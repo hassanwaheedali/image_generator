@@ -127,6 +127,11 @@ CURATED_GALLERY_SOURCES: frozenset[str] = frozenset(
     }
 )
 
+#: The subset that really is the product's own gallery, used for the download allowance:
+#: ``dom_audit`` is deliberately absent - those nodes exist only so that S2/S3 can reject
+#: them in the log, so they must never enlarge a page's download budget.
+GALLERY_IMAGE_SOURCES: frozenset[str] = CURATED_GALLERY_SOURCES - {"dom_audit"}
+
 
 # --------------------------------------------------------------------------- #
 # helpers
@@ -516,12 +521,26 @@ class _DownloadBudget:
     Two levels on purpose.  A page that serves nothing but dark marketing renders must
     not consume the row's whole allowance and starve the next candidate page - found
     live on Dawlance, where the brand page hid the retail candidates completely.
+
+    A brand's *own* verified page is the documented exception: ``_page_download_allowance``
+    raises that single page's cap to the size of its curated gallery, because those are the
+    manufacturer's own product shots and a gallery routinely holds more than the per-page
+    default (live: the DW 7500 TWIN TUB CLEAR LID (WHITE) page publishes 10 photos and the
+    old 6-download ceiling silently ignored four of them).
     """
 
     def __init__(self, per_page: int, per_row: int) -> None:
         self._per_page = max(1, per_page)
         self._row_left = max(1, per_row)
         self._page_left: dict[str, int] = {}
+
+    def grant(self, page_url: str, allowance: int) -> None:
+        """Raise this page's allowance (never lower it; the row cap still applies).
+
+        Called once per page, before any of its candidates is downloaded.
+        """
+        key = page_url or "-"
+        self._page_left[key] = max(self._page_left.get(key, 0), max(1, allowance))
 
     def take(self, page_url: str) -> bool:
         """Consume one download slot for this page; ``False`` when a cap is reached."""
@@ -552,6 +571,33 @@ def _row_is_done(accepted: list[AcceptedImage], config: PipelineConfig) -> bool:
     """Enough images for this row: the customer target (3), capped by the maximum."""
     goal = min(config.target_images_per_product, config.max_images_per_product)
     return len(accepted) >= max(1, goal)
+
+
+def _page_download_allowance(
+    candidates: list[ImageCandidate],
+    config: PipelineConfig,
+) -> int:
+    """How many full downloads one page may spend.
+
+    Ordinary scraped pages keep ``image_full_download_max_per_page``: a page of dark
+    marketing renders must not eat the row's allowance and starve the next candidate
+    page (found live on Dawlance).
+
+    A page that offers a *curated gallery* (a real gallery container, the brand's own
+    extractor, JSON-LD or an embedded product payload) is different - those are the
+    product's own pictures, and a gallery routinely holds more of them than the
+    per-page default (live: the Dawlance DW 7500 TWIN TUB CLEAR LID (WHITE) page
+    publishes 10 photos, Surmawala's DW-7500 page carries its own set; a 6-download
+    ceiling silently ignored the rest).  There the gallery is read in full, never more
+    than the row may publish and never more than the row's own download budget.
+    """
+    curated = sum(1 for candidate in candidates if candidate.source in GALLERY_IMAGE_SOURCES)
+    if curated <= 0:
+        return config.image_full_download_max_per_page
+    return max(
+        config.image_full_download_max_per_page,
+        min(curated, config.max_images_per_product, config.image_full_download_max_per_row),
+    )
 
 
 def _search_sources(
@@ -695,7 +741,12 @@ def _consume_candidates(
 
     Order matters: URL/DOM filters cost nothing, the 64 KB probe rejects S6/S8 before
     a real download, and only an image that passed every gate is composed and saved.
+
+    The page's download allowance is opened first: a curated gallery may be read in
+    full (bounded by the row budget) instead of stopping at the per-page default and
+    leaving the rest of the product's own photos unexamined.
     """
+    budget.grant(page_url, _page_download_allowance(candidates, config))
     for candidate in candidates:
         if len(accepted) >= config.max_images_per_product:
             break

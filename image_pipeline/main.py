@@ -56,7 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int, default=None, help="process at most N products")
     parser.add_argument("--workers", type=int, default=4, help="parallel workers (default 4)")
     parser.add_argument("--min-images", type=int, default=2, help="images required for status ok")
-    parser.add_argument("--max-images", type=int, default=5, help="images kept per product")
+    parser.add_argument("--max-images", type=int, default=10, help="images kept per product")
     parser.add_argument("--no-resume", action="store_true", help="ignore the checkpoint entirely")
     parser.add_argument(
         "--no-fallback",

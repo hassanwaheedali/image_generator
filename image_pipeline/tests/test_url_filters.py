@@ -146,6 +146,18 @@ def test_cdn_transform_segments_are_kept_for_fetching() -> None:
     assert canonicalize_url(url, "") == url
 
 
+def test_zoom_link_and_served_render_are_one_asset() -> None:
+    """Live case (Dawlance SFCC gallery): the lightbox links the asset itself
+    (``…/FILE.png``) while the visible picture is ``…/FILE.png/1000Wx1000H/image.webp``.
+    Both are the same photograph, so they must not take two download slots - the per-page
+    allowance is what decides how many of the product's own photos are ever examined."""
+    asset = "https://www.dawlance.com.pk/media/resize/F11031006930_LO1_20231120_115524.png"
+    assert dedup_key(f"{asset}/1000Wx1000H/image.webp") == dedup_key(asset)
+    assert dedup_key(f"{asset}/2000Wx2000H/image.jpg") == dedup_key(asset)
+    # a different asset in the same folder stays a different picture
+    assert dedup_key(asset.replace("LO1", "LO2")) != dedup_key(asset)
+
+
 def test_dedup_key_sees_through_cdn_transforms() -> None:
     """Two photos whose file name is identical must still get different keys."""
     first = (

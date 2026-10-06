@@ -506,6 +506,18 @@ def dedup_key(canonical_url: str) -> str:
     ]
     if without_transforms:
         segments = without_transforms
+    # A *served render* is ``<asset>.<ext>/<render-name>.<ext>`` (SFCC/Shopify style, e.g.
+    # ``…/F1103.png/1000Wx1000H/image.webp``).  That last raw segment names the transform
+    # output, not the asset, so it must stay out of the key - otherwise the gallery's own
+    # zoom link to the same picture (``…/F1103.png``) counted as a second asset and bought a
+    # second download slot (live: Dawlance DW 7500 gallery, 10 photos, one slot wasted).
+    last = segments[-1].lower()
+    if (
+        len(segments) >= 2
+        and _path_has_image_extension(segments[-2])
+        and (last in _GENERIC_FILENAMES or last.rsplit(".", 1)[0] in _GENERIC_FILENAMES)
+    ):
+        segments = segments[:-1]
     take = 2 if len(segments) > 1 else 1
     while take < len(segments):
         head = segments[-take].lower()

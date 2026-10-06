@@ -180,7 +180,12 @@ class PipelineConfig:
     # them; fewer than `min_required_images` accepted -> status `partial`.
     target_images_per_product: int = 3
     min_required_images: int = 2
-    max_images_per_product: int = 5
+    # Owner request 2026-10-06: a brand's own gallery routinely holds more than 5
+    # usable product shots (live: the Dawlance DW 7500 TWIN TUB CLEAR LID (WHITE) page
+    # publishes 10), and publishing only 5 of them silently threw the rest away.  The
+    # *target* still stops the search after 3 images; this is only the hard ceiling on
+    # how many may be published.  `--max-images` overrides it per run.
+    max_images_per_product: int = 10
     allow_title_only_verification: bool = False
     unbalanced_bracket_keeps_text: bool = True
     use_bracketed_keys_as_fallback: bool = True
@@ -263,6 +268,8 @@ class PipelineConfig:
     image_probe_bytes: int = 65536
     #: Per *page* cap: one page of dark marketing renders must never eat the row's
     #: whole allowance and starve the next candidate page (found live on Dawlance).
+    #: A brand-official page offering a *curated gallery* is exempt and may be read
+    #: in full, bounded by the row cap below (see ``_page_download_allowance``).
     image_full_download_max_per_page: int = 6
     image_full_download_max_per_row: int = 18
     url_rewrite_enabled: bool = True              # largest-size rewrite before fetch

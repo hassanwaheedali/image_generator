@@ -36,6 +36,7 @@ from fetch import PermanentAPIError
 from models import (
     AcceptedImage,
     CheckpointEntry,
+    ImageCandidate,
     PageCandidate,
     ProductResult,
     ProductTask,
@@ -46,6 +47,7 @@ from pipeline import (
     BatchRunner,
     DryRunHost,
     PipelineDeps,
+    _page_download_allowance,
     ensure_banner_url,
     finalize_and_upload,
     process_product,
@@ -900,3 +902,155 @@ def test_official_page_gallery_is_accepted_when_the_product_fills_the_frame(tmp_
                                       {IMG1.replace("cdn.haier.com", "shop.example"): png_bytes(frame_filling)})
     _, retail_images = process_product(task(0, "Haier HSU-12HFPAA Inverter AC", (retail,)), retail_deps, config)
     assert not retail_images, "a retail page must not get the official-gallery acceptance"
+
+
+# --------------------------------------------------------------------------- #
+# official gallery vs the per-page download allowance
+# --------------------------------------------------------------------------- #
+def _gallery_image(index: int) -> Image.Image:
+    """A distinct white-background catalog photo (position and shading vary by index)."""
+    image = Image.new("RGB", (900, 900), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    left = 120 + (index % 4) * 95
+    top = 100 + (index // 4) * 115
+    draw.rounded_rectangle(
+        (left, top, left + 380, top + 430),
+        radius=20,
+        fill=(40 + index * 15, 70, 160 - index * 8),
+    )
+    return image
+
+
+def _gallery_page(host: str, count: int, model: str = "hsu-12hfpaa") -> str:
+    images = "\n".join(
+        f'<img src="https://cdn.{host}/p/{model}-{index}.jpg">' for index in range(1, count + 1)
+    )
+    return (
+        f'<html><head><title>Haier HSU-12HFPAA Inverter AC</title></head><body>'
+        f'<div class="product-gallery">{images}</div></body></html>'
+    )
+
+
+def test_page_download_allowance_reads_a_curated_gallery_in_full(tmp_path: Path) -> None:
+    """The rule itself: a *curated gallery* page (brand or retailer) may be read in full,
+    bounded by what a row may publish and by the row's own download budget; a scraped page
+    whose images are only a whole-page fallback keeps the per-page cap."""
+    config = live_config(
+        tmp_path, image_full_download_max_per_page=6, image_full_download_max_per_row=18
+    )
+    curated = [
+        ImageCandidate(url=f"https://cdn.haier.com/p/hsu-12hfpaa-{i}.jpg", page_url=HAIER_PAGE,
+                       source="gallery_container", order=i, matches_model=True)
+        for i in range(10)
+    ]
+    scraped = [
+        ImageCandidate(url="https://cdn.haier.com/p/hsu-12hfpaa-spec.jpg", page_url=HAIER_PAGE,
+                       source="whole_page", order=0, matches_model=True)
+    ]
+    audit = [
+        ImageCandidate(url="https://cdn.haier.com/p/hsu-12hfpaa-spec.jpg", page_url=HAIER_PAGE,
+                       source="dom_audit", order=0, matches_model=True)
+    ]
+    assert _page_download_allowance(curated, config) == 10          # brand's curated gallery
+    assert _page_download_allowance(scraped, config) == 6           # scraped page: strict cap
+    assert _page_download_allowance(audit, config) == 6             # S2/S3 audit nodes: no budget
+    capped = live_config(
+        tmp_path, image_full_download_max_per_page=6, max_images_per_product=4
+    )
+    assert _page_download_allowance(curated, capped) == 6           # never more than we publish
+    tight = live_config(
+        tmp_path, image_full_download_max_per_page=1, image_full_download_max_per_row=2
+    )
+    assert _page_download_allowance(curated, tight) == 2            # never more than the row
+
+
+def test_official_gallery_is_read_in_full_not_truncated_by_the_page_allowance(
+    tmp_path: Path,
+) -> None:
+    """Live bug: the DW 7500 TWIN TUB CLEAR LID (WHITE) page publishes 10 photos, but the
+    6-download page allowance meant four of the manufacturer's own pictures were never even
+    looked at.  An official curated gallery is no longer truncated."""
+    config = live_config(tmp_path)                       # defaults: 6 per page, 10 per product
+    page = _gallery_page("haier.com", 8)
+    images = {f"https://cdn.haier.com/p/hsu-12hfpaa-{i}.jpg": png_bytes(_gallery_image(i))
+              for i in range(1, 9)}
+    deps, _, image_fetcher, _ = build_deps(tmp_path, {HAIER_PAGE: page}, images)
+    result, accepted = process_product(
+        task(0, "Haier HSU-12HFPAA Inverter AC", (HAIER_PAGE,)), deps, config
+    )
+    assert len(image_fetcher.requested) == 8, "the whole official gallery must be read"
+    assert result.images_accepted == 8
+    assert len(accepted) == 8
+    decisions = [
+        json.loads(line) for line in (tmp_path / "out" / "decisions.jsonl").read_text().splitlines()
+    ]
+    assert not [
+        line for line in decisions
+        if line["rule_id"] == "S13.fetch" and "allowance" in line["detail"]
+    ], "an official gallery must not hit the page allowance"
+
+
+def test_retail_curated_gallery_is_also_read_in_full(tmp_path: Path) -> None:
+    """Owner request 2026-10-06: when the product is found on a retailer (priority 2),
+    download its own gallery - not just the first six pictures."""
+    config = live_config(tmp_path)
+    retail = "https://www.surmawala.pk/products/dawlance-semi-automatic-dw-7500"
+    page = _gallery_page("surmawala.pk", 10)
+    images = {f"https://cdn.surmawala.pk/p/hsu-12hfpaa-{i}.jpg": png_bytes(_gallery_image(i))
+              for i in range(1, 11)}
+    deps, _, image_fetcher, _ = build_deps(tmp_path, {retail: page}, images)
+    result, accepted = process_product(
+        task(0, "Haier HSU-12HFPAA Inverter AC", (retail,)), deps, config
+    )
+    assert len(image_fetcher.requested) == 10
+    assert result.images_accepted == 10
+    assert len(accepted) == 10
+
+
+def test_scraped_page_still_stops_at_the_per_page_allowance(tmp_path: Path) -> None:
+    """The live Dawlance protection stays: a page whose images are only a model-bearing
+    whole-page fallback (marketing renders) must not eat the row's allowance and starve
+    the next candidate page."""
+    config = live_config(tmp_path)
+    retail = "https://shop.example/p/hsu-12hfpaa"
+    # no gallery container: every image URL carries the model, so source 5 serves them,
+    # which is the whole-page fallback path (source = "whole_page").
+    images_html = "\n".join(
+        f'<img src="https://cdn.shop.example/p/hsu-12hfpaa-{i}.jpg">' for i in range(1, 9)
+    )
+    page = (
+        "<html><head><title>Haier HSU-12HFPAA Inverter AC</title></head><body>"
+        f"<div>{images_html}</div></body></html>"
+    )
+    images = {f"https://cdn.shop.example/p/hsu-12hfpaa-{i}.jpg": png_bytes(_gallery_image(i))
+              for i in range(1, 9)}
+    deps, _, image_fetcher, _ = build_deps(tmp_path, {retail: page}, images)
+    result, _ = process_product(
+        task(0, "Haier HSU-12HFPAA Inverter AC", (retail,)), deps, config
+    )
+    assert len(image_fetcher.requested) == 6             # the per-page cap still applies
+    assert result.images_accepted == 6
+    decisions = [
+        json.loads(line) for line in (tmp_path / "out" / "decisions.jsonl").read_text().splitlines()
+    ]
+    assert any(
+        line["rule_id"] == "S13.fetch" and "allowance" in line["detail"] for line in decisions
+    )
+
+
+def test_max_images_per_product_is_the_publication_ceiling(tmp_path: Path) -> None:
+    """Owner request 2026-10-06: up to 10 of the product's own gallery photos may be
+    published (the target of 3 still stops the search for *more pages*)."""
+    config = live_config(tmp_path, max_images_per_product=10)
+    page = _gallery_page("haier.com", 12)
+    images = {f"https://cdn.haier.com/p/hsu-12hfpaa-{i}.jpg": png_bytes(_gallery_image(i))
+              for i in range(1, 13)}
+    deps, _, image_fetcher, _ = build_deps(tmp_path, {HAIER_PAGE: page}, images)
+    result, accepted = process_product(
+        task(0, "Haier HSU-12HFPAA Inverter AC", (HAIER_PAGE,)), deps, config
+    )
+    assert result.images_accepted == 10
+    assert len(accepted) == 10
+    assert len(image_fetcher.requested) == 10            # stops at the ceiling, not the gallery
+
+
