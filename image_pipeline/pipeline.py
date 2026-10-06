@@ -29,7 +29,13 @@ from compositing import (
     to_jpeg_bytes,
     to_square_canvas,
 )
-from config import FAILED_HEADER, OUTPUT_HEADER, REPORT_HEADER, PipelineConfig
+from config import (
+    FAILED_HEADER,
+    OUTPUT_HEADER,
+    REPORT_HEADER,
+    REVIEW_HEADER,
+    PipelineConfig,
+)
 from csv_io import (
     append_checkpoint,
     atomic_write_csv,
@@ -55,7 +61,11 @@ from image_quality import (
     trim_edge_seams,
     validate_image_bytes,
 )
-from model_matching import build_model_keys, url_belongs_to_other_model
+from model_matching import (
+    build_model_keys,
+    relaxed_page_match,
+    url_belongs_to_other_model,
+)
 from models import (
     AcceptedImage,
     CheckpointEntry,
@@ -69,7 +79,12 @@ from models import (
     SourceSearchReport,
     Status,
 )
-from page_verification import MatchSettings, strip_unwanted_regions, verify_page
+from page_verification import (
+    MatchSettings,
+    page_body_text,
+    strip_unwanted_regions,
+    verify_page,
+)
 from protocols import ImageFetcher, ImageHost, PageFetcher, SourceSearcher
 from url_filters import (
     dedup_key,
@@ -355,6 +370,7 @@ def process_product(
     accepted: list[AcceptedImage] = []
     seen_keys: set[str] = set()
     notes: list[str] = []
+    relaxed_notes: list[str] = []
     rejections: Counter[str] = Counter()
     pages_tried = 0
     pages_rejected = 0
@@ -455,6 +471,8 @@ def process_product(
             )
             if not outcome.fetched or not outcome.matched:
                 pages_rejected += 1
+            if outcome.relaxed:
+                relaxed_notes.append(outcome.relaxed)
     else:
         stages.append("3 fallback search: skipped (row already solved or disabled)")
 
@@ -496,6 +514,10 @@ def process_product(
     )
     stages.append(f"5 compose: {len(accepted)} final set(s) on both templates")
     result = finalize_and_upload(task, result, accepted, deps, config)
+    if relaxed_notes and result.status is Status.OK:
+        # A relaxed fallback match is published, never silently "ok": the row goes to
+        # review_products.csv and to the report with its flag.
+        result = replace(result, status=Status.PARTIAL)
     stages.append(
         f"6 upload: {len(result.digi_urls)} digimall / {len(result.alfa_urls)} alfamall URL(s)"
         if result.status is not Status.FAILED
@@ -516,6 +538,9 @@ class _PageOutcome:
     matched: bool
     fetched: bool
     page_url: str
+    #: Set when a *fallback* page was accepted with the relaxed rule; the reason is what the
+    #: run report shows and why the row is listed in review_products.csv.
+    relaxed: str = ""
 
 
 class _DownloadBudget:
@@ -658,6 +683,22 @@ def _visit_page(
     resolved_url = response.url or page_url
     soup = strip_unwanted_regions(_parse(response.text), resolved_url)
     match = verify_page(resolved_url, response.text, keys, brand=brand, settings=settings)
+    relaxed = ""
+    if not match.accepted and is_fallback:
+        # Owner decision 2026-10-06: a fallback page that names the brand and carries the
+        # model's own number publishes its pictures and flags the row for manual review,
+        # instead of failing.  Sheet URLs never come here.
+        relaxed = _relaxed_fallback_note(
+            page_url=resolved_url, soup=soup, keys=keys, brand=brand, config=config
+        )
+        if relaxed:
+            deps.decisions.keep(
+                title=task.title,
+                url=resolved_url,
+                rule_id="S15.relaxed",
+                detail=f"fallback page accepted with a flag - {relaxed}",
+            )
+            match = replace(match, strength=max(1, match.strength), detail=relaxed, match_rule="relaxed")
     if not match.accepted:
         rejections["S15" if is_fallback else "S1"] += 1
         detail = f"page strength 0 - {match.detail}"
@@ -670,6 +711,8 @@ def _visit_page(
         return _PageOutcome(False, True, resolved_url)
 
     notes.extend(match.variant_notes)
+    if relaxed:
+        notes.append(f"flagged: relaxed fallback match - {relaxed}")
     if is_fallback:
         notes.append(f"fallback page: {source_label}")
     context = ExtractionContext(
@@ -702,7 +745,7 @@ def _visit_page(
             rule_id="S12",
             detail="no gallery and no model-bearing image URL on this page",
         )
-        return _PageOutcome(True, True, resolved_url)
+        return _PageOutcome(True, True, resolved_url, relaxed)
 
     _consume_candidates(
         task=task,
@@ -811,6 +854,27 @@ def _fetch_and_parse_json(
         LOG.debug("unexpected error fetching %s", url, exc_info=True)
         return []
     return parser(response.text, context)
+
+
+def _relaxed_fallback_note(
+    *,
+    page_url: str,
+    soup: BeautifulSoup,
+    keys: ModelKeys,
+    brand: str | None,
+    config: PipelineConfig,
+) -> str:
+    """Loose acceptance for a *fallback* page: brand + the model's own number.
+
+    Owner decision 2026-10-06: a fallback page that is close enough should publish its
+    pictures with a flag for manual review instead of failing the row ("I just need
+    images").  Never used for the sheet's own URLs, which stay strict S1.
+    """
+    if not config.relaxed_fallback_matching or not keys.identities:
+        return ""
+    text = page_body_text(soup)
+    ok, reason = relaxed_page_match(page_url, text, keys, brand)
+    return reason if ok else ""
 
 
 def _failure_reason(pages_tried: int, pages_rejected: int) -> str:
@@ -1145,6 +1209,18 @@ def write_output_csvs(
             FAILED_HEADER,
             ((result.title, result.reason) for result in ordered if result.status is Status.FAILED),
         )
+    # The manual-review queue: rows that published something but carry a flag
+    # (relaxed fallback match, colour/variant difference).  Written on every run,
+    # including --dry-run, because it is a report.
+    atomic_write_csv(
+        config.review_csv,
+        REVIEW_HEADER,
+        (
+            (result.title, result.status.value, result.note)
+            for result in ordered
+            if "flagged" in result.note.lower()
+        ),
+    )
     _write_output_readme(ordered, config, include_platform_csvs=include_platform_csvs)
     atomic_write_csv(
         config.report_csv,
@@ -1179,6 +1255,8 @@ folder is always the result of the **last** run - never a mix of runs.
 - `failed_products.csv` - rows that produced nothing usable: `Title,Reason`.
 - `run_report.csv` - one line per input row: status (`ok`/`partial`/`failed`),
   pages tried, pages rejected, images accepted, note.
+- `review_products.csv` - the manual-review queue: rows that published something but
+  carry a flag (a relaxed fallback match, a colour/variant difference): `Title,Status,Note`.
 - `decisions.jsonl` - the audit trail: one JSON object per accept/reject with the
   rule id (S1..S15) that decided it.
 - `pipeline_run.log` - the full log of the run.

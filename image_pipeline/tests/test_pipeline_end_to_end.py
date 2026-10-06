@@ -1247,3 +1247,22 @@ def test_woo_store_api_tops_up_a_one_image_page(tmp_path: Path) -> None:
     assert len(accepted) == 3
 
 
+# --------------------------------------------------------------------------- #
+# relaxed fallback: brand + number publishes with a flag (owner decision)
+# --------------------------------------------------------------------------- #
+FALLBACK_PAGE = "https://www.surmawala.pk/products/dawlance-twin-tub-2500-special"
+RELAXED_TITLE = "Dawlance DW 2500 C Twin Tub"
+
+
+def _thin_fallback_page() -> str:
+    return (
+        "<html><head><title>Dawlance Twin Tub Washing Machine 2500 - Special Edition"
+        "</title></head><body><h1>Dawlance Twin Tub Washing Machine 2500</h1>"
+        "<div class='product-gallery'>"
+        + "".join(
+            f'<img src="https://cdn.surmawala.pk/p/dw2500-{i}.jpg">' for i in range(1, 4)
+        )
+        + "</div></body></html>"
+    )
+
+

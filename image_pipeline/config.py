@@ -33,6 +33,10 @@ REPORT_HEADER: tuple[str, ...] = (
     "Images_Accepted",
     "Note",
 )
+#: Rows that published something but carry a flag a human should read (relaxed fallback
+#: match, colour/variant difference) - owner request 2026-10-06: "we will manually review
+#: it, I just need images".
+REVIEW_HEADER: tuple[str, str, str] = ("Title", "Status", "Note")
 
 
 class ConfigError(ValueError):
@@ -260,6 +264,11 @@ class PipelineConfig:
     #: carries the product's whole image list.  Fetched only when the page's own gallery
     #: yielded fewer than ``target_images_per_product`` candidates.
     structured_gallery_enabled: bool = True
+    #: A *fallback* page (never a sheet URL) that fails strict S1 may still be used when it
+    #: names the brand and carries the model's own number: the row is published with a
+    #: ``flagged:`` note and listed in ``review_products.csv``.  Owner decision 2026-10-06:
+    #: images are wanted with a flag rather than a failed row.
+    relaxed_fallback_matching: bool = True
     fallback_max_pages_per_row: int = 6
     #: Per *source* share of that budget.  Without it the first source that answers
     #: (a brand sitemap lists the whole model family) fills the row budget and the
@@ -657,6 +666,11 @@ class PipelineConfig:
     @property
     def report_csv(self) -> Path:
         return self.output_dir / "run_report.csv"
+
+    @property
+    def review_csv(self) -> Path:
+        """Rows published with a flag - the manual-review queue."""
+        return self.output_dir / "review_products.csv"
 
     @property
     def checkpoint_path(self) -> Path:

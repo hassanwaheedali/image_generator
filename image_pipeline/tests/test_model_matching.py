@@ -15,6 +15,8 @@ from model_matching import (
     key_pattern,
     model_like_token,
     near_miss_codes,
+    numeric_stem,
+    relaxed_page_match,
     truncation_variants,
     url_belongs_to_other_model,
     variant_conflicts,
@@ -263,5 +265,71 @@ def test_generic_words_and_two_digit_sizes_never_glue() -> None:
     # the HSU-12 vs HSU-12HFPAA protection is untouched: a glued key never extends
     hsu = build_model_keys("Haier HSU-12 1.5 Ton")
     assert not find_matching_keys("HSU-12HFPAA Inverter", hsu, include_title_key=False)
+
+
+def test_relaxed_matching_never_swallows_a_sibling_model_code() -> None:
+    """``dw7500`` must not match inside ``dw7500c`` - that is the black/glass machine.
+
+    The relaxed rule is deliberately loose, and the first version tested `identity in
+    haystack` on normalized text; normalization drops the separators, so ``dw7500`` was
+    found inside ``dw7500c`` and the brand's *other* product supplied the pictures.  Today's
+    acceptance run caught it (DW-7500 row, DW-7500C page accepted).  Matching through the
+    page's own separators, as a whole token, keeps the loose rule from inventing a variant.
+    """
+    white = build_model_keys("DW 7500 TWIN TUB CLEAR LID (WHITE)")
+    black = build_model_keys("DW-7500C TWIN TUB GLASS LID BLACK/GREY")
+    assert relaxed_page_match(
+        "https://www.dawlance.com.pk/twin-tub-washing-machine/"
+        "dw-7500c-twin-tub-glass-lid-black-grey",
+        "DW-7500C TWIN TUB GLASS LID BLACK/GREY",
+        white,
+        "Dawlance",
+    ) == (False, "")
+    # a *separated* letter is the one spelling the strict matcher already treats as "the
+    # site dropped the trailing letter" (owner decision, 2026-10-05); relaxed agrees with
+    # strict instead of inventing a rule of its own - and the row is flagged anyway.
+    spaced = "DW-7500 C"
+    assert find_matching_keys(spaced, white) == ("DW 7500",)
+    assert relaxed_page_match("https://example.pk/products/x", spaced, white, "Dawlance") == (
+        True,
+        "page carries dw7500",
+    )
+    # and the code we *do* mean is still found through whatever separator the page uses
+    for spelling in ("DW-7500 - 10Kg", "dw 7500 twin tub", "Dawlance DW/7500 Clear Lid"):
+        accepted, reason = relaxed_page_match(
+            "https://www.surmawala.pk/products/dawlance-washing-machine-dw-6550g-white",
+            spelling,
+            white,
+            "Dawlance",
+        )
+        assert accepted, spelling
+        assert reason == "page carries dw7500"
+    # the C row keeps its own code, glued or spaced, and is never matched to the plain one
+    assert relaxed_page_match("https://x.pk/dw-7500c", "DW-7500C", black, "Dawlance") == (
+        True,
+        "page carries dw7500c",
+    )
+
+
+def test_numeric_stem_and_relaxed_fallback_match() -> None:
+    keys = build_model_keys("Dawlance DW 2500 C Twin Tub")
+    assert numeric_stem(keys.identities[0]) == "2500c"
+    ok, reason = relaxed_page_match(
+        "https://shop.pk/product/dawlance-washer",
+        "Dawlance Twin Tub Washing Machine 2500 - Special Edition",
+        keys,
+        "dawlance",
+    )
+    assert ok and "2500" in reason
+    # the brand must be on the page: the same text without it is not accepted
+    ok, _ = relaxed_page_match(
+        "https://shop.pk/product/other-brand-washer", "Twin Tub Washing Machine 2500", keys, "dawlance"
+    )
+    assert not ok
+    # an unrelated number is not accepted either
+    ok, _ = relaxed_page_match(
+        "https://shop.pk/product/dawlance", "Dawlance Twin Tub Washing Machine 9999", keys, "dawlance"
+    )
+    assert not ok
 
 

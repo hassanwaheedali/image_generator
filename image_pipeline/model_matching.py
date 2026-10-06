@@ -258,6 +258,83 @@ def glued_model_token(
     if len(identity) < 5 or not re.search(r"[a-z]", identity) or not re.search(r"\d", identity):
         return None
     return token, identity
+
+
+def numeric_stem(identity: str) -> str:
+    """The number that identifies a model family: ``dw2500c`` -> ``2500c``."""
+    match = re.search(r"\d{2,6}[a-z]{0,3}", identity)
+    return match.group(0) if match else ""
+
+
+_MODEL_RUN_RE = re.compile(r"\d+|[a-z]+")
+
+
+def _whole_token_pattern(needle: str) -> re.Pattern[str] | None:
+    """A pattern for a model spelling that allows the page's own separators.
+
+    ``dw7500`` finds ``DW-7500``, ``dw 7500`` and ``DW/7500`` - but never ``DW-7500C``:
+    every run of the needle has to be there, and the hit has to be a whole token.  Without
+    that boundary ``dw7500`` would swallow its ``C`` sibling, and the white machine's row
+    would be illustrated with the black/glass model's photos.
+    """
+    runs = _MODEL_RUN_RE.findall(needle.lower())
+    if not runs:
+        return None
+    body = _SEP.join(re.escape(run) for run in runs)
+    return re.compile(rf"(?<![0-9a-z]){body}(?![0-9a-z])")
+
+
+def relaxed_page_match(
+    page_url: str,
+    page_text: str,
+    keys: ModelKeys,
+    brand: str | None,
+) -> tuple[bool, str]:
+    """Loose match for a *fallback* page: brand **and** the model's own number.
+
+    Strict S1 asks whether the page proves this exact model; this asks the much weaker
+    question "is this page about this brand's product with the same number", which is the
+    owner-approved trade for rescued rows (2026-10-06): publish the pictures, flag the row
+    for manual review.  It is never used for the sheet's own URLs.
+
+    Accepts when:
+
+    * the page carries our own identity as a **whole token** (``dw2500c`` - matched
+      through the page's own spacing, but never inside a longer model code); or
+    * the page names the brand **and** carries the model's number (``2500c`` or ``2500``),
+      which covers the sibling-variant case (``DW-2500`` page for a ``DW-2500C`` row).
+    """
+    if not keys.identities:
+        return False, ""
+    haystack = f"{page_url} {page_text}".lower()
+    for identity in keys.identities:
+        pattern = _whole_token_pattern(identity)
+        if len(identity) >= 5 and pattern is not None and pattern.search(haystack):
+            return True, f"page carries {identity}"
+    stems: list[str] = []
+    for identity in keys.identities:
+        stem = numeric_stem(identity)
+        if not stem:
+            continue
+        stems.append(stem)
+        digits = re.match(r"\d+", stem)
+        if digits and digits.group(0) not in stems:
+            stems.append(digits.group(0))
+    hit = next(
+        (
+            stem
+            for stem in stems
+            if stem and (pattern := _whole_token_pattern(stem)) and pattern.search(haystack)
+        ),
+        "",
+    )
+    if not hit:
+        return False, ""
+    if brand and not brand_token_present(f"{page_url} {page_text}", brand):
+        return False, ""
+    return True, f"brand + number match ({hit}) without an exact model proof"
+
+
 def _token_and_identity(words: list[str], index: int, max_extra: int) -> tuple[str, str]:
     """Return (token, glued identity) for ``words[index]``.
 
