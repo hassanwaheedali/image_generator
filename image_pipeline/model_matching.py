@@ -207,6 +207,57 @@ def _leading_letters(core: str) -> str:
     return match.group(0) if match else ""
 
 
+#: A model written with a space: the prefix is 2-4 letters (``DW``, ``PEL``, ``HSU``) ...
+_GLUE_PREFIX_RE = re.compile(r"^[a-z]{2,4}$")
+#: ... and the number is 3-5 digits, optionally with its own suffix (``7500``, ``7500C``).
+#: Two-digit numbers are deliberately excluded: "TCL 85" (a size, not a model) must never
+#: become a key that accepts any 85-inch page.
+_GLUE_NUMBER_RE = re.compile(r"^\d{3,5}[a-z]{0,2}$")
+#: Words that are never a model prefix, so "TV 55" / "IN 20" never become a key.
+GLUE_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "tv", "led", "lcd", "oled", "qled", "uhd", "fhd", "hd", "smart", "digital",
+        "kg", "kgs", "gb", "tb", "cm", "mm", "in", "inch", "ml", "ltr", "no", "the",
+        "and", "for", "with", "of", "to", "model", "type", "size", "set", "sets",
+        "pcs", "pc", "w", "kw", "v", "hz", "btu", "ton",
+    }
+)
+
+
+def glued_model_token(
+    words: list[str], index: int
+) -> tuple[str, str] | None:
+    """A model spelled with spaces: ``DW 7500 C`` -> ``("DW 7500 C", "dw7500c")``.
+
+    The sheet writes what the shop prints, and Dawlance prints ``DW 7500 TWIN TUB CLEAR
+    LID (WHITE)`` - two words that are one model (live case: that title produced **no**
+    model key, so the row was skipped before a single page was fetched).  ``DW 7500C``
+    also produced only ``7500c`` (the prefix was lost), which made the key weaker than
+    the model really is.
+
+    Guards: the prefix is 2-4 letters and not a generic word (``TV 55`` never glues), the
+    number is 3-5 digits (``TCL 85`` - a size - never glues), and a trailing single letter
+    is only glued when the number carries no suffix of its own (``DW 7500 C`` -> ``dw7500c``,
+    but ``DW 7500C X`` stays ``dw7500c``).
+    """
+    prefix = words[index].strip(_PUNCTUATION)
+    if not _GLUE_PREFIX_RE.match(prefix.lower()) or prefix.lower() in GLUE_STOPWORDS:
+        return None
+    if index + 1 >= len(words):
+        return None
+    number = words[index + 1].strip(_PUNCTUATION)
+    if not _GLUE_NUMBER_RE.match(number.lower()):
+        return None
+    token = f"{prefix} {number}"
+    suffix_is_glued = bool(re.search(r"[a-z]$", number.lower()))
+    if not suffix_is_glued and index + 2 < len(words):
+        suffix = words[index + 2].strip(_PUNCTUATION)
+        if len(suffix) == 1 and suffix.isalpha():
+            token = f"{token} {suffix}"
+    identity = normalize_key(token)
+    if len(identity) < 5 or not re.search(r"[a-z]", identity) or not re.search(r"\d", identity):
+        return None
+    return token, identity
 def _token_and_identity(words: list[str], index: int, max_extra: int) -> tuple[str, str]:
     """Return (token, glued identity) for ``words[index]``.
 
@@ -244,20 +295,25 @@ def _build(
     words = cleaned.split()
 
     def scan(source_words: list[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        tokens: list[str] = []
-        identities: list[str] = []
+        found: list[tuple[int, str, str]] = []
         seen: set[str] = set()
-        for index, word in enumerate(source_words):
-            if not model_like_token(word):
-                continue
-            token, identity = _token_and_identity(source_words, index, max_extra_tokens)
+
+        def remember(position: int, token: str, identity: str) -> None:
             core = normalize_key(token)
             if not core or core in seen:
-                continue
+                return
             seen.add(core)
-            tokens.append(token)
-            identities.append(identity)
-        return tuple(tokens), tuple(identities)
+            found.append((position, token, identity))
+
+        for index, word in enumerate(source_words):
+            if model_like_token(word):
+                token, identity = _token_and_identity(source_words, index, max_extra_tokens)
+                remember(index, token, identity)
+            glued = glued_model_token(source_words, index)
+            if glued is not None:
+                remember(index, glued[0], glued[1])
+        found.sort(key=lambda entry: entry[0])
+        return tuple(entry[1] for entry in found), tuple(entry[2] for entry in found)
 
     tokens, identities = scan(words)
     if not tokens and bracketed_fallback:

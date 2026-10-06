@@ -11,6 +11,7 @@ from model_matching import (
     extract_colour_families,
     extract_variant_facts,
     find_matching_keys,
+    glued_model_token,
     key_pattern,
     model_like_token,
     near_miss_codes,
@@ -217,3 +218,50 @@ def test_variant_facts_and_conflicts() -> None:
 def test_display_technology_is_not_an_axis() -> None:
     assert "display" not in extract_variant_facts("Haier 55 Inch QLED TV")
     assert extract_variant_facts("PEL Microwave 23 L")["capacity_l"] == "23"
+
+
+# --------------------------------------------------------------------------- #
+# spaced model spellings: "DW 7500" / "DW 7500 C" (live case 2026-10-06)
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    ("title", "token"),
+    (
+        ("DW 7500 TWIN TUB CLEAR LID (WHITE)", "DW 7500"),
+        ("Dawlance DW 7500 TWIN TUB CLEAR LID (WHITE)", "DW 7500"),
+        ("Dawlance Twin Tub Washing Machine DW 7500 White", "DW 7500"),
+        ("DW 7500 C", "DW 7500 C"),
+        ("Dawlance DW 2500 C Twin Tub", "DW 2500 C"),
+        ("DW 7500C", "DW 7500C"),
+        ("PEL 1250 Top Load Washing Machine", "PEL 1250"),
+    ),
+)
+def test_a_spaced_model_spelling_is_still_a_model_key(title: str, token: str) -> None:
+    """The sheet writes what the brand prints - `DW 7500 TWIN TUB CLEAR LID (WHITE)` is the
+    official product name, and it used to produce **no** model key at all, so the row was
+    skipped before a single page was fetched."""
+    keys = build_model_keys(title)
+    assert token in keys.tokens, f"{title!r} -> {keys.tokens}"
+    assert keys.all_keys
+
+
+def test_the_spaced_key_matches_the_pages_own_spellings() -> None:
+    keys = build_model_keys("DW 7500 C TWIN TUB CLEAR LID (WHITE)")
+    assert "dw7500c" in keys.identities
+    # the page may print DW-7500C, DW 7500C or just DW-7500 (the truncation rule)
+    for page in ("DW-7500C TWIN TUB", "DW 7500C Twin Tub", "DW-7500 TWIN TUB"):
+        assert find_matching_keys(page, keys, include_title_key=False), page
+
+
+def test_generic_words_and_two_digit_sizes_never_glue() -> None:
+    """`TCL 85` is a size and `TV 55` is a category - neither may become a model key, or a
+    row would accept any 85-inch / any 55-inch page."""
+    assert glued_model_token(["TV", "55"], 0) is None
+    assert glued_model_token(["kg", "7500"], 0) is None
+    assert glued_model_token(["DW", "75"], 0) is None                 # 2-digit: not a model
+    assert build_model_keys("TV 55 Inch Smart").tokens == ()
+    assert build_model_keys("TCL 85 Inch SQD Mini LED TV (85C8L)").tokens == ("85C8L",)
+    # the HSU-12 vs HSU-12HFPAA protection is untouched: a glued key never extends
+    hsu = build_model_keys("Haier HSU-12 1.5 Ton")
+    assert not find_matching_keys("HSU-12HFPAA Inverter", hsu, include_title_key=False)
+
+
