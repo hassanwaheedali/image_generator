@@ -288,14 +288,13 @@ def ensure_banner_url(config: PipelineConfig, deps: PipelineDeps, role: str) -> 
     digest = _banner_cache_key(config, sha256_bytes(data))
     with deps.banner_cache_lock:
         cached = deps.banner_cache.get(digest)
-    if cached:
-        return cached
-    jpeg = to_jpeg_bytes(Image.open(io.BytesIO(data)), quality=config.jpeg_quality)
-    url = deps.image_host.upload(jpeg, f"{role}-closing-banner.jpg")
-    with deps.banner_cache_lock:
+        if cached:
+            return cached
+        jpeg = to_jpeg_bytes(Image.open(io.BytesIO(data)), quality=config.jpeg_quality)
+        url = deps.image_host.upload(jpeg, f"{role}-closing-banner.jpg")
         deps.banner_cache[digest] = url
         save_banner_cache(config.banner_cache_path, deps.banner_cache)
-    return url
+        return url
 
 
 # --------------------------------------------------------------------------- #
