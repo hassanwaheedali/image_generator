@@ -10,6 +10,35 @@
 #       is marked failed, and PermanentAPIError is re-raised to abort the run.  Silent
 #       swallowing is not allowed anywhere else, so the rules are relaxed only where needed.
 
+# Packaging: the project is a flat-layout set of top-level modules plus the
+# ``gallery_extractors`` package.  Without the explicit lists below, setuptools
+# refuses the build ("Multiple top-level packages discovered in a flat-layout"),
+# which broke the documented ``pip install -e ".[dev]"``.
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["gallery_extractors"]
+py-modules = [
+    "compositing",
+    "config",
+    "csv_io",
+    "decisions",
+    "dedup",
+    "fetch",
+    "image_host",
+    "image_quality",
+    "main",
+    "model_matching",
+    "models",
+    "page_verification",
+    "pipeline",
+    "protocols",
+    "sources",
+    "url_filters",
+]
+
 [project]
 name = "image-pipeline"
 version = "1.0.0"
@@ -28,7 +57,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "mypy>=1.8", "ruff>=0.6"]
+# ruff must be >=0.9: the per-file ignores below use RUF059, and older ruff versions do not
+# know that selector - they abort with "Unknown rule selector" instead of linting.
+# types-beautifulsoup4 is dev-only: mypy --strict needs bs4's stubs to type the DOM code.
+dev = ["pytest>=8", "mypy>=1.8", "ruff>=0.9", "types-beautifulsoup4"]
 
 [tool.ruff]
 target-version = "py310"
