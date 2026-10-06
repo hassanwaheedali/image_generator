@@ -1,0 +1,59 @@
+==============================================================================
+DEEP SMOKE TEST - 10 real sheet rows, offline, workers=3
+==============================================================================
+
+1. the ten rows
+    title                                                          status   images  flagged
+    Dawlance Semi Automatic Washing Machine 10kg (DW-7500C)        ok            4  
+    Haier 50 Inch QLED Google LED TV (H50S80EUX)                   ok            4  
+    Haier 55 Inch 4K Smart QLED TV (55S80EUX)                      ok            4  
+    Haier 55 Inch Smart Google LED TV (H55K85FX)                   ok            2  
+    PEL Top Load Fully Automatic Washing Machine (PAWM-1100)       ok            4  
+    PEL Kitchen Pro Grill Microwave Oven (PMO–23 Kitchen Pro GR    ok            4  
+    TCL 85 Inch SQD Mini LED TV (85C8L)                            ok            4  
+    TCL 98 Inch SQD Mini LED TV (98C8L)                            ok            4  
+    PEL Top Load Washing Machine White 12.5 Kg (PWM-1250)          partial       3  yes
+    Homage Freezer-on-Top Refrigerator 18 Cu Ft Golden (HRF-4766   failed        0  
+    PASS  all 10 rows came back
+    PASS  at least 7 rows published pictures  - 9 published
+
+2. the closing banner (one URL, shared by every product, always last)
+    PASS  every published row ends with the digimall banner  - ['https://img.example/digimall-closing-banner.jpg']
+    PASS  every published row ends with the alfamall banner  - ['https://img.example/alfamall-closing-banner.jpg']
+    PASS  both banners share one URL across all rows
+    PASS  the banner was uploaded exactly once per template  - digimall=1 alfamall=1
+    PASS  no other upload was repeated  - {'dawlance-semi-automatic-washing-machine-10kg-dw-7500c-01-digimall.jpg': 1, 'dawlance-semi-automatic-washing-machine-10kg-dw-7500c-01-alfamall.jpg': 1, 'dawlance-semi-automatic-washing-machine-10kg-dw-7500c-02-digimall.jpg': 1, 'dawlance-semi-automatic-washing-machine-10kg-dw-7500c-02-alfamall.jpg': 1, 'dawlance-semi-automatic-washing-machine-10kg-dw-7500c-03-digimall.jpg': 1, 'dawlance-semi-automatic-washing-machine-10kg-dw-7500c-03-alfamall.jpg': 1, 'dawlance-semi-automatic-washing-machine-10kg-dw-7500c-04-digimall.jpg': 1, 'dawlance-semi-automatic-washing-machine-10kg-dw-7500c-04-alfamall.jpg': 1, 'digimall-closing-banner.jpg': 1, 'alfamall-closing-banner.jpg': 1, 'haier-55-inch-4k-smart-qled-tv-55s80eux-01-digimall.jpg': 1, 'haier-55-inch-4k-smart-qled-tv-55s80eux-01-alfamall.jpg': 1, 'haier-55-inch-4k-smart-qled-tv-55s80eux-02-digimall.jpg': 1, 'haier-55-inch-4k-smart-qled-tv-55s80eux-02-alfamall.jpg': 1, 'haier-55-inch-4k-smart-qled-tv-55s80eux-03-digimall.jpg': 1, 'haier-55-inch-4k-smart-qled-tv-55s80eux-03-alfamall.jpg': 1, 'haier-55-inch-4k-smart-qled-tv-55s80eux-04-digimall.jpg': 1, 'haier-55-inch-4k-smart-qled-tv-55s80eux-04-alfamall.jpg': 1, 'haier-50-inch-qled-google-led-tv-h50s80eux-01-digimall.jpg': 1, 'haier-50-inch-qled-google-led-tv-h50s80eux-01-alfamall.jpg': 1, 'haier-50-inch-qled-google-led-tv-h50s80eux-02-digimall.jpg': 1, 'haier-50-inch-qled-google-led-tv-h50s80eux-02-alfamall.jpg': 1, 'haier-50-inch-qled-google-led-tv-h50s80eux-03-digimall.jpg': 1, 'haier-50-inch-qled-google-led-tv-h50s80eux-03-alfamall.jpg': 1, 'haier-50-inch-qled-google-led-tv-h50s80eux-04-digimall.jpg': 1, 'haier-50-inch-qled-google-led-tv-h50s80eux-04-alfamall.jpg': 1, 'haier-55-inch-smart-google-led-tv-h55k85fx-01-digimall.jpg': 1, 'haier-55-inch-smart-google-led-tv-h55k85fx-01-alfamall.jpg': 1, 'haier-55-inch-smart-google-led-tv-h55k85fx-02-digimall.jpg': 1, 'haier-55-inch-smart-google-led-tv-h55k85fx-02-alfamall.jpg': 1, 'pel-top-load-fully-automatic-washing-machine-pawm-1100-01-digimall.jpg': 1, 'pel-top-load-fully-automatic-washing-machine-pawm-1100-01-alfamall.jpg': 1, 'pel-top-load-fully-automatic-washing-machine-pawm-1100-02-digimall.jpg': 1, 'pel-top-load-fully-automatic-washing-machine-pawm-1100-02-alfamall.jpg': 1, 'pel-top-load-fully-automatic-washing-machine-pawm-1100-03-digimall.jpg': 1, 'pel-top-load-fully-automatic-washing-machine-pawm-1100-03-alfamall.jpg': 1, 'pel-top-load-fully-automatic-washing-machine-pawm-1100-04-digimall.jpg': 1, 'pel-top-load-fully-automatic-washing-machine-pawm-1100-04-alfamall.jpg': 1, 'pel-kitchen-pro-grill-microwave-oven-pmo-23-kitchen-pro-gr-01-digimall.jpg': 1, 'pel-kitchen-pro-grill-microwave-oven-pmo-23-kitchen-pro-gr-01-alfamall.jpg': 1, 'pel-kitchen-pro-grill-microwave-oven-pmo-23-kitchen-pro-gr-02-digimall.jpg': 1, 'pel-kitchen-pro-grill-microwave-oven-pmo-23-kitchen-pro-gr-02-alfamall.jpg': 1, 'pel-kitchen-pro-grill-microwave-oven-pmo-23-kitchen-pro-gr-03-digimall.jpg': 1, 'pel-kitchen-pro-grill-microwave-oven-pmo-23-kitchen-pro-gr-03-alfamall.jpg': 1, 'pel-kitchen-pro-grill-microwave-oven-pmo-23-kitchen-pro-gr-04-digimall.jpg': 1, 'pel-kitchen-pro-grill-microwave-oven-pmo-23-kitchen-pro-gr-04-alfamall.jpg': 1, 'tcl-85-inch-sqd-mini-led-tv-85c8l-01-digimall.jpg': 1, 'tcl-85-inch-sqd-mini-led-tv-85c8l-01-alfamall.jpg': 1, 'tcl-85-inch-sqd-mini-led-tv-85c8l-02-digimall.jpg': 1, 'tcl-85-inch-sqd-mini-led-tv-85c8l-02-alfamall.jpg': 1, 'tcl-85-inch-sqd-mini-led-tv-85c8l-03-digimall.jpg': 1, 'tcl-85-inch-sqd-mini-led-tv-85c8l-03-alfamall.jpg': 1, 'tcl-85-inch-sqd-mini-led-tv-85c8l-04-digimall.jpg': 1, 'tcl-85-inch-sqd-mini-led-tv-85c8l-04-alfamall.jpg': 1, 'pel-top-load-washing-machine-white-12-5-kg-pwm-1250-01-digimall.jpg': 1, 'pel-top-load-washing-machine-white-12-5-kg-pwm-1250-01-alfamall.jpg': 1, 'pel-top-load-washing-machine-white-12-5-kg-pwm-1250-02-digimall.jpg': 1, 'pel-top-load-washing-machine-white-12-5-kg-pwm-1250-02-alfamall.jpg': 1, 'pel-top-load-washing-machine-white-12-5-kg-pwm-1250-03-digimall.jpg': 1, 'pel-top-load-washing-machine-white-12-5-kg-pwm-1250-03-alfamall.jpg': 1, 'tcl-98-inch-sqd-mini-led-tv-98c8l-01-digimall.jpg': 1, 'tcl-98-inch-sqd-mini-led-tv-98c8l-01-alfamall.jpg': 1, 'tcl-98-inch-sqd-mini-led-tv-98c8l-02-digimall.jpg': 1, 'tcl-98-inch-sqd-mini-led-tv-98c8l-02-alfamall.jpg': 1, 'tcl-98-inch-sqd-mini-led-tv-98c8l-03-digimall.jpg': 1, 'tcl-98-inch-sqd-mini-led-tv-98c8l-03-alfamall.jpg': 1, 'tcl-98-inch-sqd-mini-led-tv-98c8l-04-digimall.jpg': 1, 'tcl-98-inch-sqd-mini-led-tv-98c8l-04-alfamall.jpg': 1}
+
+3. the import CSV shape (Title,Brand,Image_Urls | pipe-separated, no spaces)
+    PASS  header is exactly Title,Brand,Image_Urls  - Title,Brand,Image_Urls
+    PASS  one data line per published row  - 9 lines
+    PASS  every line: 3 columns, no spaces in URLs, banner last
+    PASS  each row carries its pictures + the one banner  - [5, 5, 5, 3, 5, 5, 5, 5, 4]
+
+4. flags, failures and the audit trail
+    PASS  review CSV lists the relaxed row (row 9)  - ['PEL Top Load Washing Machine White 12.5 Kg (PWM-1250)']
+    PASS  review CSV does not list the clean rows
+    PASS  the unmatched row 10 is in failed.csv with a reason  - Homage Freezer-on-Top Refrigerator 18 Cu Ft Golden (HRF-47662-GD),page
+    PASS  every decision carries a known rule id  - []
+    PASS  the wrong-link deferral is traced (S15.tolerated)  - 1
+    PASS  the relaxed rescue is traced (S15.relaxed)  - 1
+    PASS  row 1 published Surmawala's DW-7500C pictures  - 4 shop pictures kept
+    PASS  row 1 did not publish the wrong link's pictures
+
+5. dedup and URL hygiene
+    PASS  no row repeats one of its own URLs  - []
+    PASS  no product picture is shared between rows  - 33 pictures
+    PASS  both platforms carry the same pictures
+
+6. second run (same state dir): resume + no re-upload of the banner
+    PASS  every published row came back from the checkpoint  - 9 resumed of 9 published
+    PASS  the failed row was retried, not skipped
+    PASS  the second run uploaded no banner at all
+
+7. dry-run keeps its own banner cache
+    PASS  a dry-run banner URL is never reused for a real run  - https://img.example/digimall-closing-banner.jpg
+
+==============================================================================
+RESULT: 26/26 checks passed - ALL GREEN
+artifacts: /tmp/smoke10-ig_mfzt7/out
+==============================================================================
