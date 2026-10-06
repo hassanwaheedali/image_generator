@@ -825,6 +825,11 @@ class ProductMatch:
     rule: str                 # model_key | brand_code | body_model_key | body_brand_code | none
     found: tuple[str, ...]
     in_body_only: bool = False
+    #: True when the page only matched after the *dropped-trailing-letter* tolerance
+    #: (``DW-7500`` printed where the sheet says ``DW-7500C``).  That is a tolerated
+    #: spelling, not proof: the pipeline keeps looking and uses such a page, flagged, only
+    #: when nothing prints the model itself (live Dawlance row, 2026-10-06).
+    tolerated: bool = False
 
     @property
     def strength(self) -> int:
@@ -832,6 +837,21 @@ class ProductMatch:
         if not self.matched:
             return 0
         return 1 if self.in_body_only else 2
+
+
+def _needs_key_tolerance(text: str, keys: ModelKeys, allow_key_truncation: bool) -> bool:
+    """True when the page only matched because a trailing letter was tolerated.
+
+    The one owner-approved spelling tolerance (2026-10-05) is the *dropped trailing
+    letter*: the sheet says ``DW-7500C`` and dawlance.com.pk prints ``DW-7500`` on the very
+    page the sheet points at.  The page is worth keeping - it may be the only source for
+    that machine - but it is not proof the page shows our model, so the pipeline first
+    looks for a page that really prints it and falls back to this one, flagged, only after
+    the whole chain found nothing better.
+    """
+    if not allow_key_truncation:
+        return False
+    return not find_matching_keys(text, keys, include_title_key=False, include_truncation=False)
 
 
 def match_product(
@@ -855,7 +875,12 @@ def match_product(
         strong_text, keys, include_title_key=False, include_truncation=allow_key_truncation
     )
     if found:
-        return ProductMatch(True, "model_key", tuple(dict.fromkeys(found)))
+        return ProductMatch(
+            True,
+            "model_key",
+            tuple(dict.fromkeys(found)),
+            tolerated=_needs_key_tolerance(strong_text, keys, allow_key_truncation),
+        )
 
     if brand_match_enabled and brand:
         found = find_brand_code_matches(
@@ -872,7 +897,13 @@ def match_product(
         body_text, keys, include_title_key=False, include_truncation=allow_key_truncation
     )
     if found:
-        return ProductMatch(True, "body_model_key", tuple(dict.fromkeys(found)), in_body_only=True)
+        return ProductMatch(
+            True,
+            "body_model_key",
+            tuple(dict.fromkeys(found)),
+            in_body_only=True,
+            tolerated=_needs_key_tolerance(body_text, keys, allow_key_truncation),
+        )
 
     if brand_match_enabled and brand:
         found = find_brand_code_matches(

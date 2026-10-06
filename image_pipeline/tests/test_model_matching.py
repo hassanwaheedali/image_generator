@@ -13,6 +13,7 @@ from model_matching import (
     find_matching_keys,
     glued_model_token,
     key_pattern,
+    match_product,
     model_like_token,
     near_miss_codes,
     numeric_stem,
@@ -333,3 +334,24 @@ def test_numeric_stem_and_relaxed_fallback_match() -> None:
     assert not ok
 
 
+def test_a_tolerated_spelling_is_not_an_exact_match() -> None:
+    """The sheet says DW-7500C; the page that link points at prints DW-7500 (live, 2026-10-06).
+
+    Matching it is fine - it may be the only page for that machine - but the pipeline has to
+    *know* it only matched by tolerance, because that is what lets it keep looking for the
+    page that really prints the model (and flag the row if none is found).
+    """
+    keys = build_model_keys("Dawlance Semi Automatic Washing Machine 10kg (DW-7500C)")
+    page = "DW-7500 TWIN TUB GLASS LID BLACK/GREY"
+
+    loose = match_product(keys=keys, brand="dawlance", strong_text=page)
+    assert loose.matched and loose.tolerated
+
+    exact = match_product(keys=keys, brand="dawlance", strong_text="DW-7500C TWIN TUB")
+    assert exact.matched and not exact.tolerated
+    # the spaced spelling of the same model is exact, not tolerated
+    assert not match_product(keys=keys, brand="dawlance", strong_text="DW 7500 C").tolerated
+
+    # S1 with the tolerance switched off keeps the wrong page out entirely
+    strict = match_product(keys=keys, brand="dawlance", strong_text=page, allow_key_truncation=False)
+    assert not strict.matched

@@ -93,6 +93,9 @@ class PageMatchResult:
     match_rule: str = "none"
     variant_notes: tuple[str, ...] = ()
     page_name: str = ""
+    #: True when the page matched only through the dropped-trailing-letter tolerance -
+    #: a flagged last resort, never proof (see ``model_matching.match_product``).
+    tolerated: bool = False
 
     @property
     def accepted(self) -> bool:

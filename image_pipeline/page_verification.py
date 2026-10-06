@@ -410,4 +410,5 @@ def verify_page(
         decision.rule,
         tuple(notes),
         page_name,
+        tolerated=decision.tolerated,
     )

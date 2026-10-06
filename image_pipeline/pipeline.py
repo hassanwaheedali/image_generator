@@ -63,6 +63,7 @@ from image_quality import (
 )
 from model_matching import (
     build_model_keys,
+    near_miss_codes,
     relaxed_page_match,
     url_belongs_to_other_model,
 )
@@ -371,6 +372,9 @@ def process_product(
     seen_keys: set[str] = set()
     notes: list[str] = []
     relaxed_notes: list[str] = []
+    #: Pages that matched only through the tolerated spelling, kept for the last resort
+    #: pass: (url, source label, was a fallback page).
+    tolerated_pages: list[tuple[str, str, bool]] = []
     rejections: Counter[str] = Counter()
     pages_tried = 0
     pages_rejected = 0
@@ -411,7 +415,12 @@ def process_product(
             rejections=rejections,
             notes=notes,
             budget=budget,
+            defer_tolerated=True,
         )
+        if outcome.deferred:
+            tolerated_pages.append((outcome.page_url, "sheet", False))
+        elif outcome.tolerated:
+            relaxed_notes.append(outcome.tolerated)
         if not outcome.fetched or not outcome.matched:
             pages_rejected += 1
     stages.append(
@@ -468,13 +477,53 @@ def process_product(
                 rejections=rejections,
                 notes=notes,
                 budget=budget,
+                defer_tolerated=True,
             )
+            if outcome.deferred:
+                tolerated_pages.append((outcome.page_url, f"fallback:{candidate.origin}", True))
+            elif outcome.tolerated:
+                relaxed_notes.append(outcome.tolerated)
             if not outcome.fetched or not outcome.matched:
                 pages_rejected += 1
             if outcome.relaxed:
                 relaxed_notes.append(outcome.relaxed)
     else:
         stages.append("3 fallback search: skipped (row already solved or disabled)")
+
+    # ---- stage 3b: the tolerated spelling, only if nothing better exists -----
+    # The sheet's link is sometimes the wrong page for the model in its title (live:
+    # DW-7500C row pointing at a page printing DW-7500).  Such a page is published with a
+    # flag rather than thrown away - but only after every source above failed to find one
+    # that prints the model.  Owner decision 2026-10-06.
+    for page_url, label, is_fallback in tolerated_pages:
+        if cancel_event is not None and cancel_event.is_set():
+            break
+        if len(accepted) >= config.min_required_images:
+            break
+        pages_tried += 1
+        outcome = _visit_page(
+            task=task,
+            page_url=page_url,
+            source_label=label,
+            is_fallback=is_fallback,
+            keys=keys,
+            brand=brand,
+            settings=settings,
+            config=config,
+            deps=deps,
+            dedup=dedup,
+            seen_keys=seen_keys,
+            accepted=accepted,
+            rejections=rejections,
+            notes=notes,
+            budget=budget,
+            defer_tolerated=False,
+        )
+        if outcome.tolerated:
+            relaxed_notes.append(outcome.tolerated)
+            stages.append(f"3b tolerated spelling used: {outcome.page_url}")
+        if not outcome.fetched or not outcome.matched:
+            pages_rejected += 1
 
     # ---- stage 4/5 summary -------------------------------------------------
     if rejections:
@@ -541,6 +590,12 @@ class _PageOutcome:
     #: Set when a *fallback* page was accepted with the relaxed rule; the reason is what the
     #: run report shows and why the row is listed in review_products.csv.
     relaxed: str = ""
+    #: Set when the page matched only through the dropped-trailing-letter tolerance and was
+    #: **not** consumed: the row keeps searching, this URL is the last resort.
+    deferred: bool = False
+    #: Set when such a page *was* consumed (the chain found nothing better): the reason goes
+    #: on the row report and into review_products.csv, exactly like ``relaxed``.
+    tolerated: str = ""
 
 
 class _DownloadBudget:
@@ -668,8 +723,14 @@ def _visit_page(
     rejections: Counter[str],
     notes: list[str],
     budget: _DownloadBudget,
+    defer_tolerated: bool = False,
 ) -> _PageOutcome:
-    """Fetch one page, verify it (S1, or S15 for a fallback candidate), extract, gate."""
+    """Fetch one page, verify it (S1, or S15 for a fallback candidate), extract, gate.
+
+    ``defer_tolerated`` is set while the row is still looking for a page that *prints* the
+    model: a page matching only through the dropped-trailing-letter tolerance is then
+    returned untouched, so the caller can come back to it as a flagged last resort.
+    """
     try:
         response = deps.page_fetcher.fetch_page(page_url)
     except (PermanentAPIError, FetchError) as exc:
@@ -710,9 +771,32 @@ def _visit_page(
         )
         return _PageOutcome(False, True, resolved_url)
 
+    tolerated_reason = ""
+    if match.tolerated and config.tolerated_spelling_as_last_resort:
+        tolerated_reason = _tolerated_spelling_reason(match.page_name, keys)
+        if defer_tolerated:
+            # Live case (2026-10-06): the sheet row says DW-7500C and the link it carries
+            # points at a page printing DW-7500 - the wrong page for that model.  The page
+            # is kept for later, and the row goes on to look for one that prints the model.
+            deps.decisions.keep(
+                title=task.title,
+                url=resolved_url,
+                rule_id="S15.tolerated",
+                detail=f"deferred as last resort - {tolerated_reason}",
+            )
+            return _PageOutcome(True, True, resolved_url, deferred=True)
+
     notes.extend(match.variant_notes)
     if relaxed:
         notes.append(f"flagged: relaxed fallback match - {relaxed}")
+    if tolerated_reason:
+        notes.append(f"flagged: tolerated spelling - {tolerated_reason}")
+        deps.decisions.keep(
+            title=task.title,
+            url=resolved_url,
+            rule_id="S15.tolerated",
+            detail=f"published as last resort - {tolerated_reason}",
+        )
     if is_fallback:
         notes.append(f"fallback page: {source_label}")
     context = ExtractionContext(
@@ -745,7 +829,7 @@ def _visit_page(
             rule_id="S12",
             detail="no gallery and no model-bearing image URL on this page",
         )
-        return _PageOutcome(True, True, resolved_url, relaxed)
+        return _PageOutcome(True, True, resolved_url)
 
     _consume_candidates(
         task=task,
@@ -762,7 +846,7 @@ def _visit_page(
         source_label=source_label,
         budget=budget,
     )
-    return _PageOutcome(True, True, resolved_url)
+    return _PageOutcome(True, True, resolved_url, relaxed, tolerated=tolerated_reason)
 
 
 def _parse(html: str) -> BeautifulSoup:
@@ -854,6 +938,19 @@ def _fetch_and_parse_json(
         LOG.debug("unexpected error fetching %s", url, exc_info=True)
         return []
     return parser(response.text, context)
+
+
+def _tolerated_spelling_reason(page_name: str, keys: ModelKeys) -> str:
+    """One sentence for the report and the review CSV: what the page shows vs the sheet.
+
+    Live shape (2026-10-06): the page shows ``DW-7500`` while the sheet's model is
+    ``DW-7500C`` - the pipeline tolerates that spelling, but the row is flagged so a human
+    can look at the two.
+    """
+    shows = near_miss_codes(page_name, keys)
+    page_code = shows[0].upper() if shows else "the model without its trailing letter"
+    sheet_code = keys.tokens[0] if keys.tokens else keys.identities[0].upper()
+    return f"page shows {page_code}, sheet model is {sheet_code}"
 
 
 def _relaxed_fallback_note(

@@ -1266,3 +1266,232 @@ def _thin_fallback_page() -> str:
     )
 
 
+def test_relaxed_fallback_publishes_the_pictures_and_flags_the_row(tmp_path: Path) -> None:
+    """Owner decision 2026-10-06: when nothing proves the exact model but the fallback page
+    is this brand's product with this number, publish the pictures and flag the row for
+    manual review ("I just need images")."""
+    config = live_config(tmp_path)
+    dead_sheet_url = "https://www.dawlance.com.pk/twin-tub-washing-machine/dw-2500c"
+    unmatched_sheet_page = (
+        "<html><head><title>DW-9999 TWIN TUB | Dawlance</title></head><body>"
+        "<h1>DW-9999 TWIN TUB</h1></body></html>"
+    )
+    images = {
+        f"https://cdn.surmawala.pk/p/dw2500-{i}.jpg": png_bytes(_gallery_image(i))
+        for i in range(1, 4)
+    }
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {dead_sheet_url: unmatched_sheet_page, FALLBACK_PAGE: _thin_fallback_page()},
+        images,
+    )
+    deps.source_searcher = FakeSourceSearcher(
+        candidates=[
+            PageCandidate(url=FALLBACK_PAGE, origin="json-search:www.surmawala.pk", method="json-search")
+        ]
+    )
+    result, accepted = process_product(
+        task(0, RELAXED_TITLE, (dead_sheet_url,)), deps, config
+    )
+    assert result.images_accepted == 3
+    assert len(accepted) == 3
+    assert result.status is Status.PARTIAL, "a flagged row is never silently ok"
+    assert "flagged: relaxed fallback match" in result.note
+    decisions = [
+        json.loads(line) for line in (tmp_path / "out" / "decisions.jsonl").read_text().splitlines()
+    ]
+    assert any(line["rule_id"] == "S15.relaxed" for line in decisions)
+
+    # the review queue is written for the human pass
+    write_output_csvs([result], config, include_platform_csvs=False)
+    review = (config.review_csv).read_text(encoding="utf-8")
+    assert RELAXED_TITLE in review and "flagged: relaxed fallback match" in review
+
+
+def test_the_sheets_own_url_is_never_relaxed(tmp_path: Path) -> None:
+    """The relaxation exists for fallback pages only: a sheet URL must still prove the model
+    (the sheet's URLs are chosen by hand - a mismatch there is a wrong row, not a rescue)."""
+    config = live_config(tmp_path)
+    images = {
+        f"https://cdn.surmawala.pk/p/dw2500-{i}.jpg": png_bytes(_gallery_image(i))
+        for i in range(1, 4)
+    }
+    deps, _, _, _ = build_deps(tmp_path, {FALLBACK_PAGE: _thin_fallback_page()}, images)
+    result, accepted = process_product(
+        task(0, RELAXED_TITLE, (FALLBACK_PAGE,)), deps, config
+    )
+    assert accepted == []
+    assert result.status is Status.FAILED
+    assert "flagged" not in result.note
+
+
+def test_relaxed_matching_can_be_switched_off(tmp_path: Path) -> None:
+    config = live_config(tmp_path, relaxed_fallback_matching=False)
+    dead_sheet_url = "https://www.dawlance.com.pk/twin-tub-washing-machine/dw-2500c"
+    unmatched_sheet_page = (
+        "<html><head><title>DW-9999 TWIN TUB | Dawlance</title></head><body>"
+        "<h1>DW-9999 TWIN TUB</h1></body></html>"
+    )
+    images = {
+        f"https://cdn.surmawala.pk/p/dw2500-{i}.jpg": png_bytes(_gallery_image(i))
+        for i in range(1, 4)
+    }
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {dead_sheet_url: unmatched_sheet_page, FALLBACK_PAGE: _thin_fallback_page()},
+        images,
+    )
+    deps.source_searcher = FakeSourceSearcher(
+        candidates=[PageCandidate(url=FALLBACK_PAGE, origin="json-search:www.surmawala.pk", method="json-search")]
+    )
+    result, accepted = process_product(
+        task(0, RELAXED_TITLE, (dead_sheet_url,)), deps, config
+    )
+    assert accepted == []
+    assert result.status is Status.FAILED
+
+
+# --------------------------------------------------------------------------- #
+# the wrong sheet link: the model in the title wins (live DW-7500C row, 2026-10-06)
+# --------------------------------------------------------------------------- #
+WRONG_LINK_TITLE = "Dawlance Semi Automatic Washing Machine 10kg (DW-7500C)"
+WRONG_LINK = (
+    "https://www.dawlance.com.pk/twin-tub-washing-machine/"
+    "dw-7500-twin-tub-glass-lid-black-grey-semi-automatic-washing-machines"
+)
+#: the four photos the live page really serves (all `F01000000030_*`, 1000Wx1000H)
+DAWLANCE_LO_DOWNLOADS = [
+    "https://www.dawlance.com.pk/media/resize/"
+    f"F01000000030_LO{n}_20220415_11{minute}.png/1000Wx1000H/image.webp"
+    for n, minute in ((1, "3939"), (2, "3951"), (3, "4004"), (4, "4019"))
+]
+SURMAWALA_DW7500_PAGE = (
+    "https://www.surmawala.pk/products/dawlance-washing-machine-dw-6550g-white-price-in-pakistan"
+)
+SURMAWALA_C_PAGE = (
+    "https://www.surmawala.pk/products/dawlance-semi-automatic-washing-machine-dw-7500c-10kg"
+)
+
+
+def _dawlance_wrong_link_page() -> str:
+    """Live shape: the page prints DW-7500 (no C) though the sheet row is a DW-7500C."""
+    photos = "".join(
+        f'<img src="{url}" alt="DW-7500 TWIN TUB GLASS LID BLACK/GREY (Photo {n}/4)">'
+        for n, url in enumerate(DAWLANCE_LO_DOWNLOADS, 1)
+    )
+    return (
+        "<html><head><title>DW-7500 TWIN TUB GLASS LID BLACK/GREY | Twin Tub Washing "
+        "Machine | Washing Machines | Dawlance</title></head><body>"
+        "<h1>DW-7500 TWIN TUB GLASS LID BLACK/GREY Twin Tub Washing Machine</h1>"
+        f"<div class='product-gallery'>{photos}</div></body></html>"
+    )
+
+
+def _surmawala_suggest_dw7500c() -> str:
+    """The live `suggest.json?q=DW-7500C` answer: the plain DW-7500 first, the C second."""
+    return json.dumps({"resources": {"results": {"products": [
+        {"url": "/products/dawlance-washing-machine-dw-6550g-white-price-in-pakistan",
+         "title": "Dawlance Semi Automatic Washing Machine DW-7500 - 10Kg"},
+        {"url": "/products/dawlance-semi-automatic-washing-machine-dw-7500c-10kg",
+         "title": "Dawlance Semi Automatic Washing Machine DW-7500C - 10Kg"},
+    ]}}})
+
+
+def _shop_page(title: str, slug: str) -> str:
+    photos = "".join(
+        f'<img src="https://cdn.surmawala.pk/p/{slug}-{n}.png">' for n in range(1, 5)
+    )
+    return (
+        f"<html><head><title>{title}</title><script>var s='cdn.shopify.com'</script>"
+        f"</head><body><h1>{title}</h1><div class='product-gallery'>{photos}</div>"
+        "</body></html>"
+    )
+
+
+def _wrong_link_deps(
+    tmp_path: Path, *, with_chain: bool
+) -> tuple[PipelineDeps, dict[str, bytes]]:
+    pages = {
+        WRONG_LINK: _dawlance_wrong_link_page(),
+        SURMAWALA_DW7500_PAGE: _shop_page(
+            "Dawlance Semi Automatic Washing Machine DW-7500 - 10Kg", "dw7500"
+        ),
+        SURMAWALA_C_PAGE: _shop_page(
+            "Dawlance Semi Automatic Washing Machine DW-7500C - 10Kg", "dw7500c"
+        ),
+        f"{SURMAWALA_C_PAGE}.json": json.dumps({"product": {"images": [
+            {"src": f"https://cdn.surmawala.pk/p/dw7500c-{n}.png?v={n}"} for n in range(1, 5)
+        ]}}),
+    }
+    images = {
+        **{url: png_bytes(_gallery_image(n)) for n, url in enumerate(DAWLANCE_LO_DOWNLOADS, 1)},
+        **{
+            f"https://cdn.surmawala.pk/p/{slug}-{n}.png": png_bytes(_gallery_image(n))
+            for slug in ("dw7500", "dw7500c")
+            for n in range(1, 5)
+        },
+    }
+    deps, _, _, _ = build_deps(tmp_path, pages, images)
+    if with_chain:
+        http = FakeJsonHttp({
+            "https://www.surmawala.pk/robots.txt": "User-agent: *\nDisallow:\n",
+            "https://www.surmawala.pk/search/suggest.json?q=DW-7500C"
+            "&resources[type]=product&resources[limit]=6": _surmawala_suggest_dw7500c(),
+        })
+        deps.source_searcher = SourceChain(live_config(tmp_path), http)
+    return deps, images
+
+
+def test_the_title_model_wins_over_a_wrong_sheet_link(tmp_path: Path) -> None:
+    """The live row: title says DW-7500C, the link prints DW-7500 - so the row keeps looking.
+
+    The link is a *tolerated spelling*, not proof.  The fallback chain then reaches
+    Surmawala, whose `suggest.json?q=DW-7500C` answer carries the real DW-7500C listing, and
+    those are the pictures the row publishes.
+    """
+    config = live_config(tmp_path)
+    deps, _ = _wrong_link_deps(tmp_path, with_chain=True)
+    result, accepted = process_product(task(0, WRONG_LINK_TITLE, (WRONG_LINK,)), deps, config)
+
+    assert result.status is Status.OK
+    assert len(accepted) == 4
+    assert all("cdn.surmawala.pk/p/dw7500c-" in image.source_url for image in accepted)
+    assert not any("dawlance.com.pk/media/resize" in image.source_url for image in accepted)
+    # the plain DW-7500 shop page was offered first and skipped as another tolerated spelling
+    assert not any("cdn.surmawala.pk/p/dw7500-" in image.source_url for image in accepted)
+    decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
+    assert "deferred as last resort" in decisions
+    assert "S15.tolerated" in decisions
+
+
+def test_a_tolerated_sheet_page_is_published_with_a_flag_when_nothing_else_matches(
+    tmp_path: Path,
+) -> None:
+    """No page prints the model: the wrong-link page is still published - flagged, not dropped."""
+    config = live_config(tmp_path)
+    deps, _ = _wrong_link_deps(tmp_path, with_chain=False)
+    result, accepted = process_product(task(0, WRONG_LINK_TITLE, (WRONG_LINK,)), deps, config)
+
+    assert len(accepted) == 4
+    assert all("dawlance.com.pk/media/resize" in image.source_url for image in accepted)
+    assert result.status is Status.PARTIAL              # published, but never silently "ok"
+    assert "tolerated spelling" in result.note
+    assert "page shows DW7500, sheet model is DW-7500C" in result.note
+    write_output_csvs([result], config, include_platform_csvs=False)
+    review = config.review_csv.read_text(encoding="utf-8")
+    assert WRONG_LINK_TITLE in review
+    decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
+    assert "published as last resort" in decisions
+
+
+def test_the_tolerated_spelling_can_be_switched_off(tmp_path: Path) -> None:
+    """With the switch off the tolerated page is the answer, exactly as before this rule."""
+    config = live_config(tmp_path, tolerated_spelling_as_last_resort=False)
+    deps, _ = _wrong_link_deps(tmp_path, with_chain=True)
+    result, accepted = process_product(task(0, WRONG_LINK_TITLE, (WRONG_LINK,)), deps, config)
+
+    assert result.status is Status.OK
+    assert len(accepted) == 4
+    assert all("dawlance.com.pk/media/resize" in image.source_url for image in accepted)
+    decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
+    assert "deferred as last resort" not in decisions

@@ -269,6 +269,13 @@ class PipelineConfig:
     #: ``flagged:`` note and listed in ``review_products.csv``.  Owner decision 2026-10-06:
     #: images are wanted with a flag rather than a failed row.
     relaxed_fallback_matching: bool = True
+    #: A page that only matches through the dropped-trailing-letter tolerance (``DW-7500``
+    #: printed for the sheet's ``DW-7500C``) is not treated as the answer: the row keeps
+    #: looking - brand, then Surmawala and the other shops - for a page that prints the
+    #: model, and revisits the tolerated page as a **flagged** last resort only when the
+    #: chain found nothing.  Owner decision 2026-10-06: the sheet's link is sometimes the
+    #: wrong page for the model in the title, so the model wins over the link.
+    tolerated_spelling_as_last_resort: bool = True
     fallback_max_pages_per_row: int = 6
     #: Per *source* share of that budget.  Without it the first source that answers
     #: (a brand sitemap lists the whole model family) fills the row budget and the

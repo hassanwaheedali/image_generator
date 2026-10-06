@@ -39,6 +39,7 @@ def test_strong_page_matches_in_title_and_url() -> None:
     result = verify_page(HAIER, load_fixture("product_ok"), keys, brand="haier")
     assert result.strength == 2
     assert result.match_rule == "model_key"
+    assert result.tolerated is False        # the fixture prints the model itself
     assert "HSU-12HFPAA" in result.matched_keys
 
 
@@ -165,6 +166,22 @@ def test_dropped_trailing_letter_page_matches() -> None:
     )
     assert result.strength == 2
     assert result.match_rule == "model_key"
+    # and the flag travels with it: the page does not *print* the sheet's model
+    assert result.tolerated is True
+
+
+def test_a_page_that_prints_the_model_is_not_tolerated() -> None:
+    html = """<html><head><title>DW-7500C TWIN TUB GLASS LID BLACK/GREY</title></head>
+    <body><h1>DW-7500C Twin Tub Washing Machine</h1></body></html>"""
+    keys = build_model_keys("Dawlance Semi Automatic Washing Machine 10kg (DW-7500C)")
+    result = verify_page(
+        "https://www.surmawala.pk/products/dawlance-semi-automatic-washing-machine-dw-7500c-10kg",
+        html,
+        keys,
+        brand="dawlance",
+    )
+    assert result.strength == 2
+    assert result.tolerated is False
 
 
 def test_different_haier_model_still_rejected() -> None:
