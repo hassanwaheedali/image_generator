@@ -53,6 +53,7 @@ from pipeline import (
     process_product,
     write_output_csvs,
 )
+from sources import SourceChain
 
 HAIER_PAGE = "https://www.haier.com/pk/hsu-12hfpaa.shtml"
 NO_GALLERY_PAGE = "https://www.haier.com/pk/no-gallery"
@@ -1052,5 +1053,114 @@ def test_max_images_per_product_is_the_publication_ceiling(tmp_path: Path) -> No
     assert result.images_accepted == 10
     assert len(accepted) == 10
     assert len(image_fetcher.requested) == 10            # stops at the ceiling, not the gallery
+
+
+# --------------------------------------------------------------------------- #
+# the priority chain: brand (1) -> retailer (2), with the real SourceChain
+# --------------------------------------------------------------------------- #
+class FakeJsonHttp:
+    """Stub for the chain's HTTP boundary (``JsonHttp`` protocol)."""
+
+    def __init__(self, pages: dict[str, str]) -> None:
+        self.pages = pages
+        self.requested: list[str] = []
+
+    def get_text(self, url: str) -> str | None:
+        self.requested.append(url)
+        return self.pages.get(url)
+
+
+def test_model_conflict_on_the_brand_page_moves_to_the_priority_2_retailer(
+    tmp_path: Path,
+) -> None:
+    """Live scenario (2026-10-06): the sheet asks for the WHITE twin tub, the sheet's own
+    URL serves the DW-7500**C** page (different model -> S1 rejects), and the row must then
+    walk the priority chain: brand sources (1) first, then the retailers (2) in order -
+    Surmawala being the first Shopify shop - and publish that shop's whole gallery."""
+    config = live_config(tmp_path)          # fallback_max_pages_per_row=6, per_source=3
+    sheet_title = "Dawlance DW-7500 WHITE Twin Tub Washing Machine"
+
+    # the sheet's own URL: the DW-7500C page -> the sheet's key (dw7500) must NOT match it
+    official = "https://www.dawlance.com.pk/twin-tub-washing-machine/dw-7500c-semi-automatic-washing-machines"
+    other_variant = (
+        "<html><head><title>DW-7500C TWIN TUB (BLACK/GREY) | Dawlance</title></head>"
+        "<body><h1>DW-7500C TWIN TUB</h1><div class='product-gallery'>"
+        "<img src='https://www.dawlance.com.pk/media/resize/F01000000030_LO1.png/1000Wx1000H/image.webp'>"
+        "</div></body></html>"
+    )
+    # the brand's sitemap: the whole DW-7500 family, in sitemap order
+    sitemap = (
+        "<urlset>"
+        "<url><loc>https://www.dawlance.com.pk/twin-tub-washing-machine/"
+        "dw-7500-twin-tub-glass-lid-black-grey-semi-automatic-washing-machines</loc></url>"
+        "<url><loc>https://www.dawlance.com.pk/product/dw-7500-c/</loc></url>"
+        "<url><loc>https://www.dawlance.com.pk/twin-tub-washing-machine/"
+        "dw-7500-twin-tub-clear-lid-white-semi-automatic-washing-machines</loc></url>"
+        "</urlset>"
+    )
+    # what Surmawala really answers for q=DW-7500 (fetched live): the white one first
+    surmawala_json = json.dumps(
+        {"resources": {"results": {"products": [
+            {"url": "/products/dawlance-washing-machine-dw-6550g-white-price-in-pakistan",
+             "title": "Dawlance Semi Automatic Washing Machine DW-7500 - 10Kg"},
+            {"url": "/products/dawlance-semi-automatic-washing-machine-dw-7500c-10kg",
+             "title": "Dawlance Semi Automatic Washing Machine DW-7500C - 10Kg"},
+        ]}}}
+    )
+    http = FakeJsonHttp(
+        {
+            "https://www.dawlance.com.pk/robots.txt": "User-agent: *\nDisallow:\n",
+            "https://www.dawlance.com.pk/sitemap.xml": sitemap,
+            "https://www.surmawala.pk/robots.txt": "User-agent: *\nDisallow:\n",
+            "https://www.surmawala.pk/search/suggest.json?q=DW-7500"
+            "&resources[type]=product&resources[limit]=6": surmawala_json,
+        }
+    )
+    surmawala_page = (
+        "https://www.surmawala.pk/products/dawlance-washing-machine-dw-6550g-white-price-in-pakistan"
+    )
+    retail_html = (
+        "<html><head><title>Dawlance Semi Automatic Washing Machine DW-7500 - 10Kg"
+        "</title></head><body><h1>Dawlance Semi Automatic Washing Machine DW-7500 - 10Kg</h1>"
+        "<div class='product-gallery'>"
+        + "".join(
+            f'<img src="https://cdn.surmawala.pk/p/dw7500-{i}.jpg">' for i in range(1, 11)
+        )
+        + "</div></body></html>"
+    )
+    pages = {
+        official: other_variant,
+        "https://www.dawlance.com.pk/twin-tub-washing-machine/"
+        "dw-7500-twin-tub-glass-lid-black-grey-semi-automatic-washing-machines": other_variant,
+        "https://www.dawlance.com.pk/product/dw-7500-c/": other_variant,
+        "https://www.dawlance.com.pk/twin-tub-washing-machine/"
+        "dw-7500-twin-tub-clear-lid-white-semi-automatic-washing-machines": other_variant,
+        surmawala_page: retail_html,
+    }
+    images = {
+        f"https://cdn.surmawala.pk/p/dw7500-{i}.jpg": png_bytes(_gallery_image(i))
+        for i in range(1, 11)
+    }
+    deps, _, image_fetcher, _ = build_deps(tmp_path, pages, images)
+    deps.source_searcher = SourceChain(config, http)
+
+    result, accepted = process_product(
+        task(0, sheet_title, (official,)), deps, config
+    )
+    # the retail tier was reached at all (the bug fixed here: it never was)
+    assert any("surmawala" in url for url in http.requested)
+    # and the shop's own gallery was published in full
+    assert result.status is Status.OK
+    assert result.images_accepted == 10
+    assert len(accepted) == 10
+    shop_downloads = [url for url in image_fetcher.requested if "surmawala" in url]
+    assert len(shop_downloads) == 10, "every photo of the retailer's gallery is read"
+    assert len(image_fetcher.requested) <= config.image_full_download_max_per_row
+    assert "fallback used: yes" in result.note
+    decisions = [
+        json.loads(line) for line in (tmp_path / "out" / "decisions.jsonl").read_text().splitlines()
+    ]
+    # the DW-7500C pages were rejected for what they are: another model
+    assert [line for line in decisions if line["rule_id"] == "S1"]
 
 

@@ -263,6 +263,37 @@ def model_tokens_in_url(url: str, keys: ModelKeys) -> bool:
     return False
 
 
+def rank_candidates(
+    candidates: list[PageCandidate],
+    keys: ModelKeys,
+) -> list[PageCandidate]:
+    """Preference order for candidate pages of **one** source.  Never a rejection.
+
+    A sitemap lists a whole model family in arbitrary order (``DW-7500`` white,
+    ``DW-7500C``, ``DW-7500-G``, ``DW-7500-CB`` ...), and a Shopify ``suggest.json``
+    payload can put a wrong-slug handle first (live: Surmawala's white DW-7500 sits at
+    ``/products/…dw-6550g-white…``).  Two free signals from the sheet decide the order:
+
+    1. the sheet's own colour word (``WHITE``) appears in the page URL or the shop's own
+       title for it - that is the variant this row is about;
+    2. the model token/identity appears in the URL slug.
+
+    Ties keep the source's own order (it is relevance-ranked already).  Colour and
+    variant differences stay flags everywhere else - this only decides what is tried
+    first, exactly like the photo ordering in the gallery extractor.
+    """
+    colours = {colour.lower() for colour in keys.colours}
+
+    def score(index_and_candidate: tuple[int, PageCandidate]) -> tuple[int, int, int]:
+        index, candidate = index_and_candidate
+        haystack = f"{candidate.url} {candidate.title_hint}".lower()
+        colour_hit = 0 if colours and any(colour in haystack for colour in colours) else 1
+        model_hit = 0 if model_tokens_in_url(candidate.url, keys) else 1
+        return (colour_hit, model_hit, index)
+
+    return [candidate for _, candidate in sorted(enumerate(candidates), key=score)]
+
+
 # --------------------------------------------------------------------------- #
 # the chain
 # --------------------------------------------------------------------------- #
@@ -299,6 +330,7 @@ class SourceChain:
         tried: list[str] = []
         found: list[PageCandidate] = []
         seen: set[str] = set()
+        per_source = self._config.fallback_max_pages_per_source
 
         for base in self._config.sources_for(brand):
             if len(found) >= self._config.fallback_max_pages_per_row:
@@ -315,6 +347,10 @@ class SourceChain:
                 LOG.info("source skipped (robots): %s", host)
                 continue
             candidates = self._search(base, host, platform, terms, keys)
+            # The sheet's variant first, then this source's own relevance order.  Only
+            # this source's share of the budget is taken, so one chatty source (a brand
+            # sitemap listing the whole family) cannot hide the priority-2 retailers.
+            candidates = rank_candidates(candidates, keys)[:per_source]
             tried.append(f"{host}:{platform}:{len(candidates)}")
             for candidate in candidates:
                 if candidate.url in seen:
@@ -378,15 +414,18 @@ class SourceChain:
         if not urls:
             return []
         matched = [url for url in urls if model_tokens_in_url(url, keys)]
-        return [
+        candidates = [
             PageCandidate(
                 url=url,
                 origin=f"sitemap:{host}",
                 method="sitemap",
                 title_hint=url.rsplit("/", 1)[-1],
             )
-            for url in matched[: self._config.fallback_max_pages_per_row]
+            for url in matched
         ]
+        # Rank before truncating: a sitemap lists the whole model family in arbitrary
+        # order, so the sheet's own variant must not be cut off by the budget.
+        return rank_candidates(candidates, keys)[: self._config.fallback_max_pages_per_row]
 
     def _sitemap_urls(self, base: str, host: str) -> list[str]:
         cached = self._sitemaps.load(host, refresh=self._config.refresh_sitemaps)

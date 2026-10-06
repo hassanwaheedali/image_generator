@@ -17,6 +17,7 @@ from sources import (
     parse_shopify_suggest,
     parse_sitemap,
     parse_woo_products,
+    rank_candidates,
     search_terms,
 )
 
@@ -253,3 +254,141 @@ def test_candidate_is_only_a_page_never_an_image() -> None:
     assert [hit.url for hit in hits] == ["https://shop.pk/products/a"]
     assert isinstance(hits[0], PageCandidate)
     assert not hasattr(hits[0], "images")
+
+
+# --------------------------------------------------------------------------- #
+# budget per source, and variant ranking (live Dawlance / Surmawala case)
+# --------------------------------------------------------------------------- #
+#: The real Shopify answer for q=DW-7500 on surmawala.pk (fetched 2026-10-06).  Note the
+#: white machine's handle: ``…dw-6550g-white…`` - the slug does not carry the model, the
+#: title does.
+SURMAWALA_REAL_PAYLOAD = json.dumps(
+    {
+        "resources": {
+            "results": {
+                "products": [
+                    {
+                        "url": "/products/dawlance-washing-machine-dw-6550g-white-price-in-pakistan"
+                        "?_pos=1&_psq=DW-7500&_psid=ecc428a06&_ss=e",
+                        "title": "Dawlance Semi Automatic Washing Machine DW-7500 - 10Kg",
+                    },
+                    {
+                        "url": "/products/dawlance-semi-automatic-washing-machine-dw-7500c-10kg"
+                        "?_pos=2&_psq=DW-7500&_psid=ecc428a06&_ss=e",
+                        "title": "Dawlance Semi Automatic Washing Machine DW-7500C - 10Kg",
+                    },
+                ]
+            }
+        }
+    }
+)
+
+DW_SITEMAP = (
+    "<urlset>"
+    + "".join(
+        f"<url><loc>{url}</loc></url>"
+        for url in (
+            (
+                "https://www.dawlance.com.pk/twin-tub-washing-machine/dw-7500-twin-tub-glass-lid"
+                "-black-grey-semi-automatic-washing-machines"
+            ),
+            "https://www.dawlance.com.pk/product/dw-7500-c/",
+            "https://www.dawlance.com.pk/product/dw-7500-g/",
+            "https://www.dawlance.com.pk/product/dw-7500-g-fl/",
+            (
+                "https://www.dawlance.com.pk/twin-tub-washing-machine/dw-7500-twin-tub-clear-lid"
+                "-white-semi-automatic-washing-machines"
+            ),
+        )
+    )
+    + "</urlset>"
+)
+
+
+def _chain_fixture(tmp_path: Path, **overrides: object) -> tuple[SourceChain, FakeHttp]:
+    defaults: dict[str, object] = {"fallback_max_pages_per_row": 6, "fallback_max_pages_per_source": 3}
+    defaults.update(overrides)
+    config = _config(tmp_path, **defaults)
+    http = FakeHttp(
+        {
+            "https://www.dawlance.com.pk/robots.txt": "User-agent: *\nDisallow:\n",
+            "https://www.dawlance.com.pk/sitemap.xml": DW_SITEMAP,
+            "https://www.surmawala.pk/robots.txt": "User-agent: *\nDisallow:\n",
+            "https://www.surmawala.pk/search/suggest.json?q=DW-7500"
+            "&resources[type]=product&resources[limit]=6": SURMAWALA_REAL_PAYLOAD,
+        }
+    )
+    return SourceChain(config, http, sitemap_cache=SitemapCache(tmp_path / "sm", 7)), http
+
+
+def test_one_talkative_source_cannot_hide_the_next_priority_source(tmp_path: Path) -> None:
+    """Live bug (2026-10-06): the Dawlance sitemap answered with the whole DW-7500 family,
+    filled the candidate budget, and surmawala.pk - the priority-2 retailer that really has
+    the product - was never queried, so the row failed although the shop had it."""
+    chain, http = _chain_fixture(tmp_path)
+    keys = build_model_keys("Dawlance DW-7500 WHITE Twin Tub Washing Machine")
+    found, report = chain.find_candidates(title=keys.cleaned_title, brand="dawlance", keys=keys)
+
+    assert any("surmawala" in url for url in http.requested), "the retail tier must be searched"
+    origins = [candidate.origin for candidate in found]
+    assert sum("dawlance" in origin for origin in origins) == 3          # its share, not all 6
+    assert sum("surmawala" in origin for origin in origins) == 2         # the shop that has it
+    assert any("dw-6550g-white" in candidate.url for candidate in found)
+    assert "www.surmawala.pk:shopify:2" in report.tried
+    assert report.used.startswith("sitemap:")
+
+
+def test_each_source_contributes_at_most_its_share_of_the_budget(tmp_path: Path) -> None:
+    """``fallback_max_pages_per_source`` is what keeps the chain priority-wise."""
+    chain, _ = _chain_fixture(tmp_path, fallback_max_pages_per_row=6, fallback_max_pages_per_source=2)
+    keys = build_model_keys("Dawlance DW-7500 WHITE Twin Tub Washing Machine")
+    found, _ = chain.find_candidates(title="x", brand="dawlance", keys=keys)
+    assert sum("dawlance" in candidate.origin for candidate in found) == 2
+    assert len(found) == 4                                              # 2 brand + 2 retail
+
+
+def test_candidate_ranking_prefers_the_sheets_own_variant(tmp_path: Path) -> None:
+    """Never a rejection - colour only decides the order (as in the photo gallery)."""
+    keys = build_model_keys("Dawlance DW-7500 WHITE Twin Tub Washing Machine")
+    black_grey = PageCandidate(
+        url="https://www.dawlance.com.pk/x/dw-7500-twin-tub-glass-lid-black-grey-washing-machines",
+        origin="sitemap:www.dawlance.com.pk",
+        method="sitemap",
+    )
+    white = PageCandidate(
+        url="https://www.dawlance.com.pk/x/dw-7500-twin-tub-clear-lid-white-washing-machines",
+        origin="sitemap:www.dawlance.com.pk",
+        method="sitemap",
+    )
+    unrelated = PageCandidate(
+        url="https://www.dawlance.com.pk/product/dw-7500-g/",
+        origin="sitemap:www.dawlance.com.pk",
+        method="sitemap",
+    )
+    ranked = rank_candidates([black_grey, unrelated, white], keys)
+    assert [candidate.url for candidate in ranked] == [white.url, black_grey.url, unrelated.url]
+
+    # no colour in the sheet -> the source's own order is kept untouched
+    plain = build_model_keys("Dawlance DW-7500 Twin Tub Washing Machine")
+    assert [candidate.url for candidate in rank_candidates([black_grey, white], plain)] == [
+        black_grey.url,
+        white.url,
+    ]
+
+    # a shop's own title for the page counts too (Surmawala's white handle is mis-slugged)
+    mis_slugged = PageCandidate(
+        url="https://www.surmawala.pk/products/dawlance-washing-machine-dw-6550g-white-price-in-pakistan",
+        origin="json-search:www.surmawala.pk",
+        method="json-search",
+        title_hint="Dawlance Semi Automatic Washing Machine DW-7500 - 10Kg",
+    )
+    other = PageCandidate(
+        url="https://www.surmawala.pk/products/dawlance-semi-automatic-washing-machine-dw-7500c-10kg",
+        origin="json-search:www.surmawala.pk",
+        method="json-search",
+        title_hint="Dawlance Semi Automatic Washing Machine DW-7500C - 10Kg",
+    )
+    assert [candidate.url for candidate in rank_candidates([other, mis_slugged], keys)] == [
+        mis_slugged.url,
+        other.url,
+    ]

@@ -256,6 +256,12 @@ class PipelineConfig:
         "https://www.subhanelectronics.pk",
     )
     fallback_max_pages_per_row: int = 6
+    #: Per *source* share of that budget.  Without it the first source that answers
+    #: (a brand sitemap lists the whole model family) fills the row budget and the
+    #: retail tier is never even queried - live: a Dawlance row returned six sitemap
+    #: pages, Surmawala was never searched, and the row failed with "no page matched"
+    #: although the shop had the exact product.
+    fallback_max_pages_per_source: int = 3
     fallback_max_search_per_source: int = 1
     source_search_timeout_s: float = 12.0
     sitemap_ttl_days: int = 7
@@ -463,6 +469,13 @@ class PipelineConfig:
             raise ConfigError("min_required_images must be <= max_images_per_product")
         if self.image_probe_bytes < 4096:
             raise ConfigError("image_probe_bytes must be >= 4096")
+        if self.fallback_max_pages_per_source < 1:
+            raise ConfigError("fallback_max_pages_per_source must be >= 1")
+        if self.fallback_max_pages_per_source > self.fallback_max_pages_per_row:
+            raise ConfigError(
+                "fallback_max_pages_per_source must be <= fallback_max_pages_per_row "
+                f"({self.fallback_max_pages_per_source} > {self.fallback_max_pages_per_row})"
+            )
         if self.image_full_download_max_per_page < 1:
             raise ConfigError("image_full_download_max_per_page must be >= 1")
         if self.image_full_download_max_per_page > self.image_full_download_max_per_row:
