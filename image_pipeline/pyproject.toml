@@ -1,0 +1,64 @@
+# Project configuration: packaging metadata, ruff, pytest and mypy in one place.
+#
+# The lint selection is deliberately broad (this is a production pipeline), with two
+# families switched off - both with a written reason, because a scraper must never let one
+# bad page take down a batch:
+#
+#   BLE001 blind-except / S110 try-except-pass
+#       BatchRunner catches Exception ON PURPOSE: one unexpected error in one product must
+#       never abort the other nine.  The exception is logged with a traceback before the row
+#       is marked failed, and PermanentAPIError is re-raised to abort the run.  Silent
+#       swallowing is not allowed anywhere else, so the rules are relaxed only where needed.
+
+[project]
+name = "image-pipeline"
+version = "1.0.0"
+description = "Product-image pipeline: page verification, quality gates, template compositing, freeimage.host upload"
+requires-python = ">=3.10"
+dependencies = [
+    "curl_cffi>=0.7",              # TLS-impersonating HTTP client (pages + images)
+    "Pillow>=10",                  # decode / resize / composite
+    "numpy>=1.26",                 # pixel maths (border ring, masks, dHash)
+    "scipy>=1.11",                 # connected-component labelling for product isolation
+    "opencv-python-headless>=4.8", # QR / barcode decode (S9); headless = no GUI deps
+    "beautifulsoup4>=4.12",        # DOM parsing / region stripping
+    "lxml>=5",                     # BeautifulSoup parser backend
+    "requests>=2.31",              # plain HTTP for the image-host upload
+    "openpyxl>=3.1",               # .xlsx input sheets
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "mypy>=1.8", "ruff>=0.6"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+src = ["."]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "C4", "SIM", "PIE", "PERF", "RUF", "FURB", "ISC", "S", "BLE"]
+# See the header of this file: catching Exception on purpose is the batch-runner contract.
+ignore = ["BLE001", "S110", "RUF001"]
+
+[tool.ruff.lint.per-file-ignores]
+# tests may poke at internals, use bare asserts and helpers that raise for testing
+"tests/*" = ["S", "BLE001", "SIM117", "RUF059", "SLF001"]
+
+[tool.ruff.lint.flake8-builtins]
+builtins-allowed-modules = ["io", "os"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+files = ["."]
+exclude = ["tests/fixtures"]
+
+# These three ship no type stubs.  Everything the pipeline itself owns stays strictly
+# typed; only their imports are exempted, so a missing stub can never hide a real bug.
+[[tool.mypy.overrides]]
+module = ["scipy", "scipy.*", "requests", "requests.*", "openpyxl", "openpyxl.*", "cv2", "cv2.*"]
+ignore_missing_imports = true
