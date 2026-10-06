@@ -1,0 +1,38 @@
+final_digimall  dawlance-semi-automatic-washing-ma 01-digimall.jpg fill_h= 89.9% fill_w= 68.1% top=  54 bottom_gap=  55 x_centre_off= 0.5
+final_digimall  dawlance-semi-automatic-washing-ma 02-digimall.jpg fill_h= 89.9% fill_w= 67.8% top=  54 bottom_gap=  55 x_centre_off= 1.0
+final_digimall  dawlance-semi-automatic-washing-ma 03-digimall.jpg fill_h= 73.4% fill_w= 87.4% top=  54 bottom_gap= 233 x_centre_off= 0.0
+final_digimall  dawlance-semi-automatic-washing-ma 04-digimall.jpg fill_h= 81.7% fill_w= 87.4% top=  54 bottom_gap= 144 x_centre_off= 0.0
+final_digimall  haier-50-inch-qled-google-led-tv-h 01-digimall.jpg fill_h= 77.1% fill_w= 87.0% top=  54 bottom_gap= 193 x_centre_off= 1.0
+final_digimall  haier-50-inch-qled-google-led-tv-h 02-digimall.jpg fill_h= 78.3% fill_w= 87.2% top=  54 bottom_gap= 180 x_centre_off= 1.0
+final_digimall  haier-55-inch-4k-smart-qled-tv-55s 01-digimall.jpg fill_h= 77.3% fill_w= 87.4% top=  54 bottom_gap= 191 x_centre_off= 0.0
+final_digimall  haier-55-inch-smart-google-led-tv- 01-digimall.jpg fill_h= 78.5% fill_w= 87.4% top=  54 bottom_gap= 178 x_centre_off= 0.0
+final_digimall  homage-freezer-on-top-refrigerator 01-digimall.jpg fill_h= 89.9% fill_w= 61.9% top=  54 bottom_gap=  55 x_centre_off= 2.0
+final_digimall  pel-kitchen-pro-grill-microwave-ov 01-digimall.jpg fill_h= 76.0% fill_w= 87.4% top=  54 bottom_gap= 205 x_centre_off= 0.0
+final_digimall  pel-kitchen-pro-grill-microwave-ov 02-digimall.jpg fill_h= 70.8% fill_w= 87.4% top=  54 bottom_gap= 261 x_centre_off= 0.0
+final_digimall  pel-kitchen-pro-grill-microwave-ov 03-digimall.jpg fill_h= 75.7% fill_w= 87.4% top=  54 bottom_gap= 208 x_centre_off= 0.0
+final_digimall  pel-kitchen-pro-grill-microwave-ov 04-digimall.jpg fill_h= 75.0% fill_w= 87.4% top=  54 bottom_gap= 216 x_centre_off= 0.0
+final_digimall  pel-top-load-fully-automatic-washi 01-digimall.jpg fill_h= 89.9% fill_w= 61.9% top=  54 bottom_gap=  55 x_centre_off= 2.0
+final_digimall  pel-top-load-fully-automatic-washi 02-digimall.jpg fill_h= 89.9% fill_w= 61.9% top=  54 bottom_gap=  55 x_centre_off= 2.0
+final_digimall  pel-top-load-washing-machine-white 01-digimall.jpg fill_h= 89.9% fill_w= 61.9% top=  54 bottom_gap=  55 x_centre_off= 2.0
+final_digimall  pel-top-load-washing-machine-white 02-digimall.jpg fill_h= 89.9% fill_w= 61.9% top=  54 bottom_gap=  55 x_centre_off= 2.0
+final_digimall  tcl-85-inch-sqd-mini-led-tv-85c8l  01-digimall.jpg fill_h= 76.3% fill_w= 87.4% top=  54 bottom_gap= 202 x_centre_off= 0.0
+final_digimall  tcl-98-inch-sqd-mini-led-tv-98c8l  01-digimall.jpg fill_h= 76.2% fill_w= 87.4% top=  54 bottom_gap= 203 x_centre_off= 0.0
+final_alfamall  dawlance-semi-automatic-washing-ma 01-alfamall.jpg fill_h= 88.9% fill_w= 68.2% top=  65 bottom_gap=  55 x_centre_off= 0.5
+final_alfamall  dawlance-semi-automatic-washing-ma 02-alfamall.jpg fill_h= 88.9% fill_w= 68.1% top=  65 bottom_gap=  55 x_centre_off= 0.5
+final_alfamall  dawlance-semi-automatic-washing-ma 03-alfamall.jpg fill_h= 72.3% fill_w= 87.4% top=  65 bottom_gap= 234 x_centre_off= 0.0
+final_alfamall  dawlance-semi-automatic-washing-ma 04-alfamall.jpg fill_h= 80.5% fill_w= 87.4% top=  65 bottom_gap= 146 x_centre_off= 0.0
+final_alfamall  haier-50-inch-qled-google-led-tv-h 01-alfamall.jpg fill_h= 75.9% fill_w= 87.1% top=  65 bottom_gap= 195 x_centre_off= 1.5
+final_alfamall  haier-50-inch-qled-google-led-tv-h 02-alfamall.jpg fill_h= 77.1% fill_w= 87.2% top=  65 bottom_gap= 182 x_centre_off= 1.0
+final_alfamall  haier-55-inch-4k-smart-qled-tv-55s 01-alfamall.jpg fill_h= 76.2% fill_w= 87.4% top=  65 bottom_gap= 192 x_centre_off= 0.0
+final_alfamall  haier-55-inch-smart-google-led-tv- 01-alfamall.jpg fill_h= 77.4% fill_w= 87.4% top=  65 bottom_gap= 179 x_centre_off= 0.0
+final_alfamall  homage-freezer-on-top-refrigerator 01-alfamall.jpg fill_h= 88.9% fill_w= 44.3% top=  65 bottom_gap=  55 x_centre_off=66.0
+final_alfamall  pel-kitchen-pro-grill-microwave-ov 01-alfamall.jpg fill_h= 74.9% fill_w= 87.4% top=  65 bottom_gap= 206 x_centre_off= 0.0
+final_alfamall  pel-kitchen-pro-grill-microwave-ov 02-alfamall.jpg fill_h= 69.6% fill_w= 87.4% top=  65 bottom_gap= 263 x_centre_off= 0.0
+final_alfamall  pel-kitchen-pro-grill-microwave-ov 03-alfamall.jpg fill_h= 74.6% fill_w= 87.4% top=  65 bottom_gap= 209 x_centre_off= 0.0
+final_alfamall  pel-kitchen-pro-grill-microwave-ov 04-alfamall.jpg fill_h= 73.9% fill_w= 87.4% top=  65 bottom_gap= 217 x_centre_off= 0.0
+final_alfamall  pel-top-load-fully-automatic-washi 01-alfamall.jpg fill_h= 88.9% fill_w= 54.6% top=  65 bottom_gap=  55 x_centre_off=10.0
+final_alfamall  pel-top-load-fully-automatic-washi 02-alfamall.jpg fill_h= 88.8% fill_w= 52.6% top=  65 bottom_gap=  56 x_centre_off=21.0
+final_alfamall  pel-top-load-washing-machine-white 01-alfamall.jpg fill_h= 88.9% fill_w= 50.9% top=  65 bottom_gap=  55 x_centre_off=30.0
+final_alfamall  pel-top-load-washing-machine-white 02-alfamall.jpg fill_h= 88.9% fill_w= 50.7% top=  65 bottom_gap=  55 x_centre_off=31.0
+final_alfamall  tcl-85-inch-sqd-mini-led-tv-85c8l  01-alfamall.jpg fill_h= 75.2% fill_w= 87.4% top=  65 bottom_gap= 203 x_centre_off= 0.0
+final_alfamall  tcl-98-inch-sqd-mini-led-tv-98c8l  01-alfamall.jpg fill_h= 75.0% fill_w= 87.4% top=  65 bottom_gap= 205 x_centre_off= 0.0
