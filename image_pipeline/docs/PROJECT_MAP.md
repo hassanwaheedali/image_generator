@@ -15,11 +15,18 @@ sheet row (Title + source URLs)
   |
   3 fallback search    sources.SourceChain.find_candidates()        -> S15: only if step 2 found
   |                    (Shopify/Woo JSON -> sitemap -> HTML)            nothing; every candidate is
-  |                                                                     re-verified in step 2 (S15)
+  |                                                                     re-verified in step 2 (S15);
+  |                                                                     a page matching only by the
+  |                                                                     tolerated spelling waits
+ 3b tolerated          pipeline.process_product (last resort)          -> S15.tolerated: used only
+  |                                                                     if nothing prints the model
   4 images             gallery_extractors.extract_candidates()      -> the page's own gallery,
   |                    image_quality.run_quality_gates()                then S4/S5/S6/S7/S8/S9/
   |                    dedup.ProductDedup (S10)                          S12/S13 gates, per-product
-  |                                                                     dedup
+  |                    pipeline._extend_with_structured_gallery()       dedup; if still short of
+  |                                                                     the target, the verified
+  |                                                                     page's own product JSON
+  |                                                                     (Shopify/Woo) tops up
   5 compose            compositing.isolate_main_product()           -> isolate, 1:1 square, unsharp,
   |                    compositing.apply_template()                     both templates
   6 upload             pipeline.finalize_and_upload()               -> S14: nothing is uploaded
@@ -41,17 +48,19 @@ Every step writes its own line to `output/decisions.jsonl` (rule id + reason), a
 | `protocols.py` | the four network boundaries (so tests use fakes) | `PageFetcher`, `ImageFetcher`, `ImageHost`, `SourceSearcher`, `PageResponse`, `BinaryResponse` |
 | `fetch.py` | the only real HTTP client for pages/images/JSON: curl_cffi session, retry+backoff, per-domain rate limit, status classification | `CurlCffiPageFetcher`, `CurlCffiImageFetcher`, `CurlCffiJsonHttp`, `DomainRateLimiter`, `FetchError`, `PermanentAPIError`, `classify_http_status` |
 | `image_host.py` | freeimage.host upload + response classification | `FreeImageHost` |
-| `model_matching.py` | the two recognition rules: model key (`HSU-12HFPAA`) and brand+code (`HRF-538 IFGA`); truncation variants; colour/variant words | `match_product`, `build_model_keys`, `find_matching_keys`, `url_belongs_to_other_model`, `extract_colour_families`, `extract_variant_facts` |
+| `model_matching.py` | the two recognition rules: model key (`HSU-12HFPAA`) and brand+code (`HRF-538 IFGA`); glued/spaced identities (`DW 7500 C`); truncation variants; colour/variant words; the flagged relaxed fallback test | `match_product`, `build_model_keys`, `find_matching_keys`, `glued_model_token`, `numeric_stem`, `relaxed_page_match`, `url_belongs_to_other_model`, `extract_colour_families`, `extract_variant_facts` |
 | `page_verification.py` | S1/S2/S3 + the colour/variant flags | `verify_page`, `strip_unwanted_regions`, `is_in_description_region`, `is_linked_to_other_page`, `page_product_name`, `MatchSettings` |
 | `url_filters.py` | URL-level rules: bad keywords (S5), fetchability (S11), other-model URLs (S4), canonical/dedup keys, size rewrites, brand registry, official-host check | `has_bad_keyword`, `is_fetchable_product_url`, `dedup_key`, `upscale_candidates`, `detect_brand`, `display_brand`, `host_is_official`, `KNOWN_BRANDS`, `BAD_URL_KEYWORDS`, `UPSCALE_REWRITE_RULES` |
 | `gallery_extractors/` | one file per brand + JSON-LD, embedded JSON, gallery containers, whole-page fallback | `extract_candidates`, `ExtractionContext`, `register_extractor`, `dawlance.py`, `haier.py`, `magento.py`, `json_ld.py`, `embedded_json.py`, `generic_gallery.py`, `jsonutil.py` |
 | `image_quality.py` | every pixel gate: S6 shape, S7 border ring + neutral corners, S8 size, S9 QR, S13 bytes, plus the two scoped rescues | `run_quality_gates`, `validate_image_bytes`, `probe_verdict`, `border_is_clean`, `neutral_corner_count`, `is_qr_or_barcode`, `strip_promo_band`, `trim_edge_seams`, `official_gallery_pass`, `to_rgb` |
 | `dedup.py` | S10: dHash + correlation, strictly per product | `ProductDedup`, `dhash`, `correlation`, `fingerprint` |
 | `compositing.py` | product isolation, 1:1 canvas, unsharp, template compositing, JPEG export | `isolate_main_product`, `to_square_canvas`, `sharpen`, `apply_template`, `template_content_box`, `template_has_transparency`, `make_white_transparent`, `product_content_bbox`, `fit_product_size`, `to_jpeg_bytes` |
-| `pipeline.py` | the per-row pipeline, the S14 upload gate, the batch runner (workers, resume, interrupt) and all writers | `PipelineDeps`, `process_product`, `finalize_and_upload`, `ensure_banner_url`, `BatchRunner`, `write_output_csvs`, `_visit_page`, `_consume_candidates`, `_compose_and_save`, `DryRunHost`, `csv_escape` |
+| `pipeline.py` | the per-row pipeline, the S14 upload gate, the structured-gallery top-up (`_extend_with_structured_gallery`), the download budget (incl. the curated-gallery allowance), the batch runner (workers, resume, interrupt) and all writers | `PipelineDeps`, `process_product`, `finalize_and_upload`, `ensure_banner_url`, `BatchRunner`, `write_output_csvs`, `_visit_page`, `_consume_candidates`, `_page_download_allowance`, `_DownloadBudget`, `_compose_and_save`, `DryRunHost`, `csv_escape` |
+| `gallery_extractors/shopify_json.py` | a verified Shopify page's own product JSON: every gallery image, media preview and featured image (`<page>.json`) | `shopify_product_json_url`, `looks_like_shopify`, `parse_product_json` |
+| `gallery_extractors/woo_json.py` | a verified WooCommerce page's own Store API product (`/wp-json/wc/store/v1/products?slug=…`) | `woo_store_api_urls`, `looks_like_woo`, `parse_store_products` |
 | `decisions.py` | the audit trail writer | `DecisionLog.keep/reject/note` |
 | `csv_io.py` | input reading (.csv/.xlsx), atomic writes, checkpoint, banner cache, hashing, slugs | `read_input`, `merge_duplicate_titles`, `atomic_write_csv`, `atomic_write_text`, `save_image_atomic`, `load_checkpoint`, `append_checkpoint`, `hash_source_urls`, `sha256_bytes`, `safe_slug`, `timestamp_now`, `load_banner_cache`, `save_banner_cache` |
-| `sources.py` | S15: the fallback chain (Shopify `suggest.json` -> Woo `wc/store` -> sitemap -> HTML), robots courtesy check, sitemap cache | `SourceChain`, `RobotsCache`, `SitemapCache`, `search_terms`, `parse_shopify_suggest`, `parse_woo_products`, `parse_sitemap`, `model_tokens_in_url` |
+| `sources.py` | S15: the fallback chain (each key searched in its shop spellings via `shop_spellings`) (Shopify `suggest.json` -> Woo `wc/store` -> sitemap -> HTML), robots courtesy check, sitemap cache, per-source share of the page budget, candidate ranking, each key searched in its three shop spellings | `SourceChain`, `RobotsCache`, `SitemapCache`, `search_terms`, `rank_candidates`, `parse_shopify_suggest`, `parse_woo_products`, `parse_sitemap`, `model_tokens_in_url` |
 
 ## The safeguard registry (rule id -> function -> test)
 
@@ -75,6 +84,8 @@ Every step writes its own line to `output/decisions.jsonl` (rule id + reason), a
 | S13 | empty / truncated / broken image bytes | `image_quality.validate_image_bytes` | `test_image_quality.py` |
 | S14 | half-published rows, local paths in a CSV | `pipeline.finalize_and_upload` | `test_pipeline_end_to_end.py` |
 | S15 | a fallback page that shows a *different* model | `sources.SourceChain` + `pipeline._visit_page(is_fallback=True)` | `test_sources.py`, `test_pipeline_end_to_end.py` |
+| S15.relaxed | a fallback page that only *probably* shows it (brand + number) - published **and flagged** (review CSV) | `model_matching.relaxed_page_match` | `test_model_matching.py`, `test_pipeline_end_to_end.py` |
+| S15.tolerated | a page that shows the model *without* our exact spelling (the sheet's dropped trailing letter) being taken as proof instead of a flagged last resort | `model_matching.match_product` (`tolerated`) + `pipeline._visit_page` (`defer_tolerated`) | `test_model_matching.py`, `test_page_verification.py`, `test_pipeline_end_to_end.py` |
 | `*.fetch` | page/asset that could not be downloaded | `pipeline._visit_page` error paths | `test_pipeline_end_to_end.py` |
 
 ## Where to look for a task
@@ -85,6 +96,8 @@ Every step writes its own line to `output/decisions.jsonl` (rule id + reason), a
 | "the product is too small / not centred" | `config.py` compositing block -> `compositing.fit_product_size` / `apply_template` |
 | "a shop's gallery is missed" | `gallery_extractors/` (add a file) then `tests/fixtures/` |
 | "a new source/shop must be searched" | `config.PipelineConfig.brand_sources` / `retail_shopify_sources` / `retail_woo_sources` |
+| "the row never reaches the retailers" | `config.fallback_max_pages_per_source`, `sources.SourceChain.find_candidates` (per-source share), `sources.rank_candidates` |
+| "only 6 pictures came back from a 10-picture gallery" | `pipeline._page_download_allowance` + `config.image_full_download_max_per_page` / `max_images_per_product` |
 | "an image was rejected that looks fine" | the rule id in `decisions.jsonl` -> the table above -> one config field |
 | "add a safeguard" | `AGENTS.md` -> *Patterns* |
 | "resume / checkpoint semantics" | `csv_io.load_checkpoint`, `pipeline.BatchRunner._should_skip`, `tests/test_csv_io_resume.py` - |

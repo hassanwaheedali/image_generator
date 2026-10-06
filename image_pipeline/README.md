@@ -199,13 +199,82 @@ matched, **or** a matched page yielded no usable image — the pipeline searches
 | 3 | retail **WooCommerce** shops (Alfatah, Al Mumtaz, Hadi Electronics, Subhan Electronics) | `/wp-json/wc/store/products?search=<sheet model>` — one request per source |
 
 Rules that make it safe: the search term is **always the sheet's model**, never a code
-found on a page (so a stale URL can never "fix itself" into a successor model); every
+found on a page (so a stale URL can never "fix itself" into a successor model) — spelled
+the ways a shop may know it, derived mechanically from the key itself: as printed
+(`DW 7500`), hyphenated (`DW-7500`) and glued (`DW7500`); a key the sheet already
+hyphenates (`DW-7500C`) also gets its spaced form (`DW 7500C`). Live reason: Surmawala's
+Shopify suggest endpoint answered the hyphenated form while the sheet prints spaces, and
+`q=DW-7500C` is what returns the DW-7500C listing. Every
 found page is **re-verified with S15** before a single image URL is read; at most
-`fallback_max_pages_per_row` (6) candidate pages and one search request per source per
-row; `robots.txt` is respected; excluded hosts (`etech.pk`, `symbios.pk`, dead Zeesol
+`fallback_max_pages_per_row` (6) candidate pages, of which each source may contribute at
+most `fallback_max_pages_per_source` (3), and one search request per source per row.
+The per-source share is what keeps the chain priority-wise: a brand sitemap lists the
+whole model family, and without it the first listing filled the budget and the retailers
+were never searched (live: a Dawlance row never reached surmawala.pk, which had the
+product). Within one source the candidates are **ordered, never filtered**, so the
+sheet's own variant is tried first: a page whose URL or shop title carries the sheet's
+colour word (`WHITE`) outranks the rest of the family, then a page whose slug carries the
+model; `robots.txt` is respected; excluded hosts (`etech.pk`, `symbios.pk`, dead Zeesol
 domains) and any host that failed earlier in the run are skipped. Every rescued row is
 labelled: `run_report.csv` Note says `fallback used: yes` + which source, and
 `decisions.jsonl` keeps `source=fallback:json-search:www.alfatah.com.pk` on each image.
+
+#### When the link the sheet carries is the wrong page
+
+The sheet's link is sometimes the *wrong page for the model in its title*. Live case
+(2026-10-06): the row says `Dawlance Semi Automatic Washing Machine 10kg (DW-7500C)` and
+its link points at the Dawlance page that **prints `DW-7500`** - and the C-slugged URL is a
+404, so there is no brand page printing the model at all.
+
+A page that only matches through the dropped-trailing-letter tolerance (S1's one approved
+spelling tolerance) is therefore **not treated as the answer**:
+
+1. the match is noted (`S15.tolerated`, "deferred as last resort") and the row keeps
+   searching - brand first, then the retailers, **Surmawala first** - for a page that
+   really prints the model (`q=DW-7500C` returns the C listing there);
+2. a page that does print it wins and publishes its pictures, **unflagged**;
+3. only if the whole chain found nothing better is the tolerated page published - status
+   `PARTIAL`, note `flagged: tolerated spelling - page shows DW7500, sheet model is
+   DW-7500C`, and a row in `output/review_products.csv` - never a failed row.
+
+One switch: `config.tolerated_spelling_as_last_resort` (`False` restores the old
+"the matching page is the answer" behaviour). The same rule applies to a fallback candidate
+that only matches by tolerance - exact proof always outranks a tolerated spelling.
+
+#### When a shop page shows one picture: the product's own JSON
+
+A search result (Shopify `suggest.json`, Woo `wc/store` search) names one image; the page's
+own structured data has the whole gallery. After the page's model is verified, and only
+while the row is short of `target_images_per_product` (3), the pipeline fetches the page's
+product JSON and merges every picture:
+
+| Platform | Route | Read from |
+|---|---|---|
+| Shopify (Surmawala, Modern Electronics, Telex) | `/products/<handle>` → `<page>.json` | `product.images[].src`, `product.media[].preview_image.src`, `featured_image` |
+| WooCommerce (Alfatah, Al Mumtaz, …) | `/wp-json/wc/store/v1/products?slug=<slug>` (then `/wp-json/wc/store/products?slug=`) | `images[].src` |
+
+Both sources are canonicalised exactly like the page's own gallery, so a picture that
+appears in both is one candidate, not two. Switch: `config.structured_gallery_enabled`.
+The product JSON is fetched once per verified page and never for a page that already has
+enough pictures; a failure is silent and the page's own gallery stands.
+
+#### When nothing proves the model: publish with a flag
+
+Matching the row's exact model is what S1/S3/S15 do, and the sheet's own URLs are never
+relaxed. A **fallback** page, however, is accepted on the weaker evidence the owner approved
+(2026-10-06): the page carries the row's identity as a whole token (`dw2500c`), or it names
+the brand **and** carries the model's number (`2500` on the page for a `DW 2500 C` row).
+Those rows are published and flagged rather than failed:
+
+- `decisions.jsonl` gets `rule_id: S15.relaxed` with the reason;
+- the row's status is forced to `PARTIAL`;
+- `output/review_products.csv` (`Title,Status,Note`) lists them — written even with
+  `--dry-run`, so the review list is ready before the images are hosted;
+- switch: `config.relaxed_fallback_matching` (set `False` for strict-only).
+
+Identities and number stems must match as **whole tokens** through the page's own
+separators, so `dw7500` never matches inside `dw7500c`: a DW-7500 row is not illustrated
+with the DW-7500C black/glass machine's photos.
 
 Editing the list is data, not code: `config.source_platforms`, `config.brand_sources`,
 `config.retail_shopify_sources`, `config.retail_woo_sources`, `config.excluded_hosts`.
@@ -235,6 +304,7 @@ back to the rule that kept or rejected it.
 | S14 | Nothing uploaded until the selection is final; **both platforms or neither**; banner appended **last** | `pipeline.finalize_and_upload()` | `test_ok_product_urls_are_real_images_then_banner`, `test_failed_product_uploads_nothing`, `test_partial_product_gets_one_banner_per_platform` |
 | — | **The template's logo band is never touched** (paste box starts below `header_safe_margin`, template composited on top, its artwork preserved) | `compositing.apply_template()`, `template_content_box()`, `header_safe_margin()` | `test_logo_band_is_byte_identical_after_compositing`, `test_product_is_never_pasted_above_the_safe_margin`, `test_template_decoration_inside_the_content_area_survives`, `test_real_asset_templates_protect_their_band` (mutation-verified) |
 
+| S15.tolerated | A page that shows the model *without* our exact spelling (the sheet's dropped trailing letter) being published as if it proved the model | `model_matching.match_product` (`tolerated`) + `pipeline._visit_page` | `test_a_tolerated_spelling_is_not_an_exact_match`, `test_the_title_model_wins_over_a_wrong_sheet_link`, `test_a_tolerated_sheet_page_is_published_with_a_flag_when_nothing_else_matches` |
 | S15 | A page found by search is only a *candidate*: it must pass the same `verify_page` with the **sheet's** model before any image URL is read | `sources.SourceChain.find_candidates()` + `pipeline._visit_page()` | `test_fallback_candidate_is_verified_before_any_image_is_used`, `test_candidate_is_only_a_page_never_an_image`, `test_fallback_recovers_a_row_and_is_labelled_in_the_output` |
 
 **Zero-tolerance guarantees** (each proven by a test): no image from description/article content
@@ -287,6 +357,7 @@ Typical calibrations (all in `config.py`):
 | Photos of products shot off-centre rejected | `min_neutral_corners` (2), `corner_patch_ratio` (0.12) |
 | Good images rejected as "too small" | `min_short_side` (180), `min_long_side` (350) |
 | A bad page starves other candidate pages of downloads | `image_full_download_max_per_page` (6), `image_full_download_max_per_row` (18) |
+| The product's own gallery is cut off at 6 pictures | the curated-gallery allowance: a page offering a real gallery (brand **or** retailer) is read in full, bounded by `max_images_per_product` and the row budget |
 | Two angles of the same product collapsed into one | `dedup_hamming_threshold` (6), `dedup_hamming_soft_threshold` (14), `dedup_corr_threshold` (0.995) |
 | Product cropped too tightly / too loosely on the template | `product_fill_ratio` (0.92), `padding_px` (6), `isolation_bg_distance` (32.0) |
 | Product touching the template header band | `template_top_scan_ratio` (0.35), `template_header_gap_px` (8), `template_default_top_margin_px` (90) |
@@ -316,7 +387,11 @@ to iterate.
    because of a live finding: Dawlance's own page served only dark renders that failed S7, and those
    12 wasted downloads used to consume the row's whole allowance, so the retail candidates were never
    given a chance. Now every candidate page gets its own allowance and the row cap still bounds the
-   worst case.
+   worst case. **One exception, by owner request:** a page that offers a *curated gallery* (a gallery
+   container, the brand's own extractor, JSON-LD or an embedded product payload) may be read in full —
+   up to `max_images_per_product` and never past the row budget — because those are the product's own
+   pictures (live: the official DW 7500 TWIN TUB CLEAR LID (WHITE) page publishes 10). Scraped pages
+   and the S2/S3 audit nodes keep the strict per-page cap.
 
 ## 7. Adding a brand extractor
 
@@ -373,7 +448,8 @@ The three built-in extractors are `dawlance.py` (MDM code from the page URL), `h
 ```bash
 python3 -m ruff check .          # lint (must print: All checks passed!)
 python3 -m mypy --strict .       # types (must print: Success: no issues found)
-python3 -m pytest tests -q        # 213 tests, fakes only, no network
+python3 -m pytest tests -q        # 248 tests, fakes only, no network
+python3 ../verification/smoke_test_10_products.py   # the 10 real rows, every branch (offline)
 ```
 
 The suite covers the S1–S14 table above, resume/checkpoint semantics (skip `ok`/`partial` with
@@ -445,7 +521,9 @@ output/
    guarded as in §3. The residual risk (two families sharing a code on a site that prints neither
    prefix) is accepted; `brand_match_enabled=False` restores strict behaviour.
 4. Photos are never rejected for their colour — colour only reorders candidates.
-5. `min_required_images=2`, `max_images_per_product=5`; fewer than 2 accepted images ⇒ `partial`.
+5. `min_required_images=2`, `max_images_per_product=10`; fewer than 2 accepted images ⇒ `partial`.
+   The *target* stays 3 (it stops the search for more pages); up to 10 of the product's own gallery
+   pictures may be published (`--max-images` overrides).
 6. Asset files are fixed names in `assets/`; placeholders are provided and are meant to be replaced.
 7. Local final images are JPEG q95 on white (transparency flattened); uploads are the same bytes.
 8. The banner is appended **last** per platform and only when at least one real image was published.
@@ -461,9 +539,11 @@ Every rule is one named place. Nothing is hard-coded in a stage function.
 
 | I want to change… | Edit | Field / constant |
 |---|---|---|
-| how many images per product | `config.py` | `target_images_per_product` (3), `min_required_images` (2), `max_images_per_product` (5) |
+| the ten-row smoke test | `verification/smoke_test_10_products.py` (real titles, fixture pages, banner/share/CSV checks) |
+| how many images per product | `config.py` | `target_images_per_product` (3), `min_required_images` (2), `max_images_per_product` (10) |
 | the search sources, or add a shop | `config.py` | `brand_sources`, `retail_shopify_sources`, `retail_woo_sources`, `source_platforms`, `excluded_hosts` |
-| fallback budgets | `config.py` | `fallback_max_pages_per_row`, `fallback_max_search_per_source`, `image_full_download_max_per_row`, `image_probe_bytes`, `sitemap_ttl_days` |
+| fallback budgets | `config.py` | `fallback_max_pages_per_row` (6), `fallback_max_pages_per_source` (3), `fallback_max_search_per_source`, `image_full_download_max_per_page` (6) / `_max_per_row` (18), `image_probe_bytes`, `sitemap_ttl_days` |
+| which candidate page of a source is tried first | `sources.py` | `rank_candidates()` (sheet colour → model-in-URL → source order; a preference, never a rejection) |
 | largest-size URL rewrites | `url_filters.py` | `UPSCALE_REWRITE_RULES` (data table) |
 | what counts as an ad/badge/banner URL | `url_filters.py` | `BAD_URL_KEYWORDS`, `MULTI_WORD_BAD_KEYWORDS` |
 | brand list / official domains | `url_filters.py` | `KNOWN_BRANDS`, `DOMAIN_TO_BRAND`, `BRAND_DISPLAY` |
