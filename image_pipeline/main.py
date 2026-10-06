@@ -47,7 +47,16 @@ def build_parser() -> argparse.ArgumentParser:
         prog="image_pipeline",
         description="Verified product-gallery extraction, compositing and hosting.",
     )
-    parser.add_argument("--input", required=True, help="CSV or XLSX sheet with Title + source URL columns")
+    parser.add_argument(
+        "--input",
+        default=None,
+        help="CSV or XLSX sheet with Title + source URL columns (if omitted, auto-discovers from input-dir)",
+    )
+    parser.add_argument(
+        "--input-dir",
+        default="input",
+        help="enterprise input directory to look for sheets (default: input)",
+    )
     parser.add_argument("--assets-dir", default="assets", help="folder with the two templates and two banners")
     parser.add_argument("--output-dir", default="output", help="where the CSVs, images and logs go")
     parser.add_argument("--state-dir", default="state", help="checkpoint and banner cache folder")
@@ -103,6 +112,7 @@ def build_config(args: argparse.Namespace) -> PipelineConfig:
         assets_dir=Path(args.assets_dir),
         output_dir=Path(args.output_dir),
         state_dir=Path(args.state_dir),
+        input_dir=Path(args.input_dir),
         dry_run=bool(args.dry_run),
         workers=int(args.workers),
         limit=args.limit,
@@ -113,6 +123,68 @@ def build_config(args: argparse.Namespace) -> PipelineConfig:
         target_images_per_product=int(args.target_images),
         fallback_enabled=not bool(args.no_fallback),
         refresh_sitemaps=bool(args.refresh_sitemaps),
+    )
+
+
+def _discover_sheets_in_dir(directory: Path) -> list[Path]:
+    """Find valid .csv and .xlsx files in directory, sorted newest first."""
+    candidates: list[Path] = []
+    for ext in ("*.csv", "*.xlsx"):
+        for path in directory.glob(ext):
+            if path.name.startswith("~") or path.name.startswith("."):
+                continue
+            candidates.append(path)
+    return sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def resolve_input_path(input_arg: str | None, input_dir: Path) -> Path:
+    """Resolve the input sheet file path with enterprise input folder support."""
+    if input_dir == Path("input") or str(input_dir) == "input":
+        search_dirs = [
+            input_dir,
+            input_dir.parent / "input",
+            Path("input"),
+            Path("image_pipeline") / "input",
+            Path("uploads"),
+            Path("..") / "uploads",
+            Path("image_pipeline") / "uploads",
+        ]
+    else:
+        search_dirs = [input_dir]
+
+    if input_arg:
+        candidate = Path(input_arg)
+        if candidate.is_file():
+            return candidate
+        # Search relative to search directories
+        for directory in search_dirs:
+            candidate_in_dir = directory / input_arg
+            if candidate_in_dir.is_file():
+                return candidate_in_dir
+        if candidate.is_dir():
+            sheets = _discover_sheets_in_dir(candidate)
+            if sheets:
+                return sheets[0]
+            raise ConfigError(f"no .csv or .xlsx sheet found in directory {candidate.resolve()}")
+        raise ConfigError(f"input sheet not found: {input_arg} (also searched in {input_dir.resolve()})")
+
+    # When --input is omitted: auto-discover newest sheet from standard input folders
+    seen: set[Path] = set()
+    for directory in search_dirs:
+        try:
+            resolved = directory.resolve()
+        except OSError:
+            continue
+        if resolved in seen or not directory.is_dir():
+            continue
+        seen.add(resolved)
+        sheets = _discover_sheets_in_dir(directory)
+        if sheets:
+            return sheets[0]
+
+    raise ConfigError(
+        f"no input sheet specified and none found in '{input_dir}' or 'uploads/'. "
+        "Place your .csv or .xlsx file in the 'input/' folder or specify --input <path>."
     )
 
 
@@ -195,11 +267,17 @@ def main(argv: list[str] | None = None) -> int:
         "set" if config.api_key else ("not needed (dry-run)" if config.dry_run else "MISSING"),
     )
     check_assets(config)
-    LOG.info("input: %s", Path(args.input).resolve())
+    try:
+        input_path = resolve_input_path(args.input, config.input_dir)
+    except ConfigError as exc:
+        print(f"configuration error: {exc}", file=sys.stderr)
+        return 2
+
+    LOG.info("input: %s", input_path.resolve())
     LOG.info("dry-run: %s | workers: %d", config.dry_run, config.workers)
 
     try:
-        tasks, warnings = merge_duplicate_titles(read_input(Path(args.input)))
+        tasks, warnings = merge_duplicate_titles(read_input(input_path))
     except (OSError, ValueError) as exc:
         print(f"cannot read input sheet: {exc}", file=sys.stderr)
         return 2

@@ -165,6 +165,7 @@ class PipelineConfig:
     assets_dir: Path = Path("assets")
     output_dir: Path = Path("output")
     state_dir: Path = Path("state")
+    input_dir: Path = Path("input")
 
     # ----- asset file names ------------------------------------------------
     digimall_template_name: str = DEFAULT_DIGIMALL_TEMPLATE
