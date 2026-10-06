@@ -164,13 +164,41 @@ class RobotsCache:
 # --------------------------------------------------------------------------- #
 # parsing (pure functions - each one unit-tested)
 # --------------------------------------------------------------------------- #
-def search_terms(keys: ModelKeys) -> tuple[str, ...]:
-    """The terms a shop is searched for: always the **sheet's own** model keys."""
+_SEPARATOR_RUN_RE = re.compile(r"[\s\-_/.]+")
+
+
+def shop_spellings(token: str) -> list[str]:
+    """The ways a shop may spell one model key, mechanically: as printed, hyphen, glued, spaced.
+
+    Pure separator normalisation - no per-model table, so a key the sheet adds tomorrow
+    works the same day.  Live reason (2026-10-06): Surmawala's Shopify suggest endpoint
+    answered ``DW-7500`` for the sheet's ``DW 7500``, so the sheet's own spacing must not be
+    the only spelling tried.
+    """
+    hyphen = _SEPARATOR_RUN_RE.sub("-", token)
+    glued = _SEPARATOR_RUN_RE.sub("", token)
+    spaced = _SEPARATOR_RUN_RE.sub(" ", token)
+    spellings: list[str] = []
+    for spelling in (token, hyphen, glued, spaced):
+        if spelling and spelling not in spellings:
+            spellings.append(spelling)
+    return spellings
+
+
+def search_terms(keys: ModelKeys, *, limit: int = 3) -> tuple[str, ...]:
+    """The terms a shop is searched for: always the **sheet's own** model keys.
+
+    All spellings of the first key are tried before the next key - the *term* is still the
+    sheet's own model, never a code read off some page.
+    """
     terms: list[str] = []
     for token in keys.tokens:
-        if token and token not in terms:
-            terms.append(token)
-    return tuple(terms[:3])
+        for spelling in shop_spellings(token):
+            if spelling not in terms:
+                terms.append(spelling)
+            if len(terms) >= limit:
+                return tuple(terms)
+    return tuple(terms)
 
 
 def _as_report(found: list[PageCandidate], tried: list[str]) -> SourceSearchReport:

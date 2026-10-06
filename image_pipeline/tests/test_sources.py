@@ -19,6 +19,7 @@ from sources import (
     parse_woo_products,
     rank_candidates,
     search_terms,
+    shop_spellings,
 )
 
 
@@ -53,6 +54,25 @@ def _config(tmp_path: Path, **overrides: object) -> PipelineConfig:
 def test_search_terms_always_come_from_the_sheet() -> None:
     keys = build_model_keys("Haier 50 Inch QLED Google LED TV (H50S80EUX)")
     assert search_terms(keys) == ("H50S80EUX",)
+
+
+def test_search_terms_spell_each_key_the_three_ways_shops_know() -> None:
+    """The sheet's own spelling, the hyphenated one and the glued one.
+
+    A live check of Surmawala's Shopify suggest endpoint (2026-10-06) answered
+    ``DW-7500`` while the sheet prints ``DW 7500``; the *term* is still our model, never a
+    code read off some page.  This is also what stops a spaced sheet title from dying
+    before it reaches any shop.
+    """
+    spaced = build_model_keys("DW 7500 TWIN TUB CLEAR LID (WHITE)")
+    assert search_terms(spaced) == ("DW 7500", "DW-7500", "DW7500")
+    assert search_terms(spaced, limit=2) == ("DW 7500", "DW-7500")
+    # a key the sheet already hyphenates gets glued and spaced forms too - live DW-7500C row
+    hyphenated = build_model_keys("Dawlance Semi Automatic Washing Machine 10kg (DW-7500C)")
+    assert search_terms(hyphenated) == ("DW-7500C", "DW7500C", "DW 7500C")
+    # a code with no separators is not mangled into dashed letter runs
+    assert shop_spellings("H50S80EUX") == ["H50S80EUX"]
+    assert search_terms(build_model_keys("Haier 50 Inch QLED (H50S80EUX)")) == ("H50S80EUX",)
 
 
 def test_shopify_suggest_parsing() -> None:
