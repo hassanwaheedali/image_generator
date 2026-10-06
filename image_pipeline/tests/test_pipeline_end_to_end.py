@@ -1164,3 +1164,86 @@ def test_model_conflict_on_the_brand_page_moves_to_the_priority_2_retailer(
     assert [line for line in decisions if line["rule_id"] == "S1"]
 
 
+# --------------------------------------------------------------------------- #
+# structured product JSON: 3+ images from a shop that only shows one on the page
+# --------------------------------------------------------------------------- #
+SHOPIFY_PAGE = "https://www.surmawala.pk/products/dawlance-semi-automatic-dw-7500c-10kg"
+SHOPIFY_TITLE = "Dawlance DW-7500C Semi Automatic Washing Machine 10Kg"
+
+
+def test_shopify_product_json_tops_up_a_one_image_page(tmp_path: Path) -> None:
+    """Live complaint 2026-10-06: "shopify json gives only 1 image but we need at least 3".
+    The HTML gallery of a Shopify product page can hold a single picture; the product's own
+    JSON carries the whole set, and it is fetched when the gallery comes up short."""
+    config = live_config(tmp_path)
+    page = (
+        "<html><head><title>Dawlance Semi Automatic Washing Machine DW-7500C - 10Kg</title>"
+        "<script>var t='cdn.shopify.com'</script></head><body>"
+        "<div class='product-gallery'>"
+        "<img src='https://cdn.shopify.com/s/files/1/0829/files/7500-c.png?v=1'>"
+        "</div></body></html>"
+    )
+    product_json = json.dumps({"product": {"images": [
+        {"src": "https://cdn.shopify.com/s/files/1/0829/files/7500-c.png?v=1"},
+        {"src": "https://cdn.shopify.com/s/files/1/0829/files/7500-c-side.png?v=2"},
+        {"src": "https://cdn.shopify.com/s/files/1/0829/files/7500-c-top.png?v=3"},
+        {"src": "https://cdn.shopify.com/s/files/1/0829/files/7500-c-lid.png?v=4"},
+    ]}})
+    # The pipeline canonicalises Shopify's ?v= cache-buster away, so the shop's file URL is
+    # what gets requested - and served.
+    files = "https://cdn.shopify.com/s/files/1/0829/files"
+    images = {
+        f"{files}/7500-c.png": png_bytes(_gallery_image(1)),
+        f"{files}/7500-c-side.png": png_bytes(_gallery_image(2)),
+        f"{files}/7500-c-top.png": png_bytes(_gallery_image(3)),
+        f"{files}/7500-c-lid.png": png_bytes(_gallery_image(4)),
+    }
+    deps, pages, _, _ = build_deps(
+        tmp_path, {SHOPIFY_PAGE: page, f"{SHOPIFY_PAGE}.json": product_json}, images
+    )
+    result, accepted = process_product(
+        task(0, SHOPIFY_TITLE, (SHOPIFY_PAGE,)), deps, config
+    )
+    assert f"{SHOPIFY_PAGE}.json" in pages.requested, "the product JSON must be fetched"
+    assert result.images_accepted == 4, "all four shop pictures, not just the visible one"
+    assert len(accepted) == 4
+    assert result.status is Status.OK
+
+
+def test_woo_store_api_tops_up_a_one_image_page(tmp_path: Path) -> None:
+    config = live_config(tmp_path)
+    page = (
+        "<html><head><title>PEL PAWM-1100 Top Load Fully Automatic Washing Machine</title>"
+        "<link rel='stylesheet' href='/wp-content/plugins/woocommerce/style.css'></head><body>"
+        "<div class='woocommerce-product-gallery'>"
+        "<img src='https://www.alfatah.com.pk/wp-content/uploads/pawm-1100-1.jpg'></div>"
+        "</body></html>"
+    )
+    api_url = (
+        "https://www.alfatah.com.pk/wp-json/wc/store/v1/products"
+        "?slug=pel-11kg-top-load-automatic-washing-machine-pawm-1100i"
+    )
+    payload = json.dumps([{"id": 91, "images": [
+        {"src": "https://www.alfatah.com.pk/wp-content/uploads/pawm-1100-1.jpg"},
+        {"src": "https://www.alfatah.com.pk/wp-content/uploads/pawm-1100-2.jpg"},
+        {"src": "https://www.alfatah.com.pk/wp-content/uploads/pawm-1100-3.jpg"},
+    ]}])
+    product_url = (
+        "https://www.alfatah.com.pk/product/pel-11kg-top-load-automatic-washing-machine-pawm-1100i/"
+    )
+    images = {
+        "https://www.alfatah.com.pk/wp-content/uploads/pawm-1100-1.jpg": png_bytes(_gallery_image(1)),
+        "https://www.alfatah.com.pk/wp-content/uploads/pawm-1100-2.jpg": png_bytes(_gallery_image(2)),
+        "https://www.alfatah.com.pk/wp-content/uploads/pawm-1100-3.jpg": png_bytes(_gallery_image(3)),
+    }
+    deps, pages, _, _ = build_deps(
+        tmp_path, {product_url: page, api_url: payload}, images
+    )
+    result, accepted = process_product(
+        task(0, "PEL PAWM-1100 Top Load Washing Machine", (product_url,)), deps, config
+    )
+    assert api_url in pages.requested
+    assert result.images_accepted == 3
+    assert len(accepted) == 3
+
+

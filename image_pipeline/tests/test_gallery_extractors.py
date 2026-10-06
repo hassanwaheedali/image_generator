@@ -6,6 +6,16 @@ from bs4 import BeautifulSoup
 from conftest import load_fixture
 
 from gallery_extractors import ExtractionContext, extract_candidates, registry_extractor_for
+from gallery_extractors.shopify_json import (
+    looks_like_shopify,
+    parse_product_json,
+    shopify_product_json_url,
+)
+from gallery_extractors.woo_json import (
+    looks_like_woo,
+    parse_store_products,
+    woo_store_api_urls,
+)
 from model_matching import build_model_keys
 from models import ImageCandidate
 from page_verification import MatchSettings, strip_unwanted_regions, verify_page
@@ -124,3 +134,60 @@ def test_verified_strength_is_used_by_context() -> None:
     keys = build_model_keys("Haier HSU-12HFPAA")
     result = verify_page(HAIER, load_fixture("product_ok"), keys, brand="haier", settings=MatchSettings())
     assert result.strength == 2
+
+
+# --------------------------------------------------------------------------- #
+# structured product JSON: the whole image list (Shopify / WooCommerce)
+# --------------------------------------------------------------------------- #
+SHOPIFY_PAGE = "https://www.surmawala.pk/products/dawlance-semi-automatic-dw-7500c-10kg"
+
+SHOPIFY_PRODUCT_JSON = """{"product": {
+  "title": "Dawlance Semi Automatic Washing Machine DW-7500C - 10Kg",
+  "images": [
+    {"src": "https://cdn.shopify.com/s/files/1/0829/6490/6267/files/7500-c.png?v=1", "width": 1200},
+    {"src": "https://cdn.shopify.com/s/files/1/0829/6490/6267/files/7500-c-side.png?v=2"},
+    {"src": "https://cdn.shopify.com/s/files/1/0829/6490/6267/files/7500-c-top.png?v=3"}
+  ],
+  "media": [{"preview_image": {"src": "https://cdn.shopify.com/s/files/1/0829/6490/6267/files/7500-c-lid.png"}}],
+  "featured_image": "https://cdn.shopify.com/s/files/1/0829/6490/6267/files/7500-c.png?v=1"
+}}"""
+
+
+def test_shopify_product_json_url() -> None:
+    assert shopify_product_json_url(SHOPIFY_PAGE) == f"{SHOPIFY_PAGE}.json"
+    assert shopify_product_json_url(f"{SHOPIFY_PAGE}?variant=123") == f"{SHOPIFY_PAGE}.json"
+    assert shopify_product_json_url("https://shop.pk/collections/washing") == ""
+    assert looks_like_shopify(SHOPIFY_PAGE, "<html>cdn.shopify.com</html>")
+    assert not looks_like_shopify("https://shop.pk/collections/washing", "cdn.shopify.com")
+
+
+def test_shopify_product_json_yields_every_image() -> None:
+    """A Shopify `suggest.json` result carries one `featured_image`; the product's own JSON
+    carries them all - which is how a rescued retail row gets 3+ pictures."""
+    context = _context(SHOPIFY_PAGE, "<html></html>", "Dawlance DW-7500C Twin Tub", "dawlance")
+    candidates = parse_product_json(SHOPIFY_PRODUCT_JSON, context)
+    urls = [candidate.url for candidate in candidates]
+    assert len(urls) == 4                                    # 3 images + 1 media preview
+    assert all(candidate.source == "shopify_json" for candidate in candidates)
+    assert all("?v=" not in url for url in urls)             # the cache-buster is canonicalised
+    assert len(set(urls)) == 4
+    assert parse_product_json("<html>blocked</html>", context) == []
+
+
+def test_woo_store_api_urls_and_parsing() -> None:
+    page = "https://www.alfatah.com.pk/product/pel-11kg-top-load-pawm-1100i/"
+    urls = woo_store_api_urls(page)
+    assert urls[0].endswith("/wp-json/wc/store/v1/products?slug=pel-11kg-top-load-pawm-1100i")
+    assert urls[1].endswith("/wp-json/wc/store/products?slug=pel-11kg-top-load-pawm-1100i")
+    assert looks_like_woo(page, "<html>wp-content woocommerce</html>")
+    payload = """[{"id": 1, "images": [
+        {"src": "https://www.alfatah.com.pk/wp-content/uploads/pawm-1100-1.jpg"},
+        {"src": "https://www.alfatah.com.pk/wp-content/uploads/pawm-1100-2.jpg"}]}]"""
+    context = _context(page, "<html></html>", "PEL PAWM-1100 Top Load", "pel")
+    candidates = parse_store_products(payload, context)
+    assert [candidate.url for candidate in candidates] == [
+        "https://www.alfatah.com.pk/wp-content/uploads/pawm-1100-1.jpg",
+        "https://www.alfatah.com.pk/wp-content/uploads/pawm-1100-2.jpg",
+    ]
+    assert all(candidate.source == "woo_json" for candidate in candidates)
+    assert parse_store_products('{"detail":"no route"}', context) == []

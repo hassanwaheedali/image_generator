@@ -255,6 +255,11 @@ class PipelineConfig:
         "https://hadielectronics.com.pk",
         "https://www.subhanelectronics.pk",
     )
+    #: Structured product JSON (Shopify ``/products/<handle>.json``, WooCommerce Store API):
+    #: the HTML gallery is sometimes lazy-loaded or holds a single picture, while the JSON
+    #: carries the product's whole image list.  Fetched only when the page's own gallery
+    #: yielded fewer than ``target_images_per_product`` candidates.
+    structured_gallery_enabled: bool = True
     fallback_max_pages_per_row: int = 6
     #: Per *source* share of that budget.  Without it the first source that answers
     #: (a brand sitemap lists the whole model family) fills the row budget and the

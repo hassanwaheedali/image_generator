@@ -13,9 +13,11 @@ import io
 import logging
 import threading
 from collections import Counter
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from bs4 import BeautifulSoup
 from PIL import Image
@@ -42,7 +44,7 @@ from csv_io import (
 from decisions import DecisionLog
 from dedup import ProductDedup
 from fetch import FetchError, PermanentAPIError
-from gallery_extractors import ExtractionContext, extract_candidates
+from gallery_extractors import ExtractionContext, extract_candidates, shopify_json, woo_json
 from image_quality import (
     ImageValidationError,
     dimensions_from_header,
@@ -61,6 +63,7 @@ from models import (
     ImageRole,
     ModelKeys,
     PageCandidate,
+    PageMatchResult,
     ProductResult,
     ProductTask,
     SourceSearchReport,
@@ -681,6 +684,17 @@ def _visit_page(
         brand_match_min_digits=config.brand_match_min_digits,
     )
     candidates = extract_candidates(context)
+    if len(candidates) < config.target_images_per_product:
+        candidates = _extend_with_structured_gallery(
+            page_url=resolved_url,
+            html=response.text,
+            soup=soup,
+            candidates=candidates,
+            keys=keys,
+            match=match,
+            config=config,
+            deps=deps,
+        )
     if not candidates:
         deps.decisions.reject(
             title=task.title,
@@ -711,6 +725,92 @@ def _visit_page(
 def _parse(html: str) -> BeautifulSoup:
     """Parse with lxml (the fast backend); kept in one place for auditability."""
     return BeautifulSoup(html, "lxml")
+
+
+def _extend_with_structured_gallery(
+    *,
+    page_url: str,
+    html: str,
+    soup: BeautifulSoup,
+    candidates: list[ImageCandidate],
+    keys: ModelKeys,
+    match: PageMatchResult,
+    config: PipelineConfig,
+    deps: PipelineDeps,
+) -> list[ImageCandidate]:
+    """Top up a thin gallery from the product's own JSON (Shopify / WooCommerce).
+
+    Live reason: a Shopify search result carries **one** ``featured_image``, and a
+    lazy-loaded HTML gallery can be empty, so a rescued row published a single picture
+    where the shop had six.  The product JSON is authoritative and cheap (one request),
+    and it is fetched only when the page's own gallery came up short of the target.
+    Failures are silent by design - a missing JSON must never fail a row that already
+    has candidate pictures.
+    """
+    if not config.structured_gallery_enabled:
+        return candidates
+    context = ExtractionContext(
+        page_url=page_url,
+        soup=soup,
+        keys=keys,
+        strength=match.strength,
+        brand=None,
+        raw_html=html,
+        match_rule=match.match_rule,
+    )
+    extra: list[ImageCandidate] = []
+    host = urlsplit(page_url).netloc.lower()
+
+    if config.platform_of(f"https://{host}") == "shopify" or shopify_json.looks_like_shopify(page_url, html):
+        url = shopify_json.shopify_product_json_url(page_url)
+        if url:
+            extra = _fetch_and_parse_json(deps, url, shopify_json.parse_product_json, context)
+    elif config.platform_of(f"https://{host}") == "woo" or woo_json.looks_like_woo(page_url, html):
+        context = replace(context, brand=None)
+        for url in woo_json.woo_store_api_urls(page_url):
+            extra = _fetch_and_parse_json(deps, url, woo_json.parse_store_products, context)
+            if extra:
+                break
+    if not extra:
+        return candidates
+
+    merged = {dedup_key(candidate.url): candidate for candidate in candidates if dedup_key(candidate.url)}
+    added = 0
+    for candidate in extra:
+        key = dedup_key(candidate.url)
+        if not key or key in merged:
+            continue
+        merged[key] = candidate
+        added += 1
+    if added:
+        deps.decisions.keep(
+            title="",
+            url=page_url,
+            rule_id="source",
+            detail=(
+                f"product JSON supplied {added} more image URL(s) for this page "
+                f"(HTML gallery had {len(candidates)})"
+            ),
+        )
+    ordered = sorted(merged.values(), key=lambda candidate: candidate.order)
+    return ordered
+
+
+def _fetch_and_parse_json(
+    deps: PipelineDeps,
+    url: str,
+    parser: Callable[[str, ExtractionContext], list[ImageCandidate]],
+    context: ExtractionContext,
+) -> list[ImageCandidate]:
+    """Fetch a JSON body through the page boundary and parse it.  Never raises."""
+    try:
+        response = deps.page_fetcher.fetch_page(url)
+    except (PermanentAPIError, FetchError):
+        return []
+    except Exception:                                     # pragma: no cover - defensive
+        LOG.debug("unexpected error fetching %s", url, exc_info=True)
+        return []
+    return parser(response.text, context)
 
 
 def _failure_reason(pages_tried: int, pages_rejected: int) -> str:
