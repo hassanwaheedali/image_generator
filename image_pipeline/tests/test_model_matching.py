@@ -1,0 +1,219 @@
+"""Model keys, identity/glued matching, colour and variant extraction."""
+
+from __future__ import annotations
+
+import pytest
+
+from model_matching import (
+    build_model_keys,
+    code_like_tokens,
+    colour_conflict,
+    extract_colour_families,
+    extract_variant_facts,
+    find_matching_keys,
+    key_pattern,
+    model_like_token,
+    near_miss_codes,
+    truncation_variants,
+    url_belongs_to_other_model,
+    variant_conflicts,
+)
+
+SAMPLE_TITLES = (
+    "Dawlance Semi Automatic Washing Machine 10kg (DW-7500C)",
+    "Haier 50 Inch QLED Google LED TV (H50S80EUX)",
+    "Haier 55 Inch 4K Smart QLED TV (55S80EUX)",
+    "Haier 55 Inch Smart Google LED TV (H55K85FX)",
+    "PEL Top Load Fully Automatic Washing Machine (PAWM-1100)",
+    "PEL Kitchen Pro Grill Microwave Oven (PMO–23 Kitchen Pro GR",
+    "TCL 85 Inch SQD Mini LED TV (85C8L)",
+    "TCL 98 Inch SQD Mini LED TV (98C8L)",
+    "PEL Top Load Washing Machine White 12.5 Kg (PWM-1250)",
+    "Homage Freezer-on-Top Refrigerator 18 Cu Ft Golden (HRF-47662-GD)",
+)
+
+
+# --------------------------------------------------------------------------- #
+# keys from a title
+# --------------------------------------------------------------------------- #
+def test_keys_keep_the_model_and_drop_noise() -> None:
+    keys = build_model_keys("Haier HSU-12HFPAA 1.5 Ton Inverter (White)")
+    assert "HSU-12HFPAA" in keys.tokens
+    joined = " ".join(keys.tokens)
+    assert "1.5" not in joined
+    assert "Ton" not in joined
+    assert "White" not in joined
+
+
+def test_mixed_letters_digits_are_model_like() -> None:
+    assert model_like_token("HSU-12HFPAA")
+    assert model_like_token("DWB-300")
+    assert model_like_token("55P635")
+    assert not model_like_token("2024")
+    assert not model_like_token("1.5")
+    assert not model_like_token("12000BTU")
+    assert not model_like_token("9KG")
+    assert not model_like_token("55inch")
+    assert not model_like_token("Ton")
+    assert not model_like_token("White")
+
+
+def test_title_without_model_token_has_no_keys() -> None:
+    keys = build_model_keys("Premium LED TV 55 inch 2024")
+    assert keys.tokens == ()
+    assert keys.all_keys == ()
+    assert not keys.variant_dict().get("model")
+
+
+def test_key_pattern_boundaries() -> None:
+    keys = build_model_keys("Haier HSU-12 Cool")
+    assert find_matching_keys("hsu12", keys)
+    assert find_matching_keys("HSU 12", keys)
+    assert find_matching_keys("hsu_12", keys)
+    assert not find_matching_keys("HSU-12HFPAA", keys)
+    assert not find_matching_keys("AHSU-12", keys)
+    assert key_pattern("HSU-12").search("hsu12") is not None
+
+
+@pytest.mark.parametrize("title", SAMPLE_TITLES)
+def test_bracketed_model_keys_are_rescued(title: str) -> None:
+    """All ten sample rows carry the model inside brackets - every one must yield a key."""
+    keys = build_model_keys(title)
+    assert keys.tokens, f"no model key found for {title!r}"
+
+
+def test_unbalanced_bracket_keeps_tail() -> None:
+    keys = build_model_keys("PEL Kitchen Pro Grill Microwave Oven (PMO–23 Kitchen Pro GR")
+    assert any("PMO" in token for token in keys.tokens)
+
+
+def test_strict_mode_drops_bracketed_models() -> None:
+    keys = build_model_keys(
+        "Haier 50 Inch QLED Google LED TV (H50S80EUX)",
+        bracketed_key_fallback=False,
+        unbalanced_bracket_keeps_text=False,
+    )
+    assert keys.tokens == ()
+
+
+# --------------------------------------------------------------------------- #
+# glued identities (plan section 3.5.4)
+# --------------------------------------------------------------------------- #
+def test_glued_identity_matches() -> None:
+    keys = build_model_keys("Haier HRF-538 IFGA")
+    for spelling in ("HRF538IFGA", "HRF-538-IFGA", "hrf 538 ifga", "HRF_538_IFGA", "HRF-538 IFGA"):
+        assert find_matching_keys(spelling, keys), spelling
+
+
+def test_glued_prefix_extension_still_rejected() -> None:
+    """A key extended with characters the title never had is a different variant."""
+    keys = build_model_keys("Haier HSU-12 1.5 Ton")
+    assert not find_matching_keys("HSU12HFPAA", keys)
+    assert not find_matching_keys("HSU-12HFPAA", keys)
+
+
+def test_glued_unknown_extension_rejected() -> None:
+    keys = build_model_keys("Haier HRF-538 IFGA")
+    assert not find_matching_keys("HRF538XYZ", keys)
+
+
+def test_key_truncation_matches_sheet_suffix() -> None:
+    """Sheet says DW-7500C, the real Dawlance page prints DW-7500."""
+    keys = build_model_keys("Dawlance Semi Automatic Washing Machine 10kg (DW-7500C)")
+    assert find_matching_keys("DW-7500 TWIN TUB GLASS LID BLACK/GREY", keys)
+    assert find_matching_keys("dw 7500 twin tub", keys)
+    assert not find_matching_keys("DW-8000 TWIN TUB", keys)
+
+
+def test_truncation_never_extends_a_key() -> None:
+    """The HSU-12 vs HSU-12HFPAA protection is untouched by the truncation rule."""
+    keys = build_model_keys("Haier HSU-12 1.5 Ton")
+    assert find_matching_keys("HSU12HFPAA", keys) == ()
+    assert find_matching_keys("HSU-12HFPAA", keys) == ()
+    assert find_matching_keys("HSU-12", keys)
+
+
+def test_truncation_can_be_disabled() -> None:
+    keys = build_model_keys("Dawlance Washing Machine (DW-7500C)")
+    assert find_matching_keys("DW-7500 page", keys, include_truncation=False) == ()
+
+
+def test_near_miss_codes_report_the_page_model() -> None:
+    keys = build_model_keys("Haier 50 Inch QLED Google LED TV (H50S80EUX)")
+    assert "h50s80gux" in near_miss_codes('Haier H50S80GUX -50" QLED Google TV', keys)
+
+
+def test_glued_identity_can_be_disabled() -> None:
+    keys = build_model_keys("Haier HRF-538 IFGA")
+    assert find_matching_keys("HRF538IFGA", keys, include_identities=True)
+    assert not find_matching_keys("HRF538IFGA", keys, include_identities=False)
+
+
+# --------------------------------------------------------------------------- #
+# S4 - other model
+# --------------------------------------------------------------------------- #
+def test_other_model_url_rejected() -> None:
+    keys = build_model_keys("Haier HSU-12HFPAA")
+    assert url_belongs_to_other_model("https://cdn.haier.com/p/HSU-18HFPAA-front.png", keys)
+
+
+def test_neutral_and_own_model_urls_not_rejected() -> None:
+    keys = build_model_keys("Haier HSU-12HFPAA")
+    assert not url_belongs_to_other_model("https://cdn.haier.com/p/img123.png", keys)
+    assert not url_belongs_to_other_model("https://cdn.haier.com/p/hsu-12hfpaa-1.png", keys)
+
+
+def test_glued_image_url_not_other_model() -> None:
+    keys = build_model_keys("Haier HRF-538 IFGA")
+    assert not url_belongs_to_other_model("https://cdn.haier.com/p/HRF538IFGA-1.jpg", keys)
+
+
+def test_truncation_variants_only_drop_trailing_letters() -> None:
+    assert truncation_variants("dw7500c") == ("dw7500",)
+    assert truncation_variants("hsu12") == ()
+    assert truncation_variants("hrf47662gd") == ("hrf47662g", "hrf47662")
+
+
+def test_code_like_tokens_ignore_noise() -> None:
+    tokens = code_like_tokens("IMG_1234-800x800-hrf538ifga-a1b2c3d4e5f6a7b8")
+    assert "img1234" not in tokens
+    assert "800x800" not in tokens
+    assert "hrf538ifga" in tokens
+
+
+# --------------------------------------------------------------------------- #
+# colour (plan section 3.6)
+# --------------------------------------------------------------------------- #
+def test_colour_families_and_conflict() -> None:
+    assert extract_colour_families("Homage Refrigerator Golden") == frozenset({"gold"})
+    assert extract_colour_families("Haier AC White") == frozenset({"white"})
+    assert colour_conflict(frozenset({"gold"}), frozenset({"black"}))
+    assert not colour_conflict(frozenset({"gold"}), frozenset())
+    assert not colour_conflict(frozenset({"gold"}), frozenset({"gold"}))
+    # silver counts as grey, champagne as gold
+    assert not colour_conflict(frozenset({"gold"}), extract_colour_families("Champagne Gold"))
+
+
+def test_title_colours_come_from_brackets() -> None:
+    keys = build_model_keys("Homage Freezer Refrigerator 18 Cu Ft Golden (HRF-47662-GD)")
+    assert "gold" in keys.colours
+
+
+# --------------------------------------------------------------------------- #
+# variant facts (plan section 3.6)
+# --------------------------------------------------------------------------- #
+def test_variant_facts_and_conflicts() -> None:
+    title = extract_variant_facts("Dawlance 10 kg Top Load Semi Automatic Washing Machine")
+    assert title["capacity_kg"] == "10"
+    assert title["load"] == "top"
+    assert title["automation"] == "semi"
+    page = extract_variant_facts("Dawlance 12 kg Top Load Washer")
+    assert variant_conflicts(title, page) == ("capacity_kg",)
+    same = extract_variant_facts("Dawlance 10kg top-load washing machine")
+    assert variant_conflicts(title, same) == ()
+    assert variant_conflicts(title, {}) == ()
+
+
+def test_display_technology_is_not_an_axis() -> None:
+    assert "display" not in extract_variant_facts("Haier 55 Inch QLED TV")
+    assert extract_variant_facts("PEL Microwave 23 L")["capacity_l"] == "23"

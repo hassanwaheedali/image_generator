@@ -1,0 +1,228 @@
+"""S1/S2/S3, the two recognition rules, and the colour/variant flags."""
+
+from __future__ import annotations
+
+from bs4 import BeautifulSoup
+from conftest import load_fixture
+
+from model_matching import build_model_keys
+from page_verification import (
+    MatchSettings,
+    is_in_description_region,
+    is_linked_to_other_page,
+    strip_unwanted_regions,
+    verify_page,
+)
+
+HAIER = "https://www.haier.com/pk/hsu-12hfpaa.shtml"
+
+
+# --------------------------------------------------------------------------- #
+# S1
+# --------------------------------------------------------------------------- #
+def test_strength0_page_yields_no_images() -> None:
+    keys = build_model_keys("Haier HSU-12HFPAA")
+    result = verify_page(
+        "https://shop.example/category/air-conditioners",
+        load_fixture("listing_page"),
+        keys,
+        brand="haier",
+    )
+    assert result.strength == 0
+    assert result.accepted is False
+    assert result.match_rule == "none"
+    assert result.matched_keys == ()
+
+
+def test_strong_page_matches_in_title_and_url() -> None:
+    keys = build_model_keys("Haier HSU-12HFPAA")
+    result = verify_page(HAIER, load_fixture("product_ok"), keys, brand="haier")
+    assert result.strength == 2
+    assert result.match_rule == "model_key"
+    assert "HSU-12HFPAA" in result.matched_keys
+
+
+def test_weak_page_extracts_gallery() -> None:
+    """Customer decision: a body-text-only match is treated as a normal page."""
+    keys = build_model_keys("Haier HSU-12HFPAA")
+    result = verify_page(
+        "https://shop.example/p/inverter-ac", load_fixture("weak_page"), keys, brand="haier"
+    )
+    assert result.strength == 1
+    assert result.match_rule == "body_model_key"
+
+
+def test_colour_conflict_flags_the_row_but_keeps_it() -> None:
+    """Customer decision (2026-10-05): a colour difference is a flag, not a failure."""
+    html = """<html><head><title>Haier HRF-538 IFGA Refrigerator Black</title></head>
+    <body><h1>Haier HRF-538 IFGA Black</h1></body></html>"""
+    keys = build_model_keys("Haier Refrigerator HRF-538 IFGA Golden")
+    result = verify_page("https://www.haier.com/pk/hrf-538", html, keys, brand="haier")
+    assert result.strength == 2
+    assert result.match_rule == "model_key"
+    assert result.variant_notes
+    note = result.variant_notes[0]
+    assert "colour mismatch" in note and "gold" in note and "black" in note
+
+
+def test_colour_silence_ok() -> None:
+    html = """<html><head><title>Haier HRF-538 IFGA Refrigerator</title></head>
+    <body><h1>Haier HRF-538 IFGA</h1></body></html>"""
+    keys = build_model_keys("Haier Refrigerator HRF-538 IFGA Golden")
+    result = verify_page("https://www.haier.com/pk/hrf-538", html, keys, brand="haier")
+    assert result.strength == 2
+
+
+def test_variant_mismatch_flags_not_fails() -> None:
+    html = """<html><head><title>Dawlance DW-7500C 12 kg Washing Machine</title></head>
+    <body><h1>Dawlance DW-7500C 12 kg Twin Tub</h1></body></html>"""
+    keys = build_model_keys("Dawlance Semi Automatic Washing Machine 10kg (DW-7500C)")
+    result = verify_page("https://www.dawlance.com.pk/p/dw-7500c", html, keys, brand="dawlance")
+    assert result.strength == 2
+    assert result.variant_notes and "capacity_kg" in result.variant_notes[0]
+
+
+# --------------------------------------------------------------------------- #
+# brand + code (the one relaxed rule - see plan section 3.6)
+# --------------------------------------------------------------------------- #
+def test_brand_code_match_haier_538_ifga() -> None:
+    html = """<html><head><title>Haier Refrigerator 538 IFGA INV</title></head>
+    <body><h1>Haier Refrigerator 538 IFGA INV</h1></body></html>"""
+    keys = build_model_keys("Haier HRF-538 IFGA")
+    result = verify_page("https://www.haier.com/pk/538-ifga", html, keys, brand="haier")
+    assert result.strength == 2
+    assert result.match_rule == "brand_code"
+
+
+def test_brand_code_without_brand_rejected() -> None:
+    html = """<html><head><title>Refrigerator 538 IFGA INV</title></head>
+    <body><h1>Refrigerator 538 IFGA INV</h1></body></html>"""
+    keys = build_model_keys("Haier HRF-538 IFGA")
+    result = verify_page("https://unknown-shop.example/p/538", html, keys, brand=None)
+    assert result.strength == 0
+
+
+def test_conflicting_prefix_rejected() -> None:
+    html = """<html><head><title>Haier HSF-538 IFGA Refrigerator</title></head>
+    <body><h1>Haier HSF-538 IFGA</h1></body></html>"""
+    keys = build_model_keys("Haier HRF-538 IFGA")
+    result = verify_page("https://www.haier.com/pk/hsf-538", html, keys, brand="haier")
+    assert result.strength == 0
+
+
+def test_brand_initial_prefix_allowed() -> None:
+    html = """<html><head><title>Haier 55 Inch QLED TV H55S80EUX</title></head>
+    <body><h1>Haier 55S80EUX</h1></body></html>"""
+    keys = build_model_keys("Haier 55 Inch 4K Smart QLED TV (55S80EUX)")
+    result = verify_page(
+        "https://www.daraz.pk/products/haier-55-h55s80eux-i123.html", html, keys, brand="haier"
+    )
+    assert result.strength == 2
+
+
+def test_short_tail_not_relaxed() -> None:
+    html = """<html><head><title>Haier Inverter AC 12 series</title></head>
+    <body><h1>Haier 12</h1></body></html>"""
+    keys = build_model_keys("Haier HSU-12 1.5 Ton")
+    result = verify_page("https://www.haier.com/pk/cool", html, keys, brand="haier")
+    assert result.strength == 0
+
+
+def test_other_manufacturer_domain_rejected() -> None:
+    html = """<html><head><title>Dawlance 538 IFGA Refrigerator</title></head>
+    <body><h1>Dawlance 538 IFGA</h1></body></html>"""
+    keys = build_model_keys("Dawlance DW-538 IFGA")
+    result = verify_page("https://www.samsung.com/pk/538-ifga", html, keys, brand="dawlance")
+    assert result.strength == 0
+
+
+def test_retail_domain_brand_code_allowed() -> None:
+    html = """<html><head><title>Haier Refrigerator 538 IFGA INV</title></head>
+    <body><h1>Haier 538 IFGA</h1></body></html>"""
+    keys = build_model_keys("Haier HRF-538 IFGA")
+    result = verify_page("https://www.daraz.pk/products/haier-538-ifga-i9.html", html, keys, brand="haier")
+    assert result.strength == 2
+
+
+def test_brand_code_off_switch() -> None:
+    html = """<html><head><title>Haier Refrigerator 538 IFGA INV</title></head></html>"""
+    keys = build_model_keys("Haier HRF-538 IFGA")
+    settings = MatchSettings(brand_match_enabled=False)
+    result = verify_page("https://www.haier.com/pk/538-ifga", html, keys, brand="haier", settings=settings)
+    assert result.strength == 0
+
+
+def test_dropped_trailing_letter_page_matches() -> None:
+    """Live finding: the sheet says DW-7500C and the Dawlance page prints DW-7500."""
+    html = """<html><head><title>DW-7500 TWIN TUB GLASS LID BLACK/GREY</title></head>
+    <body><h1>DW-7500 Twin Tub Washing Machine</h1></body></html>"""
+    keys = build_model_keys("Dawlance Semi Automatic Washing Machine 10kg (DW-7500C)")
+    result = verify_page(
+        "https://www.dawlance.com.pk/twin-tub-washing-machine/dw-7500-twin-tub",
+        html,
+        keys,
+        brand="dawlance",
+    )
+    assert result.strength == 2
+    assert result.match_rule == "model_key"
+
+
+def test_different_haier_model_still_rejected() -> None:
+    html = """<html><head><title>Haier HSU-18HFPAA Inverter AC</title></head>
+    <body><h1>Haier HSU-18HFPAA</h1></body></html>"""
+    keys = build_model_keys("Haier HSU-12HFPAA 1.5 Ton")
+    result = verify_page("https://www.daraz.pk/products/haier-hsu-18-i7.html", html, keys, brand="haier")
+    assert result.strength == 0
+    assert result.match_rule == "none"
+
+
+# --------------------------------------------------------------------------- #
+# S2 / S3
+# --------------------------------------------------------------------------- #
+def test_description_image_nested_deep_rejected() -> None:
+    soup = strip_unwanted_regions(BeautifulSoup(load_fixture("description_images"), "lxml"), HAIER)
+    image = soup.select_one('img[src*="description-chart"]')
+    assert image is not None
+    assert is_in_description_region(image) is True
+
+
+def test_gallery_inside_tab_not_treated_as_description() -> None:
+    soup = strip_unwanted_regions(BeautifulSoup(load_fixture("description_images"), "lxml"), HAIER)
+    image = soup.select_one('img[src*="inside-tab"]')
+    assert image is not None
+    assert is_in_description_region(image) is False
+
+
+def test_article_content_rejected() -> None:
+    soup = strip_unwanted_regions(BeautifulSoup(load_fixture("description_images"), "lxml"), HAIER)
+    image = soup.select_one('img[src*="blog"]')
+    assert image is not None
+    assert is_in_description_region(image) is True
+
+
+def test_related_carousel_excluded() -> None:
+    soup = strip_unwanted_regions(BeautifulSoup(load_fixture("related_carousel"), "lxml"), HAIER)
+    assert soup.select_one('img[src*="hsu-18hfpaa"]') is None      # container removed
+    gallery_image = soup.select_one('img[src*="hsu-12hfpaa-front"]')
+    assert gallery_image is not None
+    assert is_in_description_region(gallery_image) is False
+
+
+def test_lightbox_link_to_own_file_kept() -> None:
+    soup = BeautifulSoup('<a href="/media/hsu-12hfpaa-1.jpg"><img src="/media/thumb.jpg"></a>', "lxml")
+    anchor = soup.find("a")
+    assert is_linked_to_other_page(anchor, HAIER) is False
+
+
+def test_link_to_other_page_detected() -> None:
+    soup = BeautifulSoup('<a href="/product/other-model"><img src="/media/x.jpg"></a>', "lxml")
+    anchor = soup.find("a")
+    assert is_linked_to_other_page(anchor, HAIER) is True
+
+
+def test_strip_unwanted_regions_marks_parent() -> None:
+    soup = strip_unwanted_regions(
+        BeautifulSoup("<body><div><div class='related'><img src='/x.jpg'></div></div></body>", "lxml")
+    )
+    assert soup.select_one("img") is None
+    assert soup.select_one("div[data-pipeline-stripped]") is not None
