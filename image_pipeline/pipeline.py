@@ -97,6 +97,7 @@ from url_filters import (
     prioritize_source_urls,
     upscale_candidates,
 )
+from variant_terms import identity_alpha_tail
 
 LOG = logging.getLogger("pipeline")
 
@@ -943,13 +944,37 @@ def _fetch_and_parse_json(
     return parser(response.text, context)
 
 
+def _variant_tails(identities: tuple[str, ...]) -> list[str]:
+    """The letter tails the model codes carry, e.g. ``["ifga"]`` for ``HRF-538 IFGA``."""
+    return [tail for _, tail in map(identity_alpha_tail, identities) if tail]
+
+
+def _variant_tail_difference(page_name: str, keys: ModelKeys) -> str:
+    """``"page shows variant IFPA, sheet model is IFGA"`` when the tails differ.
+
+    A letter tail is the part of a model code that names the variant (``IFGA`` vs
+    ``IFPA``), so the reviewer has to see both spellings - a generic "tolerated
+    spelling" note would hide the only interesting difference.
+    """
+    sheet_tails = _variant_tails(keys.identities)
+    page_tails = _variant_tails(build_model_keys(page_name).identities)
+    other = sorted({tail.upper() for tail in page_tails} - {tail.upper() for tail in sheet_tails})
+    if not sheet_tails or not other:
+        return ""
+    return f"page shows variant {'/'.join(other)}, sheet model is {sheet_tails[0].upper()}"
+
+
 def _tolerated_spelling_reason(page_name: str, keys: ModelKeys) -> str:
     """One sentence for the report and the review CSV: what the page shows vs the sheet.
 
-    Live shape (2026-10-06): the page shows ``DW-7500`` while the sheet's model is
-    ``DW-7500C`` - the pipeline tolerates that spelling, but the row is flagged so a human
-    can look at the two.
+    Two shapes only, and both are spelled out for the reviewer:
+    * another variant tail - the page shows ``IFPA`` for an ``IFGA`` row (2026-10-07);
+    * a dropped trailing letter - the page shows ``DW-7500`` for a ``DW-7500C`` row
+      (live case, 2026-10-06).
     """
+    tail_difference = _variant_tail_difference(page_name, keys)
+    if tail_difference:
+        return tail_difference
     shows = near_miss_codes(page_name, keys)
     page_code = shows[0].upper() if shows else "the model without its trailing letter"
     sheet_code = keys.tokens[0] if keys.tokens else keys.identities[0].upper()

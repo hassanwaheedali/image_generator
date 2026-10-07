@@ -1548,6 +1548,36 @@ def test_a_tolerated_sheet_page_is_published_with_a_flag_when_nothing_else_match
     assert "published as last resort" in decisions
 
 
+def test_a_page_printing_another_variant_suffix_is_a_last_resort_not_proof(
+    tmp_path: Path,
+) -> None:
+    """Variant separation (2026-10-07): the sheet asks for IFGA, its own link prints IFPA.
+
+    Those tails name different variants of one model, so the page is no longer exact
+    proof: the row defers it, keeps looking for a page that prints its own model, and
+    publishes it only as a flagged last resort.
+    """
+    config = live_config(tmp_path)
+    sheet_url = "https://www.haier.com/pk/hrf-538"
+    photo = "https://cdn.haier.com/p/hrf-538-ifpa-1.jpg"
+    html = (
+        "<html><head><title>Haier HRF-538 IFPA Refrigerator Golden</title></head>"
+        "<body><h1>Haier HRF-538 IFPA</h1>"
+        f"<div class='product-gallery'><img src=\"{photo}\"></div></body></html>"
+    )
+    deps, _, _, _ = build_deps(tmp_path, {sheet_url: html}, {photo: png_bytes(_gallery_image(1))})
+    result, accepted = process_product(
+        task(0, "Haier Refrigerator HRF-538 IFGA Golden", (sheet_url,)), deps, config
+    )
+
+    assert accepted                            # published as a last resort, never dropped
+    assert result.status is Status.PARTIAL     # and never a silent "ok"
+    assert "tolerated spelling" in result.note
+    assert "IFPA" in result.note and "IFGA" in result.note
+    decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
+    assert "deferred as last resort" in decisions
+
+
 def test_a_row_with_one_exact_image_is_never_topped_up_by_the_tolerated_page(
     tmp_path: Path,
 ) -> None:
