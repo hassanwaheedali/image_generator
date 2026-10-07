@@ -60,12 +60,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `same_digit_runs()`; `ModelKeys.name_words` captures the positional "name" words - series lines
   (`Daimond`/`Cuby`) and unknown colourways (`Ocean Mist`) - with category noise removed; and
   `score_match()` returns per-attribute vetoes (series / colour / size) plus a confidence, each
-  fail-open.  `match_product` now demotes a matched page whose strong text lacks a series name the
-  row carries to a flagged last resort, so `Daimond`/`Cuby`/`Ruby` and *future* unknown colourways no
+  fail-open.  `match_product` now demotes a matched page that *names a different* series line or
+  colourway to a flagged last resort, so `Daimond`/`Cuby`/`Ruby` and *future* unknown colourways no
   longer silently mix, with **zero per-name tables**.  The hand-added `marine impression` vocabulary
-  line was removed - the dynamic rule covers it.  Measured: same-code colour pairs separated 274,
-  **0 false rejects**; 100-product offline smoke GREEN; 319 tests, ruff + mypy --strict clean, radon
-  baseline unchanged (45).
+  line was removed - the dynamic rule covers it.  A series veto needs a **substitution** (a word on
+  each side the other lacks), never a mere omission: the first cut vetoed whenever the page did not
+  repeat the row's line name and that demoted **75 of 94** products on a terse `brand + code + colour`
+  page; the substitution rule keeps all **94/94** clean, and brand words are dropped before the
+  comparison so `Super Asia` ≡ `Superasia` cannot veto.  Measured: same-code colour pairs separated
+  274, **0 false rejects**, 157 diff-colour pairs with **0** clean matches; 100-product offline smoke
+  GREEN; 322 tests, ruff + mypy --strict clean, radon baseline unchanged (45).
 - **`image_pipeline/variant_terms.py`** - the variant vocabulary and its pure rules: colour
   families with a neutral (achromatic) carve-out, `suffix_agreement`, `colour_word_conflict`.
   It holds no brand, suffix or colour-code tables, so a colour the vocabulary has never seen

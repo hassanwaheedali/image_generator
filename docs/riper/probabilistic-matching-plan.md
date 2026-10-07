@@ -129,7 +129,7 @@ per-brand/per-product tables — attributes are positional.
 ## 8. EXECUTE / REVIEW (filled 2026-10-07)
 
 Executed on `arena/79280a67-image-generator` with TDD: `92f61b8` tasks 1-2 · `48fb99e` task 3 ·
-`9184c58` task 4 · task 5 (this commit).  Gates green at every checkpoint (319 tests, ruff +
+`9184c58` task 4 · task 5 (this commit).  Gates green at every checkpoint (322 tests, ruff +
 mypy --strict clean, radon 45).  The `marine impression` vocabulary line was removed once the
 name-word veto covered it (zero per-name entries).  Open-question resolutions: fuzzy threshold
 0.85; series veto **demotes** to flagged (not rejects); marine line removed.
@@ -139,3 +139,16 @@ table; Daimond/Cuby/Ruby separated; Avante+~Avante Plus and 9160-WB~9160LF not r
 rejects on the same-colour control; separation 274 same-code pairs (>= before).  Remaining known
 gap: multi-variant Shopify pages whose *title names no colour* (the colour lives in `?variant=` /
 the body spec row) - not covered by this change; see `variant-separation-plan.md` residuals.
+
+**Review finding (fixed before sign-off):** task 3's series veto was written as an *omission* test -
+any row name word missing from the page vetoed.  Measured against the 100-product corpus with a
+realistic terse page (`brand + code + colour`, no line name) that demoted **75 of 94** products to
+flagged, i.e. the veto punished pages for being short.  Rewritten as a *substitution* test
+(`_name_word_substitution`): a veto needs a word on **each** side the other lacks, mirroring the
+suffix rule's "only a positively different tail counts".  Brand words are dropped first
+(`_drop_brand_words`, containment against the sheet brand) because sheets and pages spell
+multi-word brands both ways (`Super Asia` / `Superasia`).  Dropping words can only weaken a veto,
+never invent one.  After the fix: terse pages **94/94** clean (was 19/94), own titles **94/94**,
+157 diff-colour pairs **0** clean matches, same-colour control **0** false rejects, PEL 425 matrix
+each colourway page clean for its own row and flagged/rejected for the siblings; 322 tests, ruff,
+mypy --strict, radon 45, smoke 10 (26/26) and smoke 100 (GREEN).

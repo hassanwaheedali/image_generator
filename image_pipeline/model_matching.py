@@ -364,8 +364,9 @@ def _name_words(title: str) -> tuple[str, ...]:
     """The positional "name" words of a title: series lines and unknown colourways.
 
     Keeps alphabetic tokens of length >= 4 that are not the category/marketing noise,
-    not a known colour word and not part of a model code.  The brand stays in - it is
-    shared by both sides of any comparison and therefore never causes a veto.
+    not a known colour word and not part of a model code.  The brand stays in here (this
+    function does not know it); :func:`_drop_brand_words` removes it before any veto, so
+    a brand spelled one way in the sheet and another on the page can never veto.
     """
     out: list[str] = []
     for raw in re.findall(r"[A-Za-z]+", title):
@@ -969,24 +970,60 @@ class ScoreMatch:
 
 
 def _name_word_confidence(row_words: tuple[str, ...], page_words: tuple[str, ...]) -> float:
+    """Share of the row's name words the page also carries (1.0 when the row names none)."""
     if not row_words:
         return 1.0
     matched = sum(1 for word in row_words if any(similar(word, page) for page in page_words))
     return matched / len(row_words)
 
 
-def score_match(keys: ModelKeys, strong_text: str) -> ScoreMatch:
+def _name_word_substitution(row_words: tuple[str, ...], page_words: tuple[str, ...]) -> bool:
+    """True when the page *replaces* a row name word instead of merely adding words.
+
+    A veto needs a positive contradiction, exactly like the suffix rule above: the page
+    has to name a line/colourway the row does not (``Daimond`` vs ``Cuby``, ``Marine
+    Impression`` vs ``Red Blaze``).  A word only one side carries is not enough on its
+    own, because both directions are innocent in real pages - a shop title that adds a
+    marketing word (``Inverter``) is the same product, and a terse title that prints only
+    the code and colour simply omits the line name.  Only a *substitution* - a word on
+    each side that the other lacks - says the two texts describe different products.
+    A page that carries no name word at all says nothing and never vetoes.
+    """
+    if not row_words or not page_words:
+        return False
+    row_only = [word for word in row_words if not any(similar(word, page) for page in page_words)]
+    page_only = [page for page in page_words if not any(similar(page, word) for word in row_words)]
+    return bool(row_only and page_only)
+
+
+def _drop_brand_words(words: tuple[str, ...], brand: str | None) -> tuple[str, ...]:
+    """Drop name words that are only the brand, however the two sides spell it.
+
+    A brand is already matched by its own rule, so it must never decide a series veto.
+    Sheets and pages spell multi-word brands both ways (``Super Asia`` / ``Superasia``),
+    so a word counts as brand when it is a piece of the brand key or the whole of it.
+    Dropping words can only weaken a veto, never invent one, which is the safe direction.
+    """
+    key = normalize_key(brand or "")
+    if len(key) < 4:
+        return words
+    return tuple(word for word in words if word not in key and key not in word)
+
+
+def score_match(keys: ModelKeys, strong_text: str, brand: str | None = None) -> ScoreMatch:
     """Score a page's strong text against the row's keys (additive to match_product).
 
     Three independent vetoes, each fail-open (an absent attribute is never a veto):
-    * series - the row carries a name word the page does not (``Daimond`` vs ``Cuby``);
+    * series - the page names a line/colourway in place of the row's (``Daimond``/``Cuby``);
     * colour - the row's colour word conflicts with the page (existing primitive);
     * size   - a capacity/type fact contradicts (existing ``variant_conflicts``).
     """
     page = build_model_keys(strong_text)
-    confidence = _name_word_confidence(keys.name_words, page.name_words)
+    row_words = _drop_brand_words(keys.name_words, brand)
+    page_words = _drop_brand_words(page.name_words, brand)
+    confidence = _name_word_confidence(row_words, page_words)
     return ScoreMatch(
-        series_veto=bool(keys.name_words and page.name_words) and confidence < 1.0,
+        series_veto=_name_word_substitution(row_words, page_words),
         colour_veto=colour_word_conflict(keys.colour_word, strong_text),
         size_veto=bool(variant_conflicts(keys.variant_dict(), extract_variant_facts(strong_text))),
         confidence=confidence,
@@ -1033,7 +1070,7 @@ def match_product(
         return ProductMatch(False, "colour_conflict", ())
     if not match.tolerated and _page_names_another_variant(keys, strong_text):
         return replace(match, tolerated=True)
-    if not match.tolerated and score_match(keys, strong_text).series_veto:
+    if not match.tolerated and score_match(keys, strong_text, brand).series_veto:
         # A series/line name the page does not carry (``Daimond`` vs ``Cuby``) names a
         # different product.  Demote rather than reject - the page may simply omit the
         # line name - so it becomes a flagged last resort, like the suffix case.
