@@ -140,6 +140,11 @@ def _padded(text: str) -> str:
 # --------------------------------------------------------------------------- #
 # colour words
 # --------------------------------------------------------------------------- #
+def is_colour_word(word: str) -> bool:
+    """Whether a single token is one of the vocabulary's colour words."""
+    return _canonical(normalize_text(word)) in _FAMILY_OF
+
+
 def colour_words(text: str) -> frozenset[str]:
     """Every colour word ``text`` names, in canonical spelling.
 

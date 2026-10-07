@@ -495,3 +495,19 @@ def test_colour_separation_can_be_switched_off() -> None:
     )
     assert verdict.matched
     assert not verdict.tolerated
+
+def test_name_words_keep_series_and_unknown_colourway_but_drop_noise() -> None:
+    """Task 2: the positional "name" words - series lines and unknown colourways -
+    survive, while brand-agnostic noise (type words, colours, codes) is dropped."""
+    daimond = build_model_keys("Dawlance 9191 Daimond RED")
+    assert "daimond" in daimond.name_words
+    assert "red" not in daimond.name_words
+    assert "9191" not in daimond.name_words
+
+    fridge = build_model_keys("Dawlance Avante Freezer-On-Top Refrigerator 7 Cu Ft Burgundy")
+    assert "avante" in fridge.name_words
+    assert "refrigerator" not in fridge.name_words
+    assert "burgundy" not in fridge.name_words
+
+    ocean = build_model_keys("PEL Straight 3 Taps Glass Door Water Dispenser (PWD-425-GD)-Ocean Mist")
+    assert "ocean" in ocean.name_words and "mist" in ocean.name_words

@@ -28,6 +28,7 @@ from textnorm import WHITESPACE_RE, normalize_key, normalize_text
 from variant_terms import (
     COLOUR_FAMILIES,
     colour_word_conflict,
+    is_colour_word,
     primary_colour_word,
     suffix_agreement,
 )
@@ -340,6 +341,40 @@ def _token_and_identity(words: list[str], index: int, max_extra: int) -> tuple[s
     return token, identity
 
 
+# Words that describe the appliance category or marketing, never a product *name*.
+# They are dropped from ``name_words`` so a series line ("Daimond") or an unknown
+# colourway ("Ocean Mist") is the only thing left to compare.  Generic vocabulary,
+# not per-product data.
+_GENERIC_NAME_WORDS = frozenset((
+    "refrigerator", "fridge", "freezer", "washing", "machine", "washer", "dryer",
+    "dispenser", "conditioner", "inverter", "converter", "on", "top", "bottom",
+    "glass", "door", "doors", "tap", "taps", "straight", "water", "cool", "cooler",
+    "cu", "ft", "capacity", "litre", "liters", "gallon", "kg", "watt", "ton", "tons",
+    "split", "window", "portable", "cabinet", "chest", "upright", "pro", "plus",
+    "max", "special", "edition", "smart", "digital", "direct",
+))
+
+
+def _name_words(title: str) -> tuple[str, ...]:
+    """The positional "name" words of a title: series lines and unknown colourways.
+
+    Keeps alphabetic tokens of length >= 4 that are not the category/marketing noise,
+    not a known colour word and not part of a model code.  The brand stays in - it is
+    shared by both sides of any comparison and therefore never causes a veto.
+    """
+    out: list[str] = []
+    for raw in re.findall(r"[A-Za-z]+", title):
+        normalized = raw.lower()
+        if len(normalized) < 4:
+            continue
+        if normalized in _GENERIC_NAME_WORDS or is_colour_word(normalized):
+            continue
+        if model_like_token(raw) or normalized in out:
+            continue
+        out.append(normalized)
+    return tuple(out)
+
+
 @lru_cache(maxsize=8192)
 def _build(
     title: str,
@@ -393,6 +428,7 @@ def _build(
         colours=tuple(sorted(extract_colour_families(title))),
         variant_facts=tuple(sorted(extract_variant_facts(title).items())),
         colour_word=primary_colour_word(title) or "",
+        name_words=_name_words(title),
     )
 
 

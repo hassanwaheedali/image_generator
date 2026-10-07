@@ -52,6 +52,7 @@ class ModelKeys:
     ``colours``  - colour families named in the title, e.g. ("white",)
     ``variant_facts`` - ("axis", "value") pairs, e.g. (("capacity_kg", "10"),)
     ``colour_word`` - the colour the title is selling ("burgundy"), "" when it names none
+    ``name_words`` - series / colourway name words, noise removed (scored matcher)
     """
 
     cleaned_title: str
@@ -62,6 +63,9 @@ class ModelKeys:
     variant_facts: tuple[tuple[str, str], ...] = ()
     #: The title's own colour word, for variant separation ("" when it names no colour).
     colour_word: str = ""
+    #: Positional "name" words - series lines and unknown colourways - with brand-agnostic
+    #: noise (type words, colours, model codes) removed; used by the scored matcher.
+    name_words: tuple[str, ...] = ()
 
     @property
     def all_keys(self) -> tuple[str, ...]:
