@@ -747,12 +747,10 @@ def _visit_page(
     soup = strip_unwanted_regions(_parse(response.text), resolved_url)
     match = verify_page(resolved_url, response.text, keys, brand=brand, settings=settings)
     relaxed = ""
-    if not match.accepted and is_fallback and match.match_rule != "colour_conflict":
+    if _relaxed_rescue_applies(match, is_fallback):
         # Owner decision 2026-10-06: a fallback page that names the brand and carries the
         # model's own number publishes its pictures and flags the row for manual review,
-        # instead of failing.  Sheet URLs never come here.  A page rejected because it
-        # shows another colourway is never rescued: the colour is part of the product
-        # identity (owner decision 2026-10-07), so the row keeps looking instead.
+        # instead of failing.  Sheet URLs never come here.
         relaxed = _relaxed_fallback_note(
             page_url=resolved_url, soup=soup, keys=keys, brand=brand, config=config
         )
@@ -942,6 +940,15 @@ def _fetch_and_parse_json(
         LOG.debug("unexpected error fetching %s", url, exc_info=True)
         return []
     return parser(response.text, context)
+
+
+def _relaxed_rescue_applies(match: PageMatchResult, is_fallback: bool) -> bool:
+    """May the relaxed fallback tier rescue this rejected page?
+
+    Never for a colour rejection: another colourway is another product (owner decision
+    2026-10-07), so the row must keep looking instead of publishing that gallery.
+    """
+    return not match.accepted and is_fallback and match.match_rule != "colour_conflict"
 
 
 def _variant_tails(identities: tuple[str, ...]) -> list[str]:
