@@ -39,10 +39,16 @@ carries:
    **Zero vocabulary.** Pure digits+letters from the existing tokenizer → works for any brand, any
    future model, no maintenance. This is the higher-value half of the fix.
 
-2. **Chromatic-colour agreement (word level, fail-open).** Compare the *raw colour words* named by
-   title vs page, neutral/achromatic words excluded:
-   - both sides name a **known** colour and the words are disjoint (`burgundy` vs `red`) → strength 0;
-   - same word, or one side names none (incl. one side naming only an *unknown* word) → exact.
+2. **Colour agreement — primary colour word, compared raw, fail-open.** *(revised after the corpus
+   analysis: `variant-colour-corpus-report.md` §4)*. Take the colour word that ends **last** in the
+   text (series names such as "Dawlance **Chrome** …" sit early; the colourway "… Hairline **Black**
+   (9178-WB)" sits next to the code), then:
+   - the title names a colour word **and** the page names at least one colour word **and** the title's
+     word is not among the page's (`burgundy` vs `red`) → strength 0;
+   - the page names none, or names the same word (`gray` and `grey` count as the same word) → exact.
+
+   Compared **raw, never by family**: `burgundy`/`red` and `copper`/`gold` share a family, so family
+   comparison keeps exactly the pairs that must be split (measured: 256/298 by family vs 280/298 raw).
 
 ### Why this is the simplest dynamic fix
 It reuses two existing, tested machines (the identity tokenizer and the colour vocabulary) and adds one
@@ -133,10 +139,20 @@ Design consequences (this is what makes it non-hardcoded in the sense that matte
 - Test coverage for every new branch, including the fail-open path; no test touches the network.
 
 ## 7. OPEN QUESTIONS (owner)
-- Different suffix → strength 0 (never used) — confirm (recommended), vs tolerated.
-- Neutral set (excluded from colour compare): `white, black, grey, silver, steel, chrome, pearl, ivory,
-  cream, beige` — confirm.
-- Re-attach `Products.csv` (any CSV with a `Title` column; the repo's sheets use `Title,Images`) so
-  Phase 0 can run.
+- Different suffix → strength 0 (never used) — confirm (recommended), vs tolerated. Measured on the
+  catalogue: 263 pairs separated, 122 same-suffix pairs unaffected, 0 one-sided-omission pairs in
+  titles (pages that omit the suffix stay *tolerated*, last resort, flagged).
+- ~~Neutral set~~ — no longer a decision: the primary-colour-word rule does not need it (it is only a
+  tie-breaker when a title names several colour words).
+
+## 7b. CORPUS EVIDENCE (Phase 0, `variant-colour-corpus-report.md`)
+- 1796 sheet rows → 752 distinct titles; 437 identities carry an alpha suffix.
+- 43 codes / 116 titles / 149 pairs are **same code, different colour**; today **298/298** of those
+  pairs match at `strength=2, rule=model_key, tolerated=False` — 100% silent mixing, nothing flagged.
+- With both rules: **82.6%** of the 270 currently-mixing stem pairs separated, **0** false rejects on
+  the same-colour control; the residue is one-sided omission (by design) plus one unknown colourway
+  name (PEL "Marine Impression", 2 pairs).
+- Vocabulary coverage: all 20 colour words used in the catalogue are already known; marketing names
+  are always modifier + known base colour (Ruby **Red**, Platinum **Silver**), so the gap is one name.
 
 ## 8. EXECUTE / REVIEW — filled in after approval.
