@@ -353,6 +353,10 @@ _GENERIC_NAME_WORDS = frozenset((
     "cu", "ft", "capacity", "litre", "liters", "gallon", "kg", "watt", "ton", "tons",
     "split", "window", "portable", "cabinet", "chest", "upright", "pro", "plus",
     "max", "special", "edition", "smart", "digital", "direct",
+    "twin", "tub", "semi", "automatic", "manual", "frost", "standing", "floor",
+    "vertical", "horizontal", "compact", "mini", "large", "small", "luxury",
+    "premium", "original", "model", "series", "type", "style", "with", "without",
+    "and", "the", "for", "hd", "led", "lcd",
 ))
 
 
@@ -982,7 +986,7 @@ def score_match(keys: ModelKeys, strong_text: str) -> ScoreMatch:
     page = build_model_keys(strong_text)
     confidence = _name_word_confidence(keys.name_words, page.name_words)
     return ScoreMatch(
-        series_veto=bool(keys.name_words) and confidence < 1.0,
+        series_veto=bool(keys.name_words and page.name_words) and confidence < 1.0,
         colour_veto=colour_word_conflict(keys.colour_word, strong_text),
         size_veto=bool(variant_conflicts(keys.variant_dict(), extract_variant_facts(strong_text))),
         confidence=confidence,
@@ -1028,6 +1032,11 @@ def match_product(
         # the one signal that rejects, and it outranks a tolerated spelling.
         return ProductMatch(False, "colour_conflict", ())
     if not match.tolerated and _page_names_another_variant(keys, strong_text):
+        return replace(match, tolerated=True)
+    if not match.tolerated and score_match(keys, strong_text).series_veto:
+        # A series/line name the page does not carry (``Daimond`` vs ``Cuby``) names a
+        # different product.  Demote rather than reject - the page may simply omit the
+        # line name - so it becomes a flagged last resort, like the suffix case.
         return replace(match, tolerated=True)
     return match
 

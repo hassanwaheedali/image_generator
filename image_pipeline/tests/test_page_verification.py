@@ -273,3 +273,21 @@ def test_strip_unwanted_regions_marks_parent() -> None:
     )
     assert soup.select_one("img") is None
     assert soup.select_one("div[data-pipeline-stripped]") is not None
+
+def test_a_page_naming_another_series_is_a_last_resort_not_proof() -> None:
+    """Plan task 4: same code + colour but a different series line (Daimond vs Cuby)
+    is a different product - demoted to a flagged last resort, never exact proof."""
+    html = """<html><head><title>Dawlance (9191-WB) Cuby RED</title></head>
+    <body><h1>Dawlance (9191-WB) Cuby RED</h1></body></html>"""
+    keys = build_model_keys("Dawlance (9191-WB) Daimond RED")
+    result = verify_page("https://www.dawlance.com.pk/9191", html, keys, brand="dawlance")
+    assert result.strength > 0
+    assert result.tolerated          # flagged last resort, not a silent exact match
+
+    same = verify_page(
+        "https://www.dawlance.com.pk/9191",
+        """<html><head><title>Dawlance (9191-WB) Daimond RED</title></head>
+        <body><h1>Dawlance (9191-WB) Daimond RED</h1></body></html>""",
+        keys, brand="dawlance",
+    )
+    assert same.strength > 0 and not same.tolerated
