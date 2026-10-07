@@ -34,7 +34,7 @@ python3 main.py --input sample_input.csv --workers 4        # real run (needs FR
 
 python3 -m ruff check .        # must print: All checks passed!
 python3 -m mypy --strict .     # must print: Success: no issues found
-python3 -m pytest tests -q     # 263 tests, fakes only, no network
+python3 -m pytest tests -q     # 308 tests, fakes only, no network
 ```
 
 Secrets: `FREEIMAGE_API_KEY` (and optional `FREEIMAGE_UPLOAD_URL`) come from the environment or from
@@ -72,6 +72,8 @@ variable always wins. **Never print, log, commit or echo the key value.**
   white backdrop while the product legitimately touches the frame edges.  A busy/lifestyle frame
   never reaches four neutral corners at `corner_patch_ratio`, so it stays rejected (tests:
   `test_white_corners_busy_middle_rejected`, `test_studio_rescue_can_be_switched_off`).
+  Variant separation (2026-10-07) is a *strengthening* of `S1`, not a weakening: a page printing
+  another colourway is rejected as `colour_conflict`, and `S15.relaxed` never rescues such a page.
 - **Never publish a non-`http(s)` URL.** `finalize_and_upload` refuses `file://` on purpose.
 - **Never compare uploaded image bytes to the local finals** - freeimage.host re-encodes. Identify the
   uploaded picture back to its own local final with a 32x32 blurred grayscale fingerprint (live run
@@ -82,8 +84,11 @@ variable always wins. **Never print, log, commit or echo the key value.**
 - **Never add a dependency** that is not needed for a shipped feature; the list in `pyproject.toml`
   must match the imports exactly.
 - Never log secrets, never commit `secrets.env`/`.env`/`output/`/`state/`.
-- Do not re-litigate settled product decisions (title colour/variant differences are *flagged*, never
-  grounds for rejection; photo-level colour differences only affect ordering).
+- Do not re-litigate settled product decisions. Colour is one, and it moved: another colourway of the
+  same model is a **different product**, so it is rejected rather than flagged (owner decision
+  2026-10-07, superseding 2026-10-05) - the wrong picture costs a penalty. Size/type differences are
+  still flags only, photo-level colour differences still only affect ordering, and one field
+  (`config.variant_separation_enabled`) rolls the whole rule back.
 - **Relaxed matching never applies to the sheet's own URLs.** `relaxed_page_match` is only for
   `is_fallback=True` pages, it must always emit `S15.relaxed` **and** a `review_products.csv` row, and
   it must match whole tokens: `dw7500` never matches inside `dw7500c`.

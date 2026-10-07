@@ -58,14 +58,16 @@ main.py  (CLI · fail-fast order: assets → config → sheet → checkpoint →
 |---|---|---|
 | `main.py` (327 L) | CLI, fail-fast order, sheet auto-discovery, logging, summary | the only entry point |
 | `config.py` (689 L) | **every** path, threshold and source table; `ConfigError`; `load_env_file()` | enforces "one config field per threshold" |
-| `pipeline.py` (1551 L) | per-row flow, download budget, upload gate (S14), `BatchRunner`, all writers | the orchestration core — largest file |
-| `model_matching.py` (919 L) | the two recognition rules, glued/spaced identities, truncation, colour/variant facts | the strictness of the whole product lives here |
+| `pipeline.py` (1588 L) | per-row flow, download budget, upload gate (S14), `BatchRunner`, all writers | the orchestration core — largest file |
+| `model_matching.py` (951 L) | the two recognition rules, glued/spaced identities, truncation, colour/variant facts, variant separation | the strictness of the whole product lives here |
+| `variant_terms.py` (247 L) | the variant vocabulary: colour families + neutral carve-out, model-code letter tails | one rule, no brand/suffix/colour tables |
+| `textnorm.py` (28 L) | `normalize_text` / `normalize_key`, the leaf both matching and variants normalize through | no import cycle, punctuation never hides a colour |
 | `image_quality.py` (575 L) | every pixel gate (S6–S9, S13) + the two scoped rescues | what may be published at all |
 | `url_filters.py` (547 L) | URL-level rules S4/S5/S11, brand registry, official-host check, size rewrites | cheapest gates run first |
 | `sources.py` (490 L) | the S15 fallback chain, robots check, sitemap cache, candidate ranking | the "sheet URL is wrong" path |
-| `page_verification.py` (414 L) | S1/S2/S3 + colour/variant flags | the "is this really that model" proof |
+| `page_verification.py` (413 L) | S1/S2/S3 + the size/type flags + the colour-conflict rejection | the "is this really that model" proof |
 | `compositing.py` (403 L) | isolation, 1:1 canvas, unsharp, header-safe template compositing, JPEG export | the visual output contract |
-| `protocols.py` (82 L) | `PageFetcher`, `ImageFetcher`, `ImageHost`, `SourceSearcher` | the seam that keeps the 263 tests offline |
+| `protocols.py` (82 L) | `PageFetcher`, `ImageFetcher`, `ImageHost`, `SourceSearcher` | the seam that keeps the 308 tests offline |
 | `gallery_extractors/` (10 files) | one file per brand/format + `@register_extractor` registry | extractors only *find*; gates still run |
 | `csv_io.py` (284 L) | sheet reading, atomic writes, checkpoint, banner cache, slugs | every write goes through here |
 
@@ -147,7 +149,7 @@ Sheet auto-discovery (`resolve_input_path`) searches `input/`, `uploads/`, and t
 CSV/XLSX sheet ──read_input──▶ ProductTask(index, title, source_urls)
    │  merge_duplicate_titles folds same-title rows
    ▼
-build_model_keys(title) ──▶ ModelKeys(tokens, identities, colours, variant_facts)
+build_model_keys(title) ──▶ ModelKeys(tokens, identities, colours, variant_facts, colour_word)
    │  no model-like token ⇒ reject "4.1", row FAILED, nothing else runs
    ▼
 visit each sheet URL in order ──▶ verify_page (S1/S2/S3) ──▶ PageMatchResult(strength)
@@ -178,7 +180,7 @@ ProductResult → write_output_csvs → digimall/alfamall CSVs, failed CSV, run 
 | | |
 |---|---|
 | **Framework** | `pytest`, `testpaths = ["tests"]`, `addopts = "-q"` |
-| **Measured this session** | **263 passed, 0 failed, 0 skipped** (after the 2026-10-07 S7/probe/JSON fixes) |
+| **Measured this session** | **308 passed, 0 failed, 0 skipped** (after the 2026-10-07 variant-separation work) |
 | **Coverage** | not measured — no coverage tool is configured |
 | **Test types** | unit (pure parsers, gates) + end-to-end (`test_pipeline_end_to_end.py`, 51 tests) with `conftest.py` fakes |
 | **Network** | none — `FakePageFetcher`, `FakeImageFetcher`, `FakeImageHost`, `FakeSourceSearcher`, `LocalPathHost` + 10 HTML fixtures + synthetic images |
@@ -230,7 +232,7 @@ Measured: a dry run printed `failed : 1   (see failed_products.csv)` while `cat 
 |---|---|
 | `AGENTS.md:37`, `README.md:451` | 248 tests |
 | `plan.md:754`, `tasks/plan.md:415`, `tasks/todo.md:123`, `VERIFICATION.md:8` | 213 passed |
-| **Measured** | **263 passed** |
+| **Measured** | **308 passed** |
 
 `tasks/todo.md:123` is the worst case — it is the *standing verification* instruction: "`pytest tests -q` # must stay 213 passed". Following that instruction literally means treating 42 legitimate new tests as a regression.
 
@@ -282,8 +284,8 @@ git fetch origin --prune          → no output; HEAD == origin/main == main == 
 git ls-files | wc -l              → 196  (89 excluding .agents/)
 python3 -m venv .venv && pip install -e ".[dev]"   → success (deps were NOT pre-installed)
 python3 -m ruff check .           → All checks passed!
-python3 -m mypy --strict .        → Success: no issues found in 39 source files
-python3 -m pytest tests           → 263 passed (after 2026-10-07 fixes)
+python3 -m mypy --strict .        → Success: no issues found in 42 source files
+python3 -m pytest tests           → 308 passed (after 2026-10-07 fixes)
 python3 main.py --input sample_input.csv --dry-run --limit 1 --workers 1
                                   → exit 0; all 7 stages ran; row failed loudly
                                     ("no page matched this model"); artefacts written;

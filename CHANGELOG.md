@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **A page showing another colourway is no longer accepted as this product.** The colour a
+  product comes in is part of its identity, so `... 7 Cu Ft Burgundy (9160-WB-GD)` and its
+  `Pearl Red` twin are different products and need different pictures - the wrong colour costs
+  the company a penalty. `match_product` now rejects a page whose primary colour differs from
+  the title's (S1 rule `colour_conflict`, its own line in `decisions.jsonl`), the relaxed
+  fallback tier (`S15.relaxed`) never rescues such a page, and the row keeps looking for the
+  colour it was asked for. This supersedes the 2026-10-05 "flag it and publish" rule, so a sheet
+  URL serving the wrong colour now **fails the row** instead of publishing it with a note.
+  Owner decision 2026-10-07; regressions `test_a_page_showing_another_colour_is_rejected`,
+  `test_a_different_colour_fails_the_row_instead_of_publishing_it`.
+- **A model code's letter tail no longer counts as exact proof.** `HRF-538 IFGA` and
+  `HRF-538 IFPA` are different variants of one model, so a page printing another tail is now
+  *tolerated* rather than exact: it is deferred while the row looks for a page that prints its
+  own model, published only as a flagged last resort, and the note names both tails
+  (`page shows variant IFPA, sheet model is IFGA`). Optional feature letters still never
+  discriminate (`DSD 4890 Silver SD` ≡ `DSD 4890 Silver`), a page that omits the tail is judged
+  exactly as before, and `9160-WB` / `9160LF` stay the same product because there the tail is
+  part of the code itself. Owner decision 2026-10-07; regressions
+  `test_a_page_printing_another_variant_suffix_is_a_last_resort_not_proof`,
+  `test_a_page_that_omits_the_suffix_is_judged_as_before`.
 - **A tolerated (different-variant) page can no longer top up a partially-solved row.** Stage 3b
   consumed the deferred last-resort page whenever the row had *fewer than `min_required_images`*
   pictures, so a row with 1 correct retailer image got 4 different-colour official photos mixed in
@@ -35,6 +55,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mirroring the DOM path's `_looks_like_image` guard.
 
 ### Added
+- **`image_pipeline/variant_terms.py`** - the variant vocabulary and its pure rules: colour
+  families with a neutral (achromatic) carve-out, `suffix_agreement`, `colour_word_conflict`.
+  It holds no brand, suffix or colour-code tables, so a colour the vocabulary has never seen
+  simply fails open instead of guessing. Measured against the shipped catalogue (752 distinct
+  titles): 269 of the 304 same-code colour pairs are now separated, and every pair still kept
+  is a deliberate finish tolerance (`chrome` ≡ `silver`, `graphite` ≡ `grey`).
+- **`image_pipeline/textnorm.py`** - `normalize_text` / `normalize_key` moved out of
+  `model_matching` into a leaf module, so the variant vocabulary can normalize punctuation
+  (`(9149-WB)-Pearl Red` now reveals *both* colour words) without an import cycle.
+- **One config field for the whole rule: `variant_separation_enabled`** (replaces
+  `check_colour_match`), plus `ModelKeys.colour_word`, which carries the title's own colour word
+  so the matcher never has to re-parse a title it already cleaned.
 - **The model in the title now outranks a wrong sheet link.** A page that matches only because
   a trailing letter was tolerated (live: the row `Dawlance Semi Automatic Washing Machine 10kg
   (DW-7500C)` carries the Dawlance link that prints `DW-7500`; the C-slugged URL 404s) is no

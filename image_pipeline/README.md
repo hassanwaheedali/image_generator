@@ -177,14 +177,35 @@ Recognition is deliberately simple — two rules, no confidence scoring:
    own family letters (`Haier HSF-538 IFGA` is **rejected**), and another manufacturer's domain can
    never satisfy the row.
 
-**Colour and variant differences never reject a row** — they annotate it. `run_report.csv` Note gets
-`colour mismatch (flagged): title says gold, page says black` or
-`variant mismatch (flagged): capacity_kg 10 (title) vs 12 (page)`, and the row is still published.
-Photos are never rejected for colour either; colour is only used to **order** them (matching-colour
-photos first). This is a deliberate customer decision: the sheet's source URLs are chosen by hand, so
-the pipeline stays simple and reports instead of second-guessing.
+**A different colour is a different product** (owner decision 2026-10-07, superseding the
+2026-10-05 "flag it and publish" rule). A page that carries the model's own code but another
+colourway - `Pearl Red` for a `Burgundy (9160-WB-GD)` row - is **rejected** as rule
+`colour_conflict`, because publishing the wrong colour costs the company a penalty. The rule
+compares the two *primary* colour words, so a longer spelling of the same colour (`Pearl
+Burgundy`, `Champagne Gold`) still matches, two names of one finish do not count as a
+difference (`chrome` ≡ `silver`, `graphite` ≡ `grey`), and a page that names no colour at all
+is never rejected for one. Two chromatic words of different families (`burgundy` vs `red`,
+`copper` vs `gold`) are treated as different products, because that is what the catalogue does.
 
-What stays strict is the image side: S2–S15 below decide what may be published at all.
+**A model code's letter tail is a variant, not proof.** `HRF-538 IFGA` and `HRF-538 IFPA` are
+different variants of one model, so a page printing another tail is no longer an exact match:
+it becomes a *tolerated* match, which the row defers and - if nothing better turns up -
+publishes flagged (`page shows variant IFPA, sheet model is IFGA`), exactly like the
+dropped-trailing-letter case below. Two guards keep this from over-reaching: a page that
+**omits** the tail is judged as before, and optional feature letters never discriminate
+(`DSD 4890 Silver SD` ≡ `DSD 4890 Silver`). `9160-WB` and `9160LF` stay the same product - there
+the letters are part of the code, not a glued-on tail.
+
+Both signals share **one switch**: `config.variant_separation_enabled` (`False` restores
+colour-blind, tail-blind matching). The vocabulary lives in `variant_terms.py` and holds no
+brand, suffix or colour-code tables; a colour it has never seen simply fails open.
+
+**Size and type differences still never reject a row** - they annotate it. `run_report.csv`
+Note gets `variant mismatch (flagged): capacity_kg 10 (title) vs 12 (page)`, and the row is
+still published. Photos are never rejected for colour either; colour is only used to **order**
+them (matching-colour photos first).
+
+What stays strict is the image side: S2-S15 below decide what may be published at all.
 
 ### When the sheet's URL is wrong: the fallback source chain
 
@@ -450,7 +471,7 @@ The three built-in extractors are `dawlance.py` (MDM code from the page URL), `h
 ```bash
 python3 -m ruff check .          # lint (must print: All checks passed!)
 python3 -m mypy --strict .       # types (must print: Success: no issues found)
-python3 -m pytest tests -q        # 263 tests, fakes only, no network
+python3 -m pytest tests -q        # 308 tests, fakes only, no network
 python3 ../verification/smoke_test_10_products.py   # the 10 real rows, every branch (offline)
 ```
 
@@ -550,7 +571,7 @@ Every rule is one named place. Nothing is hard-coded in a stage function.
 | what counts as an ad/badge/banner URL | `url_filters.py` | `BAD_URL_KEYWORDS`, `MULTI_WORD_BAD_KEYWORDS` |
 | brand list / official domains | `url_filters.py` | `KNOWN_BRANDS`, `DOMAIN_TO_BRAND`, `BRAND_DISPLAY` |
 | the model-matching rules | `model_matching.py` | `match_product()` (model key → brand+code), `truncation_variants()`, `brand_match_cores()` |
-| colour/variant behaviour | `config.py` + `page_verification.py` | `check_colour_match`, `flag_variant_mismatch` (flags only - never a rejection) |
+| variant separation (colour, code tail) | `config.py` + `variant_terms.py` | `variant_separation_enabled` (colour rejects, a tail demotes to tolerated), `flag_variant_mismatch` (size/type flags only) |
 | the `robots.txt` courtesy check | `config.py` + `sources.py` | `respect_robots`, `RobotsCache` (fallback crawling only; sheet URLs are always fetched) |
 | image gates (size, border, QR, bytes) | `config.py` | the S6/S7/S8/S9/S13 blocks, one field per threshold |
 | compositing (isolation, 1:1, margins) | `config.py` | the compositing block (`product_fill_ratio`, `padding_px`, `template_*`, `unsharp_*`) |
