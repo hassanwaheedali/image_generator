@@ -250,13 +250,19 @@ def test_the_title_colour_can_be_supplied_directly() -> None:
     assert not colour_word_conflict(None, "dawlance avante refrigerator 7 cu ft red 9160 wb gd")
     assert not colour_word_conflict("", "dawlance avante refrigerator 7 cu ft red 9160 wb gd")
 
-def test_a_brand_published_colourway_name_is_recognised() -> None:
-    """PEL SGD 425 (eshop.pel.com.pk, 2026-10-07) sells Marine Impression / Red Blaze /
-    Maroon Blaze.  The marketing name must read as a colour word so the three separate."""
-    title = "PEL Straight 3 Taps Glass Door Water Dispenser (PWD-425-GD)-Marine Impression"
-    assert primary_colour_word(title) == "marine impression"
-    assert colour_word_conflict("marine impression", "PEL Water Dispenser Red Blaze")
-    assert colour_word_conflict("marine impression", "PEL Water Dispenser Maroon Blaze")
-    assert not colour_word_conflict("marine impression", "PEL Water Dispenser Marine Impression")
-    # the two red-family Blaze names are different chromatic words -> separated
+def test_an_unknown_colourway_is_separated_dynamically_not_by_a_table() -> None:
+    """The marine-impression vocabulary line is gone (2026-10-07): the positional
+    name-word rule separates unknown colourways on its own, with no per-name entry."""
+    from model_matching import build_model_keys, match_product
+
+    row = "PEL Straight 3 Taps Glass Door Water Dispenser (PWD-425-GD)-Marine Impression"
+    keys = build_model_keys(row)
+    assert not keys.colour_word                      # not a known colour any more
+    for other in ("Red Blaze", "Maroon Blaze"):
+        page = "PEL Straight 3 Taps Glass Door Water Dispenser (PWD-425-GD)-" + other
+        verdict = match_product(keys=keys, brand="pel", strong_text=page)
+        assert not (verdict.matched and not verdict.tolerated), other  # never a clean match
+    same = match_product(keys=keys, brand="pel", strong_text=row)
+    assert same.matched and not same.tolerated       # identical name words -> exact
+    # and the known chromatic pair still conflicts through the colour rule
     assert colour_word_conflict("red", "PEL Water Dispenser Maroon Blaze")

@@ -126,4 +126,16 @@ per-brand/per-product tables — attributes are positional.
 - Should a series veto *reject* or *demote to flagged*? Recommend demote (safe), reject only for colour.
 - Confirm removal of the `marine impression` line once the slot covers it.
 
-## 8. EXECUTE / REVIEW — filled in after approval.
+## 8. EXECUTE / REVIEW (filled 2026-10-07)
+
+Executed on `arena/79280a67-image-generator` with TDD: `92f61b8` tasks 1-2 · `48fb99e` task 3 ·
+`9184c58` task 4 · task 5 (this commit).  Gates green at every checkpoint (319 tests, ruff +
+mypy --strict clean, radon 45).  The `marine impression` vocabulary line was removed once the
+name-word veto covered it (zero per-name entries).  Open-question resolutions: fuzzy threshold
+0.85; series veto **demotes** to flagged (not rejects); marine line removed.
+
+**Review:** all §4 success criteria verified - Marine/Red/Maroon and Ocean Mist separated with no
+table; Daimond/Cuby/Ruby separated; Avante+~Avante Plus and 9160-WB~9160LF not rejected; 0 false
+rejects on the same-colour control; separation 274 same-code pairs (>= before).  Remaining known
+gap: multi-variant Shopify pages whose *title names no colour* (the colour lives in `?variant=` /
+the body spec row) - not covered by this change; see `variant-separation-plan.md` residuals.

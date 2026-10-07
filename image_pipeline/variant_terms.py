@@ -58,11 +58,6 @@ COLOUR_FAMILIES: dict[str, tuple[str, ...]] = {
     "pink": ("pink", "rose"),
     "orange": ("orange", "amber"),
     "yellow": ("yellow",),
-    # Brand-published colourway names with no plain colour word behind them.
-    # Each is its own family so it only ever matches itself - the maker's own
-    # name is the safest identity it can carry (PEL SGD 425, eshop.pel.com.pk,
-    # 2026-10-07).  One line per name, and an unknown name still fails open.
-    "marine": ("marine impression",),
 }
 
 #: The only spelling variants in the vocabulary.  ``gray`` and ``grey`` are the same

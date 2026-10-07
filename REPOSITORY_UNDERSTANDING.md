@@ -67,7 +67,7 @@ main.py  (CLI · fail-fast order: assets → config → sheet → checkpoint →
 | `sources.py` (490 L) | the S15 fallback chain, robots check, sitemap cache, candidate ranking | the "sheet URL is wrong" path |
 | `page_verification.py` (413 L) | S1/S2/S3 + the size/type flags + the colour-conflict rejection | the "is this really that model" proof |
 | `compositing.py` (403 L) | isolation, 1:1 canvas, unsharp, header-safe template compositing, JPEG export | the visual output contract |
-| `protocols.py` (82 L) | `PageFetcher`, `ImageFetcher`, `ImageHost`, `SourceSearcher` | the seam that keeps the 308 tests offline |
+| `protocols.py` (82 L) | `PageFetcher`, `ImageFetcher`, `ImageHost`, `SourceSearcher` | the seam that keeps the 319 tests offline |
 | `gallery_extractors/` (10 files) | one file per brand/format + `@register_extractor` registry | extractors only *find*; gates still run |
 | `csv_io.py` (284 L) | sheet reading, atomic writes, checkpoint, banner cache, slugs | every write goes through here |
 
@@ -180,7 +180,7 @@ ProductResult → write_output_csvs → digimall/alfamall CSVs, failed CSV, run 
 | | |
 |---|---|
 | **Framework** | `pytest`, `testpaths = ["tests"]`, `addopts = "-q"` |
-| **Measured this session** | **308 passed, 0 failed, 0 skipped** (after the 2026-10-07 variant-separation work) |
+| **Measured this session** | **319 passed, 0 failed, 0 skipped** (after the 2026-10-07 probabilistic-matching work) |
 | **Coverage** | not measured — no coverage tool is configured |
 | **Test types** | unit (pure parsers, gates) + end-to-end (`test_pipeline_end_to_end.py`, 51 tests) with `conftest.py` fakes |
 | **Network** | none — `FakePageFetcher`, `FakeImageFetcher`, `FakeImageHost`, `FakeSourceSearcher`, `LocalPathHost` + 10 HTML fixtures + synthetic images |
@@ -232,7 +232,7 @@ Measured: a dry run printed `failed : 1   (see failed_products.csv)` while `cat 
 |---|---|
 | `AGENTS.md:37`, `README.md:451` | 248 tests |
 | `plan.md:754`, `tasks/plan.md:415`, `tasks/todo.md:123`, `VERIFICATION.md:8` | 213 passed |
-| **Measured** | **308 passed** |
+| **Measured** | **319 passed** |
 
 `tasks/todo.md:123` is the worst case — it is the *standing verification* instruction: "`pytest tests -q` # must stay 213 passed". Following that instruction literally means treating 42 legitimate new tests as a regression.
 
@@ -285,7 +285,7 @@ git ls-files | wc -l              → 196  (89 excluding .agents/)
 python3 -m venv .venv && pip install -e ".[dev]"   → success (deps were NOT pre-installed)
 python3 -m ruff check .           → All checks passed!
 python3 -m mypy --strict .        → Success: no issues found in 42 source files
-python3 -m pytest tests           → 308 passed (after 2026-10-07 fixes)
+python3 -m pytest tests           → 319 passed (after 2026-10-07 fixes)
 python3 main.py --input sample_input.csv --dry-run --limit 1 --workers 1
                                   → exit 0; all 7 stages ran; row failed loudly
                                     ("no page matched this model"); artefacts written;
