@@ -1525,6 +1525,45 @@ def test_a_tolerated_sheet_page_is_published_with_a_flag_when_nothing_else_match
     assert "published as last resort" in decisions
 
 
+def test_a_row_with_one_exact_image_is_never_topped_up_by_the_tolerated_page(
+    tmp_path: Path,
+) -> None:
+    """Owner 2026-10-07: 1 correct image beats a mixed gallery.
+
+    The sheet lists an exact-match page that yields a single clean photo, then the wrong-link
+    (tolerated, different-variant) page.  The tolerated page must stay deferred - the row
+    publishes its one correct picture as PARTIAL/flagged instead of mixing in four
+    different-variant photos to hit the quota.
+    """
+    config = live_config(tmp_path)
+    exact_one = "https://www.surmawala.pk/products/dawlance-dw-7500c-single"
+    exact_url = "https://cdn.surmawala.pk/p/dw7500c-single-1.png"
+    pages = {
+        exact_one: (
+            "<html><head><title>Dawlance Semi Automatic Washing Machine DW-7500C - 10Kg"
+            "</title></head><body><h1>Dawlance DW-7500C</h1>"
+            f"<div class='product-gallery'><img src=\"{exact_url}\"></div></body></html>"
+        ),
+        WRONG_LINK: _dawlance_wrong_link_page(),
+    }
+    images = {
+        exact_url: png_bytes(_gallery_image(1)),
+        **{url: png_bytes(_gallery_image(n)) for n, url in enumerate(DAWLANCE_LO_DOWNLOADS, 1)},
+    }
+    deps, _, _, _ = build_deps(tmp_path, pages, images)
+    result, accepted = process_product(
+        task(0, WRONG_LINK_TITLE, (exact_one, WRONG_LINK)), deps, config
+    )
+
+    assert len(accepted) == 1
+    assert accepted[0].source_url == exact_url
+    assert not any("dawlance.com.pk/media/resize" in i.source_url for i in accepted)
+    assert result.status is Status.PARTIAL              # one image < min_required_images
+    decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
+    assert "deferred as last resort" in decisions       # the wrong link was deferred...
+    assert "published as last resort" not in decisions  # ...and never consumed to top up
+
+
 def test_the_tolerated_spelling_can_be_switched_off(tmp_path: Path) -> None:
     """With the switch off the tolerated page is the answer, exactly as before this rule."""
     config = live_config(tmp_path, tolerated_spelling_as_last_resort=False)

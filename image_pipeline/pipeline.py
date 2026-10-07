@@ -492,12 +492,14 @@ def process_product(
     # ---- stage 3b: the tolerated spelling, only if nothing better exists -----
     # The sheet's link is sometimes the wrong page for the model in its title (live:
     # DW-7500C row pointing at a page printing DW-7500).  Such a page is published with a
-    # flag rather than thrown away - but only after every source above failed to find one
-    # that prints the model.  Owner decision 2026-10-06.
+    # flag rather than thrown away - but ONLY when every source above found nothing.  If any
+    # exact-match page already yielded even one picture, publishing that single correct image
+    # (PARTIAL, flagged) beats topping the row up with a different-variant page's photos:
+    # fewer correct images are always better than a mixed, wrong gallery (owner 2026-10-07).
     for page_url, label, is_fallback in tolerated_pages:
         if cancel_event is not None and cancel_event.is_set():
             break
-        if len(accepted) >= config.min_required_images:
+        if accepted:
             break
         pages_tried += 1
         outcome = _visit_page(

@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **A tolerated (different-variant) page can no longer top up a partially-solved row.** Stage 3b
+  consumed the deferred last-resort page whenever the row had *fewer than `min_required_images`*
+  pictures, so a row with 1 correct retailer image got 4 different-colour official photos mixed in
+  (live: DW-7500C). It now runs **only when the row found zero images**: 1 correct image publishes
+  as `PARTIAL` + flagged, and the tolerated page still rescues rows that found nothing.
+  Owner decision 2026-10-07; regression
+  `test_a_row_with_one_exact_image_is_never_topped_up_by_the_tolerated_page`.
 - **S7 no longer rejects genuine white-background studio shots whose product touches the frame
   edges.** Root cause: `border_is_clean` assumed the whole outer ring is background, so a tall
   appliance / top-down view (dark top deck + base crossing the top/bottom edges) split the ring
