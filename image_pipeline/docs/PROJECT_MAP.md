@@ -76,6 +76,7 @@ Every step writes its own line to `output/decisions.jsonl` (rule id + reason), a
 | S7.band | promo strip glued to an edge | `image_quality.strip_promo_band` | `test_image_quality.py` |
 | S7.seam | 1-2 px divider seam on an edge | `image_quality.trim_edge_seams` | `test_image_quality.py` |
 | S7.official | brand's own gallery shot that fills the frame | `image_quality.official_gallery_pass` (needs `CURATED_GALLERY_SOURCES` + `host_is_official`) | `test_image_quality.py`, `test_pipeline_end_to_end.py` |
+| S7.studio | universal: white studio shot whose product touches the edges, any host, 4 neutral corners | `image_quality.studio_background_pass` (`config.studio_background_rescue`) | `test_image_quality.py`, `test_pipeline_end_to_end.py` |
 | S8 | tiny / thumbnail images | `image_quality.is_large_enough` (`probe_verdict`) | `test_image_quality.py` |
 | S9 | QR codes / barcodes | `image_quality.is_qr_or_barcode` | `test_image_quality.py` |
 | S10 | duplicates inside one product | `dedup.ProductDedup` (+ `dedup_key`) | `test_dedup.py`, `test_url_filters.py` |
@@ -85,7 +86,7 @@ Every step writes its own line to `output/decisions.jsonl` (rule id + reason), a
 | S14 | half-published rows, local paths in a CSV | `pipeline.finalize_and_upload` | `test_pipeline_end_to_end.py` |
 | S15 | a fallback page that shows a *different* model | `sources.SourceChain` + `pipeline._visit_page(is_fallback=True)` | `test_sources.py`, `test_pipeline_end_to_end.py` |
 | S15.relaxed | a fallback page that only *probably* shows it (brand + number) - published **and flagged** (review CSV) | `model_matching.relaxed_page_match` | `test_model_matching.py`, `test_pipeline_end_to_end.py` |
-| S15.tolerated | a page that shows the model *without* our exact spelling (the sheet's dropped trailing letter) being taken as proof instead of a flagged last resort | `model_matching.match_product` (`tolerated`) + `pipeline._visit_page` (`defer_tolerated`) | `test_model_matching.py`, `test_page_verification.py`, `test_pipeline_end_to_end.py` |
+| S15.tolerated | a page that shows the model *without* our exact spelling (the sheet's dropped trailing letter) being taken as proof instead of a flagged last resort; stage-3b consumes it **only when the row found zero exact images** (never as a top-up) | `model_matching.match_product` (`tolerated`) + `pipeline._visit_page` (`defer_tolerated`) + stage-3b guard | `test_model_matching.py`, `test_page_verification.py`, `test_pipeline_end_to_end.py` |
 | `*.fetch` | page/asset that could not be downloaded | `pipeline._visit_page` error paths | `test_pipeline_end_to_end.py` |
 
 ## Where to look for a task

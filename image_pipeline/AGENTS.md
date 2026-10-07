@@ -34,7 +34,7 @@ python3 main.py --input sample_input.csv --workers 4        # real run (needs FR
 
 python3 -m ruff check .        # must print: All checks passed!
 python3 -m mypy --strict .     # must print: Success: no issues found
-python3 -m pytest tests -q     # 248 tests, fakes only, no network
+python3 -m pytest tests -q     # 263 tests, fakes only, no network
 ```
 
 Secrets: `FREEIMAGE_API_KEY` (and optional `FREEIMAGE_UPLOAD_URL`) come from the environment or from
@@ -66,6 +66,12 @@ variable always wins. **Never print, log, commit or echo the key value.**
 - **Never weaken `S1` / `S3` / `S7` or `page_verification.verify_page` to make a row pass.** A row that
   refuses to publish is the correct outcome when the page cannot be proven to show that model
   (accepted example: sheet row `H50S80EUX` whose URL serves `H50S80GUX`).
+  The `S7` studio-background rescue is *not* such a weakening: it accepts an image whose border
+  ring is dirty only when **all four corners are neutral studio white**
+  (`config.studio_background_rescue`, `studio_rescue_min_neutral_corners=4`) - the corners prove a
+  white backdrop while the product legitimately touches the frame edges.  A busy/lifestyle frame
+  never reaches four neutral corners at `corner_patch_ratio`, so it stays rejected (tests:
+  `test_white_corners_busy_middle_rejected`, `test_studio_rescue_can_be_switched_off`).
 - **Never publish a non-`http(s)` URL.** `finalize_and_upload` refuses `file://` on purpose.
 - **Never compare uploaded image bytes to the local finals** - freeimage.host re-encodes. Identify the
   uploaded picture back to its own local final with a 32x32 blurred grayscale fingerprint (live run

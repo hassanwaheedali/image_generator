@@ -295,6 +295,8 @@ back to the rule that kept or rejected it.
 | S5 | No ads / banners / badges / marketing graphics | `url_filters.has_bad_keyword()` | `test_cartridge_not_rejected_cart_rejected`, `test_silicon_not_rejected_icon_rejected`, `test_banner_with_digits_rejected` |
 | S6 | No banner-shaped images (`max/min > 3.5`) | `image_quality.has_extreme_aspect()` | `test_wide_strip_rejected` |
 | S7 | Clean background only (whole border ring + ≥2 neutral bright corners) | `image_quality.border_is_clean()`, `neutral_corner_count()` | `test_white_corners_busy_middle_rejected`, `test_neutral_corner_count` |
+| S7.studio | A white studio shot whose product touches the frame edges is accepted on **any** host when all 4 corners are neutral (`studio_background_rescue`, 4-corner bar) | `image_quality.studio_background_pass()` | `test_edge_touching_product_on_white_is_accepted`, `test_owner_washer_photo_is_accepted`, `test_studio_rescue_can_be_switched_off` |
+| S7.official | Official verified-page curated gallery shot that fills the frame (≥2 neutral corners) | `image_quality.official_gallery_pass()` | `test_studio_shot_that_fills_the_frame_is_accepted_everywhere`, `test_official_gallery_acceptance_still_rejects_a_coloured_scene` |
 | S8 | Minimum real size (short ≥180 px, long ≥350 px) | `image_quality.is_large_enough()` | `test_tiny_thumbnail_rejected` |
 | S9 | No QR / barcodes (filename token **and** real decode) | `image_quality.is_qr_or_barcode()` | `test_qr_rejected`, `test_qr_filename_token_rejected` |
 | S10 | De-dup **per product only** (state created inside `process_product`) | `dedup.ProductDedup` | `test_dedup_state_not_shared_across_products`, `test_dedup_state_not_shared_between_threads`, `test_same_image_resized_is_duplicate` |
@@ -304,7 +306,7 @@ back to the rule that kept or rejected it.
 | S14 | Nothing uploaded until the selection is final; **both platforms or neither**; banner appended **last** | `pipeline.finalize_and_upload()` | `test_ok_product_urls_are_real_images_then_banner`, `test_failed_product_uploads_nothing`, `test_partial_product_gets_one_banner_per_platform` |
 | — | **The template's logo band is never touched** (paste box starts below `header_safe_margin`, template composited on top, its artwork preserved) | `compositing.apply_template()`, `template_content_box()`, `header_safe_margin()` | `test_logo_band_is_byte_identical_after_compositing`, `test_product_is_never_pasted_above_the_safe_margin`, `test_template_decoration_inside_the_content_area_survives`, `test_real_asset_templates_protect_their_band` (mutation-verified) |
 
-| S15.tolerated | A page that shows the model *without* our exact spelling (the sheet's dropped trailing letter) being published as if it proved the model | `model_matching.match_product` (`tolerated`) + `pipeline._visit_page` | `test_a_tolerated_spelling_is_not_an_exact_match`, `test_the_title_model_wins_over_a_wrong_sheet_link`, `test_a_tolerated_sheet_page_is_published_with_a_flag_when_nothing_else_matches` |
+| S15.tolerated | A page that shows the model *without* our exact spelling (the sheet's dropped trailing letter) being published as if it proved the model; used **only when the row found zero exact images** — never to top up a partially-solved row | `model_matching.match_product` (`tolerated`) + `pipeline._visit_page` + stage-3b guard | `test_a_tolerated_spelling_is_not_an_exact_match`, `test_the_title_model_wins_over_a_wrong_sheet_link`, `test_a_tolerated_sheet_page_is_published_with_a_flag_when_nothing_else_matches`, `test_a_row_with_one_exact_image_is_never_topped_up_by_the_tolerated_page` |
 | S15 | A page found by search is only a *candidate*: it must pass the same `verify_page` with the **sheet's** model before any image URL is read | `sources.SourceChain.find_candidates()` + `pipeline._visit_page()` | `test_fallback_candidate_is_verified_before_any_image_is_used`, `test_candidate_is_only_a_page_never_an_image`, `test_fallback_recovers_a_row_and_is_labelled_in_the_output` |
 
 **Zero-tolerance guarantees** (each proven by a test): no image from description/article content
@@ -448,7 +450,7 @@ The three built-in extractors are `dawlance.py` (MDM code from the page URL), `h
 ```bash
 python3 -m ruff check .          # lint (must print: All checks passed!)
 python3 -m mypy --strict .       # types (must print: Success: no issues found)
-python3 -m pytest tests -q        # 248 tests, fakes only, no network
+python3 -m pytest tests -q        # 263 tests, fakes only, no network
 python3 ../verification/smoke_test_10_products.py   # the 10 real rows, every branch (offline)
 ```
 
