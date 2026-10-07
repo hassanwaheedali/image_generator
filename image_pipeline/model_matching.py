@@ -24,6 +24,7 @@ from functools import lru_cache
 from urllib.parse import unquote, urlsplit
 
 from models import ModelKeys
+from textnorm import WHITESPACE_RE, normalize_key, normalize_text
 from variant_terms import COLOUR_FAMILIES, suffix_agreement
 
 # --------------------------------------------------------------------------- #
@@ -47,9 +48,6 @@ _NOISE_TOKEN_RES: tuple[re.Pattern[str], ...] = (
 
 _PREFIX_RE = re.compile(r"^\d*[a-z]+")
 _CODE_RUN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._\-]*[A-Za-z0-9]|[A-Za-z0-9]")
-NON_ALNUM_RE = re.compile(r"[^0-9a-z]+")
-WHITESPACE_RE = re.compile(r"\s+")
-_ZERO_WIDTH_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\ufeff]")
 
 #: Words that end a model tail (they describe the product, not the model).
 TAIL_STOPWORDS: frozenset[str] = frozenset(
@@ -123,19 +121,8 @@ TYPE_AXES: dict[str, dict[str, tuple[str, ...]]] = {
 
 
 # --------------------------------------------------------------------------- #
-# basic normalisation
+# basic normalisation lives in :mod:`textnorm`, shared with variant_terms
 # --------------------------------------------------------------------------- #
-def normalize_text(text: str) -> str:
-    """Lowercase, strip zero-width junk, turn non-alphanumeric runs into spaces."""
-    cleaned = _ZERO_WIDTH_RE.sub("", text)
-    return NON_ALNUM_RE.sub(" ", cleaned.lower()).strip()
-
-
-def normalize_key(key: str) -> str:
-    """Bare alphanumerics of a key, lowercased."""
-    return NON_ALNUM_RE.sub("", key.lower())
-
-
 @lru_cache(maxsize=4096)
 def _compiled(core: str) -> re.Pattern[str]:
     """Boundary-anchored, separator-tolerant pattern over an alphanumeric core."""

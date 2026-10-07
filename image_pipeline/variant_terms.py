@@ -12,7 +12,9 @@ different variant; a page that omits it says nothing.
 *the colour word* - the last colour the text names ("Dawlance **Chrome** ...
 Hairline **Black** (9178-WB)" sells black; "Chrome" is the series).  Compared as a
 **word**, never as a family, because ``burgundy`` and ``red`` share the ``red``
-family and must still be told apart.
+family and must still be told apart - with one exception: two *finish* names inside
+one family (``chrome`` / ``silver`` / ``graphite`` / ``grey``) are the same colour,
+because makers use those words as series names rather than colourways.
 
 Both signals fail open: a suffix or a colour that cannot be read is *no opinion*,
 never a rejection, so an unknown colourway can cost a protection but can never
@@ -20,16 +22,18 @@ reject a correct page.  Measured on the owner's 752-title catalogue
 (`docs/riper/variant-colour-corpus-report.md`): 280/298 same-code/different-colour
 pairs separated, 0 false rejects.
 
-Nothing in this module imports from the pipeline - it is data plus pure functions,
-so it can never take part in an import cycle with :mod:`model_matching`.  Text
-arguments are matched case-insensitively and tolerate any separators; the pipeline
-passes text already run through ``model_matching.normalize_text``.
+Nothing here imports from the pipeline - it is data plus pure functions, so it can
+never take part in an import cycle with :mod:`model_matching`.  Text arguments are
+normalized internally (:mod:`textnorm`), so raw titles and page text can be passed
+straight in.
 """
 
 from __future__ import annotations
 
 import re
 from typing import Literal
+
+from textnorm import normalize_text
 
 # --------------------------------------------------------------------------- #
 # colour vocabulary (moved here verbatim from model_matching, plan section 3.6)
@@ -58,10 +62,19 @@ COLOUR_FAMILIES: dict[str, tuple[str, ...]] = {
 #: colour written two ways, so they must never count as a variant difference.
 SPELLING_ALIASES: dict[str, str] = {"gray": "grey"}
 
+#: Achromatic words: they describe the *finish*, not the colourway.  Two of them inside
+#: one family are the same colour for our purposes (``chrome`` / ``silver`` / ``graphite``
+#: / ``grey``), which matters because makers also use them as series names - "Dawlance
+#: **Chrome** FH Freezer-On-Top" names no colour at all.  Two *chromatic* names inside one
+#: family are still different products (``burgundy`` vs ``red``, ``copper`` vs ``gold``).
+NEUTRAL_COLOURS: frozenset[str] = frozenset(
+    {"white", "pearl", "ivory", "cream", "beige", "black", "grey", "silver", "steel", "chrome",
+     "graphite"}
+)
+
 #: Verdicts of :func:`suffix_agreement`, best first.
 SuffixVerdict = Literal["same", "omitted", "different"]
 
-_WHITESPACE_RE = re.compile(r"\s+")
 _ALPHA_TAIL_RE = re.compile(r"^(.*\d)([a-z]+)$")
 
 #: Every known colour word, longest first so ``off white`` is found before ``white``.
@@ -81,9 +94,40 @@ def _canonical(word: str) -> str:
     return SPELLING_ALIASES.get(word, word)
 
 
+#: Canonical colour word -> its family, so two names can be recognised as one colour.
+_FAMILY_OF: dict[str, str] = {
+    _canonical(synonym): family
+    for family, synonyms in COLOUR_FAMILIES.items()
+    for synonym in synonyms
+}
+
+
+def _is_chromatic(word: str) -> bool:
+    """True for a word that names a colour rather than a finish."""
+    return word not in NEUTRAL_COLOURS
+
+
+def _same_colour(one: str, other: str) -> bool:
+    """Whether two colour words describe the same picture.
+
+    Equal words always do.  Inside one family, two *chromatic* names do not
+    (``burgundy`` vs ``red`` is exactly the pair that must be told apart), while two
+    finish names do (``chrome`` vs ``grey``).  Across families, never.
+    """
+    if one == other:
+        return True
+    if _FAMILY_OF.get(one) != _FAMILY_OF.get(other):
+        return False
+    return not (_is_chromatic(one) and _is_chromatic(other))
+
+
 def _padded(text: str) -> str:
-    """Lowercase, single-spaced, space-padded - so words can be matched exactly."""
-    return f" {_WHITESPACE_RE.sub(' ', text.lower()).strip()} "
+    """Normalize and space-pad, so colour words can be matched exactly.
+
+    Callers may pass raw text: ``(9149-WB)-Pearl Red`` has to reveal ``pearl`` just as
+    the normalized spelling does, or a colour is silently invisible.
+    """
+    return f" {normalize_text(text)} "
 
 
 # --------------------------------------------------------------------------- #
@@ -123,20 +167,29 @@ def primary_colour_word(text: str) -> str | None:
 
 
 def primary_colour_conflict(title_text: str, page_text: str) -> bool:
-    """True when the page names colours and the title's own colour is not one of them.
+    """True when the page names colours and its own colour is not the title's.
 
-    Deliberately one-sided: only the title's colour has to be found on the page, so a
-    spec page listing the whole range ("available in white silver black") is not a
-    contradiction, and a page that names no colour at all is not either - omission
-    never penalises.
+    Two steps, both deliberately forgiving:
+
+    1. if the page mentions the title's colour *anywhere*, there is no conflict - a spec
+       page listing the whole range ("available in white silver black") is not a
+       contradiction, and neither is a page that names no colour at all, because
+       omission never penalises;
+    2. otherwise the verdict comes from the page's **primary** colour, not from any word
+       it happens to contain.  Comparing against every word would let a series name
+       ("Dawlance **E Chrome** ... Metallic Gold") pose as compatible with a grey row,
+       because ``chrome`` sits in the grey family.
+
+    Whether two words are the same colour is :func:`_same_colour`.
     """
     title_word = primary_colour_word(title_text)
     if title_word is None:
         return False
     page_words = colour_words(page_text)
-    if not page_words:
+    if not page_words or title_word in page_words:
         return False
-    return title_word not in page_words
+    page_word = primary_colour_word(page_text)
+    return page_word is not None and not _same_colour(title_word, page_word)
 
 
 # --------------------------------------------------------------------------- #

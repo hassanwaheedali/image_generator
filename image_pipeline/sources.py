@@ -38,8 +38,9 @@ from urllib.parse import quote_plus, urlsplit, urlunsplit
 
 from config import PipelineConfig
 from csv_io import atomic_write_text
-from model_matching import normalize_key, truncation_variants
+from model_matching import truncation_variants
 from models import ModelKeys, PageCandidate, SourceSearchReport
+from textnorm import normalize_key
 from url_filters import is_excluded_host
 
 LOG = logging.getLogger("pipeline.sources")

@@ -117,6 +117,20 @@ def test_colour_words_returns_every_colour_named() -> None:
     )
 
 
+def test_punctuation_never_hides_a_colour_word() -> None:
+    """The catalogue writes ``(9149-WB)-Pearl Red`` - the dash must not swallow ``pearl``.
+
+    Callers should not have to remember to normalize first: a colour word that cannot be
+    seen is a protection silently lost.
+    """
+    raw = "Dawlance Avante Refrigerator 9 Cu Ft (9149-WB)-Pearl Red"
+    assert primary_colour_word(raw) == "red"
+    assert colour_words(raw) == frozenset({"pearl", "red"})
+    assert primary_colour_conflict(
+        "Dawlance Avante Refrigerator 9 Cu Ft (9149-WB)-Pearl Burgundy", raw
+    )
+
+
 # --------------------------------------------------------------------------- #
 # primary_colour_conflict
 # --------------------------------------------------------------------------- #
@@ -129,6 +143,42 @@ def test_burgundy_and_red_conflict() -> None:
     assert primary_colour_conflict(title, page)
 
 
+def test_finish_names_inside_one_family_are_not_a_variant_difference() -> None:
+    """``Chrome``/``silver``/``graphite``/``grey`` are one family of finishes.
+
+    The catalogue uses "Chrome" as a *series* name ("Dawlance **Chrome** FH ..."), so a
+    title whose only colour word is ``chrome`` has not named a colourway at all.  Treating
+    that as a contradiction would reject correct pages, so within one family only two
+    *chromatic* names differ.
+    """
+    assert not primary_colour_conflict(
+        "dawlance chrome fh freezer on top refrigerator 12 cu ft 9178 wb",
+        "dawlance e chrome freezer 14 cu ft metallic grey 9178 wb",
+    )
+    assert not primary_colour_conflict(
+        "dawlance refrigerator 12 cu ft 9178 wb platinum silver",
+        "dawlance refrigerator 12 cu ft 9178 wb graphite",
+    )
+
+
+def test_two_chromatic_names_inside_one_family_do_conflict() -> None:
+    """The pairs the owner must never see mixed: burgundy/red, maroon/red, copper/gold."""
+    assert primary_colour_conflict("refrigerator 7 cu ft copper 9140 wb", "refrigerator metallic gold 9140 wb")
+    assert primary_colour_conflict("dispenser pwd 425 gd maroon blaze", "dispenser pwd 425 gd red blaze")
+
+
+def test_neutral_and_chromatic_names_still_conflict() -> None:
+    """A different family is a different colour, whatever the finish wording."""
+    assert primary_colour_conflict(
+        "haier thunder ac 1 5 ton hsu 18hft silver",
+        "haier thunder ac 1 5 ton hsu 18hft white",
+    )
+    assert primary_colour_conflict(
+        "dawlance refrigerator 16 cu ft white 9193 wb",
+        "dawlance chrome fh refrigerator 16 cu ft hairline black 9193 wb",
+    )
+
+
 def test_the_same_colour_never_conflicts() -> None:
     title = "dawlance avante refrigerator 7 cu ft burgundy 9160 wb gd"
     assert not primary_colour_conflict(title, "dawlance ref 9160lf avante pearl burgundy")
@@ -138,6 +188,24 @@ def test_a_longer_colour_name_containing_the_titles_word_does_not_conflict() -> 
     assert not primary_colour_conflict(
         "haier t3 plus ac 1 5 ton hsu 20hftex grey",
         "haier hsu 20hftex t3 plus ac 1 5 ton hairline grey",
+    )
+
+
+def test_a_series_name_never_masks_a_real_colour_difference() -> None:
+    """``Chrome`` sits in the grey family, so it must not make a *gold* page compatible.
+
+    Live shape: "Dawlance **E Chrome** ... Metallic Grey (9173-WB)" against "Dawlance
+    **E Chrome** ... Metallic Gold (9173-WB)".  Comparing the title's colour against
+    every word the page mentions would find "chrome" and call it a match; the verdict has
+    to come from the page's own primary colour.
+    """
+    assert primary_colour_conflict(
+        "dawlance e chrome freezer on top refrigerator 11 5 cu ft metallic grey 9173 wb",
+        "dawlance e chrome freezer on top refrigerator 11 5 cu ft metallic gold 9173 wb",
+    )
+    assert primary_colour_conflict(
+        "dawlance avante freezer 12 cu ft 9178 wb platinum silver",
+        "dawlance e chrome freezer 14 cu ft metallic gold 9178 wb",
     )
 
 
