@@ -15,7 +15,7 @@ from gallery_extractors import ExtractionContext
 from gallery_extractors.jsonutil import iter_ld_json_blocks, safe_json_loads, walk_json
 from model_matching import find_matching_keys
 from models import ImageCandidate
-from url_filters import canonicalize_url
+from url_filters import canonicalize_url, has_image_extension
 
 _PRODUCT_TYPES = ("product", "individualproduct", "productgroup")
 _IDENTITY_FIELDS = ("name", "sku", "mpn", "model", "productID", "productId", "url")
@@ -99,7 +99,7 @@ def extract(context: ExtractionContext) -> list[ImageCandidate]:
                 continue
             for url in _image_urls(node):
                 canonical = canonicalize_url(url, context.page_url)
-                if not canonical:
+                if not canonical or not has_image_extension(canonical):
                     continue
                 candidates.append(
                     ImageCandidate(

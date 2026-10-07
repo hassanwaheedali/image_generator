@@ -9,6 +9,7 @@ from url_filters import (
     dedup_key,
     detect_brand,
     has_bad_keyword,
+    has_image_extension,
     host_is_other_manufacturer,
     is_fetchable_product_url,
     prioritize_source_urls,
@@ -196,6 +197,13 @@ def test_other_manufacturer_domain_guard() -> None:
     assert not host_is_other_manufacturer("www.dawlance.com.pk", "dawlance")
     assert not host_is_other_manufacturer("www.daraz.pk", "dawlance")
     assert not host_is_other_manufacturer("eshop.pel.com.pk", "pel")
+
+
+def test_has_image_extension_separates_assets_from_page_routes() -> None:
+    assert has_image_extension("https://cdn.telex.pk/p/hsu-12hfpaa-a.jpg")
+    assert has_image_extension("https://www.dawlance.com.pk/media/resize/F.png/1000Wx1000H/image.webp")
+    assert not has_image_extension("https://www.telex.pk/products/2026-06-28T22:25:28+05:00")
+    assert not has_image_extension("https://www.telex.pk/products/image")
 
 
 def test_prioritize_source_urls_prefers_official_domain() -> None:

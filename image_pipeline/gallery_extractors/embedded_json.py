@@ -8,7 +8,6 @@ could belong to any other product on the page.
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import urlsplit
 
 from gallery_extractors import ExtractionContext
 from gallery_extractors.jsonutil import (
@@ -18,7 +17,7 @@ from gallery_extractors.jsonutil import (
 )
 from model_matching import find_matching_keys
 from models import ImageCandidate
-from url_filters import canonicalize_url
+from url_filters import canonicalize_url, has_image_extension
 
 _IDENTITY_FIELDS = ("title", "handle", "sku", "name", "product_title", "productTitle")
 
@@ -57,10 +56,8 @@ def extract(context: ExtractionContext) -> list[ImageCandidate]:
             if not identity or not find_matching_keys(identity, context.keys):
                 continue
             for url in _image_urls(node):
-                if urlsplit(url).path.lower().endswith((".js", ".css", ".json")):
-                    continue
                 canonical = canonicalize_url(url, context.page_url)
-                if not canonical:
+                if not canonical or not has_image_extension(canonical):
                     continue
                 candidates.append(
                     ImageCandidate(

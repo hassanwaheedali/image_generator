@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **JSON-LD / embedded-JSON `image` fields that are page routes no longer burn downloads.** A shop
+  may put a timestamped page URL in `image` (live: telex.pk `/products/2026-06-28T…` → HTTP 404).
+  Both JSON sources now emit only URLs with a real raster extension (`url_filters.has_image_extension`),
+  mirroring the DOM path's `_looks_like_image` guard.
+
 ### Added
 - **The model in the title now outranks a wrong sheet link.** A page that matches only because
   a trailing letter was tolerated (live: the row `Dawlance Semi Automatic Washing Machine 10kg

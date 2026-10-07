@@ -50,6 +50,24 @@ def test_gallery_container_images_and_provenance() -> None:
     assert urls[0].endswith("hsu-12hfpaa-1.jpg")                       # model URLs first
 
 
+def test_jsonld_image_field_that_is_a_page_url_is_dropped() -> None:
+    """A shop may put a *page* route (no image extension) in the JSON-LD ``image`` field.
+
+    Those burn a download and 404 (live: telex.pk ``/products/<timestamp>``).  The extractor
+    must only emit URLs that actually look like images.
+    """
+    html = """<html><head><title>Haier HSU-12HFPAA</title>
+    <script type="application/ld+json">
+    {"@type": "Product", "name": "Haier HSU-12HFPAA",
+     "image": ["https://www.telex.pk/products/2026-06-28T22:25:28+05:00",
+               "https://cdn.telex.pk/p/hsu-12hfpaa-a.jpg"]}
+    </script></head><body></body></html>"""
+    context = _context("https://www.telex.pk/hsu-12hfpaa", html, "Haier HSU-12HFPAA", "haier")
+    urls = [candidate.url for candidate in extract_candidates(context)]
+    assert "https://cdn.telex.pk/p/hsu-12hfpaa-a.jpg" in urls
+    assert not any("2026-06-28" in url for url in urls)
+
+
 def test_jsonld_two_products_only_matching_node() -> None:
     context = _context(
         HAIER, load_fixture("jsonld_two_products"), "Haier HSU-12HFPAA", "haier"

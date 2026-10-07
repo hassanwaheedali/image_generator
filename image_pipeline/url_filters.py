@@ -470,6 +470,18 @@ def upscale_candidates(url: str) -> tuple[str, ...]:
     return tuple(out)
 
 
+def has_image_extension(url: str) -> bool:
+    """True when the URL path ends in a known raster extension.
+
+    JSON-LD / embedded-JSON ``image`` fields are not always images - a shop may put a *page*
+    URL (or a timestamped route) in there, which then burns a download and 404s (live case:
+    telex.pk ``/products/2026-06-28T...``).  The DOM path already guards ``<a href>`` with
+    ``_looks_like_image``; the JSON sources use this predicate instead.
+    """
+    path = urlsplit(url).path.lower()
+    return any(path.endswith("." + ext) for ext in IMAGE_EXTENSIONS)
+
+
 def _strip_tracking_params(query: str) -> str:
     if not query:
         return ""
