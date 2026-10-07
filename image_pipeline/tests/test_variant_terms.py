@@ -108,8 +108,8 @@ def test_text_without_a_colour_has_no_primary_colour() -> None:
 
 def test_an_unknown_colour_name_is_not_a_colour() -> None:
     """Fail open: a colourway outside the vocabulary yields nothing, never a guess."""
-    assert primary_colour_word("pel water dispenser pwd 425 gd marine impression") is None
-    assert colour_words("pel water dispenser pwd 425 gd marine impression") == frozenset()
+    assert primary_colour_word("pel water dispenser pwd 425 gd ocean mystery") is None
+    assert colour_words("pel water dispenser pwd 425 gd ocean mystery") == frozenset()
 
 
 def test_colour_words_returns_every_colour_named() -> None:
@@ -233,12 +233,12 @@ def test_a_missing_colour_on_either_side_never_conflicts() -> None:
 def test_an_unknown_colour_name_never_conflicts() -> None:
     """Fail open, both directions: an unlisted name cannot reject a correct page."""
     assert not primary_colour_conflict(
-        "pel dispenser pwd 425 gd marine impression",
+        "pel dispenser pwd 425 gd ocean mystery",
         "pel dispenser pwd 425 gd maroon blaze",
     )
     assert not primary_colour_conflict(
         "pel dispenser pwd 425 gd maroon blaze",
-        "pel dispenser pwd 425 gd marine impression",
+        "pel dispenser pwd 425 gd ocean mystery",
     )
 
 
@@ -249,3 +249,14 @@ def test_the_title_colour_can_be_supplied_directly() -> None:
     assert not colour_word_conflict("burgundy", "dawlance avante refrigerator 7 cu ft 9160 wb gd")
     assert not colour_word_conflict(None, "dawlance avante refrigerator 7 cu ft red 9160 wb gd")
     assert not colour_word_conflict("", "dawlance avante refrigerator 7 cu ft red 9160 wb gd")
+
+def test_a_brand_published_colourway_name_is_recognised() -> None:
+    """PEL SGD 425 (eshop.pel.com.pk, 2026-10-07) sells Marine Impression / Red Blaze /
+    Maroon Blaze.  The marketing name must read as a colour word so the three separate."""
+    title = "PEL Straight 3 Taps Glass Door Water Dispenser (PWD-425-GD)-Marine Impression"
+    assert primary_colour_word(title) == "marine impression"
+    assert colour_word_conflict("marine impression", "PEL Water Dispenser Red Blaze")
+    assert colour_word_conflict("marine impression", "PEL Water Dispenser Maroon Blaze")
+    assert not colour_word_conflict("marine impression", "PEL Water Dispenser Marine Impression")
+    # the two red-family Blaze names are different chromatic words -> separated
+    assert colour_word_conflict("red", "PEL Water Dispenser Maroon Blaze")

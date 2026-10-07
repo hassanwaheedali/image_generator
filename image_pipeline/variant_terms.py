@@ -18,9 +18,11 @@ because makers use those words as series names rather than colourways.
 
 Both signals fail open: a suffix or a colour that cannot be read is *no opinion*,
 never a rejection, so an unknown colourway can cost a protection but can never
-reject a correct page.  Measured on the owner's 752-title catalogue
-(`docs/riper/variant-colour-corpus-report.md`): 280/298 same-code/different-colour
-pairs separated, 0 false rejects.
+reject a correct page.  Where a maker publishes a colourway name that no plain
+colour word covers (``Marine Impression``), the name joins the colour vocabulary as
+its own family - one line of data, not logic.  Measured on the owner's 752-title
+catalogue (`docs/riper/variant-colour-corpus-report.md`): 269/304 same-code pairs
+whose titles both name a colour separated, 0 false rejects.
 
 Nothing here imports from the pipeline - it is data plus pure functions, so it can
 never take part in an import cycle with :mod:`model_matching`.  Text arguments are
@@ -56,6 +58,11 @@ COLOUR_FAMILIES: dict[str, tuple[str, ...]] = {
     "pink": ("pink", "rose"),
     "orange": ("orange", "amber"),
     "yellow": ("yellow",),
+    # Brand-published colourway names with no plain colour word behind them.
+    # Each is its own family so it only ever matches itself - the maker's own
+    # name is the safest identity it can carry (PEL SGD 425, eshop.pel.com.pk,
+    # 2026-10-07).  One line per name, and an unknown name still fails open.
+    "marine": ("marine impression",),
 }
 
 #: The only spelling variants in the vocabulary.  ``gray`` and ``grey`` are the same
