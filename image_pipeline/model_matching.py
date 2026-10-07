@@ -19,12 +19,12 @@ No I/O, everything cached and unit-testable.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from urllib.parse import unquote, urlsplit
 
 from models import ModelKeys
-from variant_terms import COLOUR_FAMILIES
+from variant_terms import COLOUR_FAMILIES, suffix_agreement
 
 # --------------------------------------------------------------------------- #
 # constants
@@ -844,18 +844,18 @@ def _needs_key_tolerance(text: str, keys: ModelKeys, allow_key_truncation: bool)
     return not find_matching_keys(text, keys, include_title_key=False, include_truncation=False)
 
 
-def match_product(
+def _recognize(
     *,
     keys: ModelKeys,
     brand: str | None,
     strong_text: str,
-    body_text: str = "",
-    brand_match_enabled: bool = True,
-    brand_match_min_length: int = 5,
-    brand_match_min_digits: int = 3,
-    allow_key_truncation: bool = True,
+    body_text: str,
+    brand_match_enabled: bool,
+    brand_match_min_length: int,
+    brand_match_min_digits: int,
+    allow_key_truncation: bool,
 ) -> ProductMatch:
-    """The whole recognition rule, in one readable function.
+    """The recognition stages, in one readable function.
 
     Stage A - the model key itself (title/URL/H1 fields, then body text).
     Stage B - brand + code, for sites that print the model without the brand letters.
@@ -907,3 +907,54 @@ def match_product(
             return ProductMatch(True, "body_brand_code", found, in_body_only=True)
 
     return ProductMatch(False, "none", ())
+
+
+def _page_names_another_variant(keys: ModelKeys, strong_text: str) -> bool:
+    """True when the page prints a **different** variant suffix of the same model stem.
+
+    The page's own text goes through the same tokenizer, so no brand, suffix or model
+    table is involved.  Only a positively different suffix counts (``ifga`` vs ``ifpa``):
+    a page that omits the suffix says nothing and stays with the dropped-trailing-letter
+    rule, and a page with no related code has no opinion at all.
+    """
+    return suffix_agreement(keys.identities, build_model_keys(strong_text).identities) == "different"
+
+
+def match_product(
+    *,
+    keys: ModelKeys,
+    brand: str | None,
+    strong_text: str,
+    body_text: str = "",
+    brand_match_enabled: bool = True,
+    brand_match_min_length: int = 5,
+    brand_match_min_digits: int = 3,
+    allow_key_truncation: bool = True,
+    variant_separation_enabled: bool = True,
+) -> ProductMatch:
+    """The whole recognition rule: recognize the model, then refuse to *prove* a variant.
+
+    Recognition is unchanged (:func:`_recognize`).  On top of it, a page that prints a
+    different variant suffix of the same model stops being proof: it becomes *tolerated*,
+    i.e. deferred, used only when the row found nothing better, and flagged in the review
+    CSV (owner decision 2026-10-07).  It is demoted rather than rejected because a suffix
+    is not reliably a variant code - ``9160-WB`` and ``9160LF`` are the same model - while
+    a page that positively names another variant is never allowed to pose as an exact
+    match.  The colour signal, which *is* about the picture, is the hard reject.
+    """
+    match = _recognize(
+        keys=keys,
+        brand=brand,
+        strong_text=strong_text,
+        body_text=body_text,
+        brand_match_enabled=brand_match_enabled,
+        brand_match_min_length=brand_match_min_length,
+        brand_match_min_digits=brand_match_min_digits,
+        allow_key_truncation=allow_key_truncation,
+    )
+    if not variant_separation_enabled or not match.matched or match.tolerated:
+        return match
+    if _page_names_another_variant(keys, strong_text):
+        return replace(match, tolerated=True)
+    return match
+

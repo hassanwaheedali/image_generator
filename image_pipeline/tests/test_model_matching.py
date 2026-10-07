@@ -355,3 +355,73 @@ def test_a_tolerated_spelling_is_not_an_exact_match() -> None:
     # S1 with the tolerance switched off keeps the wrong page out entirely
     strict = match_product(keys=keys, brand="dawlance", strong_text=page, allow_key_truncation=False)
     assert not strict.matched
+
+
+# --------------------------------------------------------------------------- #
+# variant separation: model-code suffix (plan: variant-separation, task 2)
+# --------------------------------------------------------------------------- #
+IFGA_TITLE = "Haier No Frost Inverter Refrigerator 18 Cu Ft (HRF-538 IFGA)"
+
+
+def test_a_page_showing_a_different_variant_suffix_is_never_exact_proof() -> None:
+    """Owner rule: a different suffix is a different product, so the page is demoted.
+
+    Live shape of the bug: the title's matchable token is the bare ``HRF-538``, so an
+    ``IFPA`` page matched at full strength and its pictures were published as if they
+    proved the ``IFGA`` model.  The page is now *tolerated* - deferred, used only when
+    the row found nothing else, and flagged for review.
+    """
+    keys = build_model_keys(IFGA_TITLE)
+    verdict = match_product(keys=keys, brand="haier", strong_text="Haier HRF-538 IFPA refrigerator")
+    assert verdict.matched
+    assert verdict.tolerated
+
+
+def test_a_page_showing_the_same_suffix_stays_exact() -> None:
+    keys = build_model_keys(IFGA_TITLE)
+    verdict = match_product(keys=keys, brand="haier", strong_text="Haier HRF-538 IFGA refrigerator")
+    assert verdict.matched
+    assert not verdict.tolerated
+
+
+def test_a_longer_spelling_of_the_same_suffix_is_still_exact() -> None:
+    """``538 IFGA INV`` is the same variant spelled longer, not a different one."""
+    keys = build_model_keys(IFGA_TITLE)
+    verdict = match_product(keys=keys, brand="haier", strong_text="Haier 538 IFGA INV")
+    assert verdict.matched
+    assert not verdict.tolerated
+
+
+def test_a_page_that_omits_the_suffix_is_judged_as_before() -> None:
+    """Omission says nothing: the existing dropped-trailing-letter rule still owns it."""
+    keys = build_model_keys("Dawlance Semi Automatic Washing Machine 10kg (DW-7500C)")
+    verdict = match_product(keys=keys, brand="dawlance", strong_text="Dawlance DW-7500 twin tub")
+    assert verdict.matched
+    assert verdict.tolerated                       # unchanged: tolerated, as before this rule
+
+
+def test_a_glued_code_carrying_another_suffix_never_matched_anyway() -> None:
+    """Dawlance glues the suffix into the code, so S1 already keeps those variants apart.
+
+    ``9160-WB`` and ``9160LF`` are the same model (owner correction), but a page printing
+    the other spelling does not match this row at all - the matchable token is the whole
+    ``9160-WB``.  There is nothing for the suffix rule to demote, and it must not change
+    that.  The rule only bites where the code is spelled with a space (``HRF-538 IFGA``),
+    because there the bare ``HRF-538`` is the matchable token.
+    """
+    keys = build_model_keys("Dawlance Chrome Freezer-On-Top Refrigerator 10 Cu Ft (9160-WB)")
+    assert not match_product(keys=keys, brand="dawlance", strong_text="Dawlance 9160LF fridge").matched
+    assert match_product(keys=keys, brand="dawlance", strong_text="Dawlance 9160-WB fridge").matched
+
+
+def test_variant_separation_can_be_switched_off() -> None:
+    """One config field rolls the whole rule back to the previous behaviour."""
+    keys = build_model_keys(IFGA_TITLE)
+    verdict = match_product(
+        keys=keys,
+        brand="haier",
+        strong_text="Haier HRF-538 IFPA refrigerator",
+        variant_separation_enabled=False,
+    )
+    assert verdict.matched
+    assert not verdict.tolerated
