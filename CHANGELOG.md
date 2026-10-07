@@ -59,8 +59,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   families with a neutral (achromatic) carve-out, `suffix_agreement`, `colour_word_conflict`.
   It holds no brand, suffix or colour-code tables, so a colour the vocabulary has never seen
   simply fails open instead of guessing. Measured against the shipped catalogue (752 distinct
-  titles): 269 of the 304 same-code colour pairs are now separated, and every pair still kept
-  is a deliberate finish tolerance (`chrome` ≡ `silver`, `graphite` ≡ `grey`).
+  titles): **269 of the 304** same-code pairs whose titles both name a colour are now separated;
+  of the 35 kept, 24 name the same word, 8 are one finish under two names (`silver` ≡ `chrome`
+  ≡ `grey`, `graphite` ≡ `grey`) and 3 fail open because the row's only colour word is the
+  series name `Chrome`.
 - **`image_pipeline/textnorm.py`** - `normalize_text` / `normalize_key` moved out of
   `model_matching` into a leaf module, so the variant vocabulary can normalize punctuation
   (`(9149-WB)-Pearl Red` now reveals *both* colour words) without an import cycle.

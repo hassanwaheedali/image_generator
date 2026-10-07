@@ -71,11 +71,15 @@ carries:
    three names) while `burgundy` ≠ `red` and `copper` ≠ `gold` (two chromatic words, two products).
 
    The verdict is read from the page's **primary** word, with the page's full colour-word set as the
-   only escape hatch (the title's word appearing anywhere means the page names it). Measured with the
-   shipped functions over the catalogue's 752 distinct titles: **269 of the 304** same-code pairs
-   that both name a colour are separated, and every pair still kept is a deliberate finish tolerance.
-   Over the 270 stem-sharing pairs that match today: **196 separated (72.6%)** — 176 by colour,
-   10 by suffix, 10 by both — 74 unchanged.
+   only escape hatch (the title's word appearing anywhere means the page names it).
+
+   **Measured with the shipped functions** over the catalogue's 752 distinct titles (ordered pairs,
+   sheet row → page): of the **304** same-code pairs whose two titles both name a colour, **269 are
+   separated**. Of the 35 kept, 24 name the *same* word (`white`/`white` …) and 8 are one finish
+   under two names (`silver` ≡ `chrome` ≡ `grey`, `graphite` ≡ `grey`); the remaining 3 fail open
+   because the row's only colour word is the series name `Chrome`, which the page repeats.
+   Over the **538** ordered stem-sharing pairs that matched before this work: **395 separated
+   (73.4%)** — 350 by colour alone, 20 by suffix alone, 25 by both — 143 unchanged.
 
 **Optional feature letters are already harmless.** Verified with the tokenizer: `DSD 4890 Silver SD`,
 `DSD 4890 Silver` and `DSD-4890` all produce the *same* identity `dsd4890`, because `Silver` is a
@@ -202,19 +206,20 @@ Design consequences (this is what makes it non-hardcoded in the sense that matte
   failure" is withdrawn. A wrong colour now fails the row, so those rows go looking for the colour
   they asked for instead of publishing a penalised picture.
 
-**Effect of the revised policy on the catalogue** (measured with the shipped functions, of the 270
-stem-sharing pairs that match today): **176 hard-rejected by colour, 10 demoted by suffix, 10 by
-both, 74 unchanged — 196/270 = 72.6% separated.** The residue is one-sided omission (by design) and
-finish tolerances. Zero false rejects on the same-colour control.
+**Effect of the revised policy on the catalogue** (measured with the shipped functions; ordered
+pairs, sheet row → page, over the 538 stem-sharing pairs that matched before this work): **350
+hard-rejected by colour, 20 demoted by suffix, 25 by both, 143 unchanged — 395/538 = 73.4%
+separated.** The residue is one-sided omission (by design), finish tolerances, and 3 pairs where the
+row's only colour word is a series name. Zero false rejects on the same-colour control.
 
 ## 7b. CORPUS EVIDENCE (Phase 0, `variant-colour-corpus-report.md`)
 - 1796 sheet rows → 752 distinct titles; 437 identities carry an alpha suffix.
 - 43 codes / 116 titles / 149 pairs are **same code, different colour**; today **298/298** of those
   pairs match at `strength=2, rule=model_key, tolerated=False` — 100% silent mixing, nothing flagged.
-- With both rules: **72.6%** of the 270 currently-mixing stem pairs separated (the earlier 82.6%
-  came from the unsafe raw-word form and must not be quoted), **0** false rejects on the same-colour
-  control; the residue is one-sided omission (by design) plus one unknown colourway name (PEL
-  "Marine Impression", 2 pairs).
+- With both rules: **73.4%** of the currently-mixing stem pairs separated (395 of 538 ordered pairs;
+  the earlier 82.6% came from the unsafe raw-word form and must not be quoted), **0** false rejects
+  on the same-colour control; the residue is one-sided omission (by design), finish tolerances, and
+  one unknown colourway name (PEL "Marine Impression", 2 pairs).
 - Vocabulary coverage: all 20 colour words used in the catalogue are already known; marketing names
   are always modifier + known base colour (Ruby **Red**, Platinum **Silver**), so the gap is one name.
 

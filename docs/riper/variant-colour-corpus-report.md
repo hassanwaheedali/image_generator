@@ -170,3 +170,12 @@ Design consequences (already in `variant-separation-plan.md` §3):
    used to pick the primary word when a title names several.
 3. Expected effect on this catalogue: **82.6% of today's silent mixes separated, 0 false rejects** on
    the same-colour control, remainder are omissions or a single unknown colourway.
+
+---
+
+**Post-implementation note (2026-10-07, rev 5).** The figures above were the Phase 0 *estimate*,
+made with a raw-word comparison. The rule that shipped is stricter in one place and safer in two:
+a neutral carve-out keeps one finish under two names (`silver` ≡ `chrome`, `graphite` ≡ `grey`), the
+verdict is read from the page's **primary** colour word so a series name cannot mask a real
+difference, and the measured result on this catalogue is **395 of 538 ordered stem-sharing pairs
+separated (73.4%)**, not 82.6%. Do not quote 82.6%.
