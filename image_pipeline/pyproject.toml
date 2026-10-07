@@ -62,7 +62,9 @@ dependencies = [
 # ruff must be >=0.9: the per-file ignores below use RUF059, and older ruff versions do not
 # know that selector - they abort with "Unknown rule selector" instead of linting.
 # types-beautifulsoup4 is dev-only: mypy --strict needs bs4's stubs to type the DOM code.
-dev = ["pytest>=8", "mypy>=1.8", "ruff>=0.9", "types-beautifulsoup4"]
+# radon is the code-health gate we can run locally (cyclomatic complexity, the same
+# signal CodeScene reports): a function may never gain a grade - extract a named helper.
+dev = ["pytest>=8", "mypy>=1.8", "ruff>=0.9", "types-beautifulsoup4", "radon>=6"]
 
 [tool.ruff]
 target-version = "py310"

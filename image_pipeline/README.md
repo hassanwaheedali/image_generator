@@ -472,6 +472,10 @@ The three built-in extractors are `dawlance.py` (MDM code from the page URL), `h
 python3 -m ruff check .          # lint (must print: All checks passed!)
 python3 -m mypy --strict .       # types (must print: Success: no issues found)
 python3 -m pytest tests -q        # 308 tests, fakes only, no network
+python3 -m radon cc . -n C -s --exclude "tests/*"
+                                  # code health: 45 blocks at C or worse today (all
+                                  # pre-existing hotspots) - a 46th means a function
+                                  # gained a grade; extract a named helper instead
 python3 ../verification/smoke_test_10_products.py   # the 10 real rows, every branch (offline)
 ```
 

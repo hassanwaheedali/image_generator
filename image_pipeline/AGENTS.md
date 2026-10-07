@@ -35,6 +35,8 @@ python3 main.py --input sample_input.csv --workers 4        # real run (needs FR
 python3 -m ruff check .        # must print: All checks passed!
 python3 -m mypy --strict .     # must print: Success: no issues found
 python3 -m pytest tests -q     # 308 tests, fakes only, no network
+python3 -m radon cc . -n C -s --exclude "tests/*"   # code health: 45 blocks at C or
+                               # worse (baseline) - no function may gain a grade
 ```
 
 Secrets: `FREEIMAGE_API_KEY` (and optional `FREEIMAGE_UPLOAD_URL`) come from the environment or from
