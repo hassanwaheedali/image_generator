@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **S7 no longer rejects genuine white-background studio shots whose product touches the frame
+  edges.** Root cause: `border_is_clean` assumed the whole outer ring is background, so a tall
+  appliance / top-down view (dark top deck + base crossing the top/bottom edges) split the ring
+  and failed at ~0.5 fraction even with 4/4 neutral corners (live: Surmawala DW-7500 1200×1200,
+  and the repo's `uploads/image-3.png`). A universal, host-agnostic rescue
+  (`config.studio_background_rescue`, `studio_rescue_min_neutral_corners=4`) now accepts such an
+  image when **all four corners are neutral studio white**; busy/lifestyle frames never reach four
+  neutral corners at `corner_patch_ratio` and stay rejected. The previous official-only rescue is
+  unchanged; the new one is bounded and switchable.
 - **S8 header-probe judged the smallest listed variant, not the asset.** Shopify pages list a
   `_288x` thumb whose `_1024x` sibling is the real photo; the probe hit the 288px file and rejected
   at S8 before the large form was requested. The probe now targets the largest rewrite first, and a

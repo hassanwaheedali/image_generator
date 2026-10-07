@@ -933,8 +933,17 @@ def test_official_page_gallery_is_accepted_when_the_product_fills_the_frame(tmp_
     retail = "https://shop.example/p/hsu-12hfpaa"
     retail_deps, _, _, _ = build_deps(tmp_path, {retail: page.replace("cdn.haier.com", "shop.example")},
                                       {IMG1.replace("cdn.haier.com", "shop.example"): png_bytes(frame_filling)})
+    # With the universal studio rescue (default) a clean 4-corner white shot is accepted on
+    # retail too - that is the 2026-10-07 policy.  The *official-gallery* acceptance itself
+    # stays host-scoped: with the universal rescue switched off, retail gets nothing.
     _, retail_images = process_product(task(0, "Haier HSU-12HFPAA Inverter AC", (retail,)), retail_deps, config)
-    assert not retail_images, "a retail page must not get the official-gallery acceptance"
+    assert retail_images, "clean white studio shot should now be accepted on retail"
+
+    strict = replace(config, studio_background_rescue=False)
+    retail_deps2, _, _, _ = build_deps(tmp_path, {retail: page.replace("cdn.haier.com", "shop.example")},
+                                       {IMG1.replace("cdn.haier.com", "shop.example"): png_bytes(frame_filling)})
+    _, strict_images = process_product(task(0, "Haier HSU-12HFPAA Inverter AC", (retail,)), retail_deps2, strict)
+    assert not strict_images, "a retail page must not get the official-gallery acceptance"
 
 
 # --------------------------------------------------------------------------- #

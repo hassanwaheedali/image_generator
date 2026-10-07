@@ -346,6 +346,18 @@ class PipelineConfig:
     official_gallery_relaxed_s7: bool = True
     #: Neutral corners required for that acceptance (the corners prove a studio backdrop).
     official_gallery_min_neutral_corners: int = 2
+    #: Universal studio-background rescue (S7).  A clean white-background product photo whose
+    #: product legitimately touches the frame edges (top-down view, tall appliance) fails the
+    #: strict border-ring test even though the backdrop is white.  When all four corners are
+    #: neutral studio white, the image is accepted regardless of which host served it - the
+    #: corners are the evidence it is a studio shot, not a lifestyle scene.  Live case:
+    #: Surmawala DW-7500 1200x1200 white shot rejected with "border ring is not a clean
+    #: background" despite 4/4 neutral corners.  Bounded: a busy frame with only tiny white
+    #: corner patches never reaches four neutral corners at ``corner_patch_ratio``.
+    studio_background_rescue: bool = True
+    #: Neutral corners required for the universal rescue - deliberately the full four,
+    #: stricter than the official-gallery acceptance because it applies to every host.
+    studio_rescue_min_neutral_corners: int = 4
     corner_patch_ratio: float = 0.12
 
     # ----- near-duplicate removal (S10) -----------------------------------
@@ -551,6 +563,8 @@ class PipelineConfig:
             raise ConfigError("min_neutral_corners must be in [0, 4]")
         if not 0 <= self.official_gallery_min_neutral_corners <= 4:
             raise ConfigError("official_gallery_min_neutral_corners must be in [0, 4]")
+        if not 0 <= self.studio_rescue_min_neutral_corners <= 4:
+            raise ConfigError("studio_rescue_min_neutral_corners must be in [0, 4]")
         for name, value in (
             ("dedup_hamming_threshold", self.dedup_hamming_threshold),
             ("dedup_hamming_soft_threshold", self.dedup_hamming_soft_threshold),

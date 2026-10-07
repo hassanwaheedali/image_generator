@@ -418,12 +418,15 @@ def _photo_with_edge_seam(size: tuple[int, int] = (900, 900)) -> Image.Image:
 
 
 def test_edge_seam_is_trimmed_so_the_photo_passes_S7(config: PipelineConfig) -> None:
+    # Strict (rescue off) so the test exercises the seam trim itself, not the studio rescue:
+    # the seam photo has 4 neutral corners and would otherwise be rescued before trimming.
+    strict = replace(config, studio_background_rescue=False)
     image = _photo_with_edge_seam()
-    assert run_quality_gates(image, config)[0] == "S7"          # what happened live
+    assert run_quality_gates(image, strict)[0] == "S7"          # what happened live
 
     trimmed, removed = trim_edge_seams(image, config)
     assert removed and removed[0][0] == "horizontal-start", removed
-    assert run_quality_gates(trimmed, config)[0] == "ok"
+    assert run_quality_gates(trimmed, strict)[0] == "ok"
     assert trimmed.size[1] < image.size[1]
     assert trimmed.size[0] == image.size[0]
 
@@ -547,11 +550,58 @@ def _studio_shot_that_fills_the_frame(size: tuple[int, int] = (1000, 1000)) -> I
     return image
 
 
-def test_official_gallery_shot_that_fills_the_frame_is_accepted(config: PipelineConfig) -> None:
-    """S7 stays strict for retail pages and is relaxed for a verified official gallery."""
+def test_studio_shot_that_fills_the_frame_is_accepted_everywhere(config: PipelineConfig) -> None:
+    """A white studio shot whose product touches the edges is accepted on any host.
+
+    The corners (4/4 neutral) prove a studio backdrop, so the universal rescue accepts it
+    even on a retail page.  This is the 2026-10-07 policy change: the same geometry that the
+    official-gallery acceptance used is no longer gated by host (live case: Surmawala
+    DW-7500 white shot).  Switching the rescue off restores the old strict retail behaviour.
+    """
     image = _studio_shot_that_fills_the_frame()
-    assert run_quality_gates(image, config)[0] == "S7"                  # retail / strict
+    assert neutral_corner_count(image, config.corner_patch_ratio, config.neutral_bright_min_value,
+                                config.neutral_bright_max_saturation) == 4
+    assert run_quality_gates(image, config)[0] == "ok"                  # retail / universal rescue
     assert run_quality_gates(image, config, official_gallery=True)[0] == "ok"
+
+
+def test_studio_rescue_can_be_switched_off(config: PipelineConfig) -> None:
+    image = _studio_shot_that_fills_the_frame()
+    strict = replace(config, studio_background_rescue=False)
+    assert run_quality_gates(image, strict)[0] == "S7"
+
+
+def _edge_touching_white_shot() -> Image.Image:
+    """White backdrop, but the product spans top-to-bottom with wide side margins.
+
+    The 12%-of-side corner patches stay pure white while the product crosses the top and
+    bottom edges - the exact geometry of the owner's Surmawala washer photo, which the strict
+    border-ring test rejected even though the corners were 4/4 neutral.
+    """
+    size = 1200
+    array = np.full((size, size, 3), 255, np.uint8)
+    array[20:120, 200:1000] = (120, 120, 120)        # grey top deck touching the top edge
+    array[120:870, 200:1000] = (245, 245, 245)       # near-white body
+    array[870:1180, 200:1000] = (30, 30, 30)         # dark base touching the bottom edge
+    return Image.fromarray(array)
+
+
+def test_edge_touching_product_on_white_is_accepted(config: PipelineConfig) -> None:
+    image = _edge_touching_white_shot()
+    assert not border_is_clean(
+        image, ring_ratio=config.border_ring_ratio, ring_min_px=config.border_ring_min_px,
+        tolerance=config.border_bg_tolerance, std_max=config.border_std_max,
+        min_fraction=config.border_clean_min_fraction,
+    )
+    assert run_quality_gates(image, config)[0] == "ok"
+
+
+def test_owner_washer_photo_is_accepted(config: PipelineConfig) -> None:
+    """The exact artefact from the 2026-10-07 bug report must now pass S7."""
+    path = Path(__file__).resolve().parents[2] / "uploads" / "image-3.png"
+    if not path.exists():                                   # pragma: no cover - asset optional
+        pytest.skip("uploads/image-3.png not present")
+    assert run_quality_gates(Image.open(path), config)[0] == "ok"
 
 
 def test_official_gallery_acceptance_still_rejects_a_coloured_scene(config: PipelineConfig) -> None:
@@ -563,6 +613,7 @@ def test_official_gallery_acceptance_still_rejects_a_coloured_scene(config: Pipe
 
 
 def test_official_gallery_acceptance_can_be_switched_off(config: PipelineConfig) -> None:
+    # Both rescues off: the image then has no path past the strict border-ring test.
     image = _studio_shot_that_fills_the_frame()
-    strict = replace(config, official_gallery_relaxed_s7=False)
+    strict = replace(config, official_gallery_relaxed_s7=False, studio_background_rescue=False)
     assert run_quality_gates(image, strict, official_gallery=True)[0] == "S7"

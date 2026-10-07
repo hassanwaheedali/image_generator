@@ -526,6 +526,28 @@ def official_gallery_pass(image: Image.Image, config: PipelineConfig) -> bool:
     return corners >= config.official_gallery_min_neutral_corners
 
 
+def studio_background_pass(image: Image.Image, config: PipelineConfig) -> bool:
+    """Universal S7 rescue: a studio shot whose product touches the frame edges.
+
+    The strict border-ring test assumes the outer ring is pure background, which a genuine
+    white-background photo violates whenever the product reaches the top/bottom edges (a
+    top-down view, a tall appliance).  The four corners are the reliable evidence that the
+    backdrop is white studio rather than a lifestyle or banner scene, so when all of them are
+    neutral the image is accepted no matter which host served it.  A busy frame with only
+    tiny white corner patches never reaches ``studio_rescue_min_neutral_corners`` at
+    ``corner_patch_ratio``, so lifestyle and banner images stay rejected.
+    """
+    if not config.studio_background_rescue:
+        return False
+    corners = neutral_corner_count(
+        image,
+        config.corner_patch_ratio,
+        config.neutral_bright_min_value,
+        config.neutral_bright_max_saturation,
+    )
+    return corners >= config.studio_rescue_min_neutral_corners
+
+
 def run_quality_gates(
     image: Image.Image,
     config: PipelineConfig,
@@ -561,7 +583,9 @@ def run_quality_gates(
         std_max=config.border_std_max,
         min_fraction=config.border_clean_min_fraction,
     )
-    relaxed_shot = official_gallery and official_gallery_pass(image, config)
+    relaxed_shot = (official_gallery and official_gallery_pass(image, config)) or (
+        studio_background_pass(image, config)
+    )
     if not ring_clean and not relaxed_shot:
         return "S7", "border ring is not a clean background"
     corners = neutral_corner_count(
