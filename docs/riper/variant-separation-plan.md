@@ -30,25 +30,42 @@ Rev 2 adds: owner's hardcoded-colour-vocabulary concern (§3), the 1800-product 
 After the existing base S1 match (strength>0), apply variant agreement using only signals the title
 carries:
 
-1. **Suffix agreement.** Run the same tokenizer on the page's strong text to get page identities; for a
-   page identity whose digit-stem equals the title's, compare the alpha tail:
+1. **Suffix agreement — demote, never reject.** *(revised 2026-10-07 after the owner's correction:
+   `9160-WB` and `9160LF` are the SAME model — the catalogue proves it, the description of the row
+   titled `… 7 Cu Ft Burgundy (9160-WB-GD)` reads "Dawlance REF **9160LF** AVANTE PEARL BURGUNDY …
+   7 cu ft … finished in Burgundy".)* Run the same tokenizer on the page's strong text to get page
+   identities; for a page identity with the same digit-stem, compare the alpha tail:
    - same tail (`ifga`==`ifga`, incl. `538 IFGA INV` reformat) → exact;
-   - **no** tail on the page (`HRF-538`) → *omitted* → tolerated (last resort, flagged) — same as DW-7500C;
-   - **different** tail (`ifga` vs `ifpa`) → different variant → strength 0 (never used, never fallback).
+   - either side has **no** tail (`HRF-538`, `DSD-4890`) → *omitted* → tolerated (last resort, flagged);
+   - **different** tail (`ifga` vs `ifpa`, `wb` vs `lf`) → **tolerated**, i.e. deferred, used only when
+     the row found nothing else, and flagged in the review CSV — **not** strength 0.
 
-   **Zero vocabulary.** Pure digits+letters from the existing tokenizer → works for any brand, any
-   future model, no maintenance. This is the higher-value half of the fix.
+   Why not strength 0: a suffix is not reliably a variant code. Hard-rejecting it would break the
+   Dawlance rows above, which today already fail to match at all (measured: `9160-WB` keys vs a
+   `9160LF` page → `matched=False`). Demoting fixes both directions at once: the `IFGA`/`IFPA` page
+   stops being an immediate silent match, and the `WB`/`LF` page becomes available as a flagged last
+   resort instead of being lost.
+2. **Colour agreement is the hard reject** — it is the signal that is actually about the picture, and
+   it catches what the lenient suffix rule lets through (`9160-WB` Hairline **Black** vs the `9160LF`
+   Pearl **Copper** page → colour conflict → strength 0).
 
-2. **Colour agreement — primary colour word, compared raw, fail-open.** *(revised after the corpus
-   analysis: `variant-colour-corpus-report.md` §4)*. Take the colour word that ends **last** in the
-   text (series names such as "Dawlance **Chrome** …" sit early; the colourway "… Hairline **Black**
-   (9178-WB)" sits next to the code), then:
+   **Zero vocabulary on the suffix side.** Pure digits+letters from the existing tokenizer → works for
+   any brand, any future model, no maintenance.
+
+   Form of the colour rule *(revised after the corpus analysis: `variant-colour-corpus-report.md` §4)*:
+   take the colour word that ends **last** in the text (series names such as "Dawlance **Chrome** …"
+   sit early; the colourway "… Hairline **Black** (9178-WB)" sits next to the code), then
    - the title names a colour word **and** the page names at least one colour word **and** the title's
      word is not among the page's (`burgundy` vs `red`) → strength 0;
    - the page names none, or names the same word (`gray` and `grey` count as the same word) → exact.
 
    Compared **raw, never by family**: `burgundy`/`red` and `copper`/`gold` share a family, so family
    comparison keeps exactly the pairs that must be split (measured: 256/298 by family vs 280/298 raw).
+
+**Optional feature letters are already harmless.** Verified with the tokenizer: `DSD 4890 Silver SD`,
+`DSD 4890 Silver` and `DSD-4890` all produce the *same* identity `dsd4890`, because `Silver` is a
+`TAIL_STOPWORDS` member (the glue stops there) and the trailing `SD` is never glued into the identity.
+So an optional `SD` / `DD` / `INV` on either side cannot cause a mismatch, and needs no special case.
 
 ### Why this is the simplest dynamic fix
 It reuses two existing, tested machines (the identity tokenizer and the colour vocabulary) and adds one
@@ -139,11 +156,16 @@ Design consequences (this is what makes it non-hardcoded in the sense that matte
 - Test coverage for every new branch, including the fail-open path; no test touches the network.
 
 ## 7. OPEN QUESTIONS (owner)
-- Different suffix → strength 0 (never used) — confirm (recommended), vs tolerated. Measured on the
-  catalogue: 263 pairs separated, 122 same-suffix pairs unaffected, 0 one-sided-omission pairs in
-  titles (pages that omit the suffix stay *tolerated*, last resort, flagged).
+- ~~Different suffix → strength 0?~~ **Resolved 2026-10-07: no.** The owner corrected that `9160-WB`
+  and `9160LF` are the same model, and the catalogue agrees (one row's title says `9160-WB-GD`, its
+  description says `REF 9160LF`). A different suffix therefore **demotes to tolerated** (deferred,
+  last resort, flagged); only a colour conflict is a hard reject.
 - ~~Neutral set~~ — no longer a decision: the primary-colour-word rule does not need it (it is only a
   tie-breaker when a title names several colour words).
+
+**Effect of the revised policy on the catalogue** (of the 270 stem-sharing pairs that match today):
+192 hard-rejected by colour, 31 demoted to tolerated by suffix, 47 unchanged — and 40 of those 47 are
+pairs with identical colour words, i.e. correct keeps. Zero false rejects on the same-colour control.
 
 ## 7b. CORPUS EVIDENCE (Phase 0, `variant-colour-corpus-report.md`)
 - 1796 sheet rows → 752 distinct titles; 437 identities carry an alpha suffix.
