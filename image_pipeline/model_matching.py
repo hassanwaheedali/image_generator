@@ -25,7 +25,12 @@ from urllib.parse import unquote, urlsplit
 
 from models import ModelKeys
 from textnorm import WHITESPACE_RE, normalize_key, normalize_text
-from variant_terms import COLOUR_FAMILIES, suffix_agreement
+from variant_terms import (
+    COLOUR_FAMILIES,
+    colour_word_conflict,
+    primary_colour_word,
+    suffix_agreement,
+)
 
 # --------------------------------------------------------------------------- #
 # constants
@@ -387,6 +392,7 @@ def _build(
         identities=identities,
         colours=tuple(sorted(extract_colour_families(title))),
         variant_facts=tuple(sorted(extract_variant_facts(title).items())),
+        colour_word=primary_colour_word(title) or "",
     )
 
 
@@ -567,13 +573,6 @@ def extract_colour_families(text: str) -> frozenset[str]:
                 found.add(family)
                 break
     return frozenset(found)
-
-
-def colour_conflict(title_colours: frozenset[str], page_colours: frozenset[str]) -> bool:
-    """True when both sides name a colour and they share no family at all."""
-    if not title_colours or not page_colours:
-        return False
-    return not (title_colours & page_colours)
 
 
 # --------------------------------------------------------------------------- #
@@ -939,9 +938,14 @@ def match_product(
         brand_match_min_digits=brand_match_min_digits,
         allow_key_truncation=allow_key_truncation,
     )
-    if not variant_separation_enabled or not match.matched or match.tolerated:
+    if not variant_separation_enabled or not match.matched:
         return match
-    if _page_names_another_variant(keys, strong_text):
+    if colour_word_conflict(keys.colour_word, strong_text):
+        # A different colour is a different picture, so the page is not this product at
+        # all - not even as a flagged last resort (owner decision 2026-10-07).  This is
+        # the one signal that rejects, and it outranks a tolerated spelling.
+        return ProductMatch(False, "colour_conflict", ())
+    if not match.tolerated and _page_names_another_variant(keys, strong_text):
         return replace(match, tolerated=True)
     return match
 

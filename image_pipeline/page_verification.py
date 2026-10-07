@@ -22,8 +22,6 @@ from soupsieve import match as css_match
 
 from config import PipelineConfig
 from model_matching import (
-    colour_conflict,
-    extract_colour_families,
     extract_variant_facts,
     match_product,
     near_miss_codes,
@@ -283,7 +281,7 @@ class MatchSettings:
     brand_match_min_length: int = 5
     brand_match_min_digits: int = 3
     brand_match_reject_other_brand_domain: bool = True
-    check_colour_match: bool = True
+    variant_separation_enabled: bool = True
     flag_variant_mismatch: bool = True
     allow_title_only_verification: bool = False
 
@@ -295,7 +293,7 @@ class MatchSettings:
             brand_match_min_length=config.brand_match_min_length,
             brand_match_min_digits=config.brand_match_min_digits,
             brand_match_reject_other_brand_domain=config.brand_match_reject_other_brand_domain,
-            check_colour_match=config.check_colour_match,
+            variant_separation_enabled=config.variant_separation_enabled,
             flag_variant_mismatch=config.flag_variant_mismatch,
             allow_title_only_verification=config.allow_title_only_verification,
         )
@@ -327,10 +325,12 @@ def verify_page(
     """Safeguard S1: does this page show *this* product?  (strength 2 / 1 / 0)
 
     Two recognition rules only (model key, brand + code - see
-    :func:`model_matching.match_product`).  A colour or variant difference is recorded
-    as a note and keeps the page (customer decisions of 2026-10-05); a page that
-    contradicts another brand's domain, or shows no code at all, is strength 0 and
-    yields nothing.
+    :func:`model_matching.match_product`).  A page that shows another colourway is
+    strength 0 as well: the colour is part of the product's identity, and publishing
+    the wrong colour costs the company a penalty (customer decision 2026-10-07,
+    superseding the 2026-10-05 "flag it and keep it" rule).  A size/type difference
+    stays a note; a page that contradicts another brand's domain, or shows no code at
+    all, is strength 0 and yields nothing.
     """
     options = settings or MatchSettings()
     if not keys:
@@ -365,30 +365,29 @@ def verify_page(
         brand_match_min_length=options.brand_match_min_length,
         brand_match_min_digits=options.brand_match_min_digits,
         allow_key_truncation=options.allow_key_truncation_match,
+        variant_separation_enabled=options.variant_separation_enabled,
     )
     strength = decision.strength
     notes: list[str] = []
 
-    if strength > 0:
-        # Colour and variant differences annotate the run report; they never reject
-        # the page (customer decision: the source URLs are curated by hand).
-        if options.check_colour_match and keys.colours:
-            page_colours = extract_colour_families(page_name)
-            if colour_conflict(frozenset(keys.colours), page_colours):
-                notes.append(
-                    f"colour mismatch (flagged): title says {'/'.join(keys.colours)}, "
-                    f"page says {'/'.join(sorted(page_colours))}"
-                )
-        if options.flag_variant_mismatch and keys.variant_facts:
-            title_facts = keys.variant_dict()
-            page_facts = extract_variant_facts(page_name)
-            notes.extend(
-                f"variant mismatch (flagged): {axis} {title_facts.get(axis, '?')} (title) vs "
-                f"{page_facts.get(axis, '?')} (page)"
-                for axis in variant_conflicts(title_facts, page_facts)
-            )
+    # A size/type difference only annotates the run report; a colour difference is not
+    # flagged here any more - match_product rejects that page outright.
+    if strength > 0 and options.flag_variant_mismatch and keys.variant_facts:
+        title_facts = keys.variant_dict()
+        page_facts = extract_variant_facts(page_name)
+        notes.extend(
+            f"variant mismatch (flagged): {axis} {title_facts.get(axis, '?')} (title) vs "
+            f"{page_facts.get(axis, '?')} (page)"
+            for axis in variant_conflicts(title_facts, page_facts)
+        )
 
-    if strength == 0:
+    if decision.rule == "colour_conflict":
+        # The page carries the model's own code but a different colourway.
+        detail = (
+            f"page shows another colourway (title: {keys.colour_word}) - "
+            "a different colour is a different product"
+        )
+    elif strength == 0:
         hints = near_miss_codes(page_name, keys)
         detail = "no model key found on the page"
         if hints:

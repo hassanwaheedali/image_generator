@@ -8,6 +8,7 @@ a config or the network.  The pipeline behaviour they drive is covered in
 from __future__ import annotations
 
 from variant_terms import (
+    colour_word_conflict,
     colour_words,
     identity_alpha_tail,
     primary_colour_conflict,
@@ -239,3 +240,12 @@ def test_an_unknown_colour_name_never_conflicts() -> None:
         "pel dispenser pwd 425 gd maroon blaze",
         "pel dispenser pwd 425 gd marine impression",
     )
+
+
+def test_the_title_colour_can_be_supplied_directly() -> None:
+    """Recognition computes the title's colour once; the verdict must not re-parse it."""
+    assert colour_word_conflict("burgundy", "dawlance avante refrigerator 7 cu ft red 9160 wb gd")
+    assert not colour_word_conflict("burgundy", "dawlance ref 9160lf avante pearl burgundy")
+    assert not colour_word_conflict("burgundy", "dawlance avante refrigerator 7 cu ft 9160 wb gd")
+    assert not colour_word_conflict(None, "dawlance avante refrigerator 7 cu ft red 9160 wb gd")
+    assert not colour_word_conflict("", "dawlance avante refrigerator 7 cu ft red 9160 wb gd")

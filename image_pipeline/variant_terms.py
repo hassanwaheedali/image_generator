@@ -166,7 +166,7 @@ def primary_colour_word(text: str) -> str | None:
     return _canonical(best[2]) if best is not None else None
 
 
-def primary_colour_conflict(title_text: str, page_text: str) -> bool:
+def colour_word_conflict(title_word: str | None, page_text: str) -> bool:
     """True when the page names colours and its own colour is not the title's.
 
     Two steps, both deliberately forgiving:
@@ -182,14 +182,18 @@ def primary_colour_conflict(title_text: str, page_text: str) -> bool:
 
     Whether two words are the same colour is :func:`_same_colour`.
     """
-    title_word = primary_colour_word(title_text)
-    if title_word is None:
+    if not title_word:
         return False
     page_words = colour_words(page_text)
     if not page_words or title_word in page_words:
         return False
     page_word = primary_colour_word(page_text)
     return page_word is not None and not _same_colour(title_word, page_word)
+
+
+def primary_colour_conflict(title_text: str, page_text: str) -> bool:
+    """:func:`colour_word_conflict` with the title's colour read from its own text."""
+    return colour_word_conflict(primary_colour_word(title_text), page_text)
 
 
 # --------------------------------------------------------------------------- #

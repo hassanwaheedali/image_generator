@@ -7,7 +7,6 @@ import pytest
 from model_matching import (
     build_model_keys,
     code_like_tokens,
-    colour_conflict,
     extract_colour_families,
     extract_variant_facts,
     find_matching_keys,
@@ -188,14 +187,13 @@ def test_code_like_tokens_ignore_noise() -> None:
 # --------------------------------------------------------------------------- #
 # colour (plan section 3.6)
 # --------------------------------------------------------------------------- #
-def test_colour_families_and_conflict() -> None:
+def test_colour_families_still_collapse_synonyms() -> None:
+    """This feeds the gallery swatch filter; the variant rule lives in variant_terms."""
     assert extract_colour_families("Homage Refrigerator Golden") == frozenset({"gold"})
     assert extract_colour_families("Haier AC White") == frozenset({"white"})
-    assert colour_conflict(frozenset({"gold"}), frozenset({"black"}))
-    assert not colour_conflict(frozenset({"gold"}), frozenset())
-    assert not colour_conflict(frozenset({"gold"}), frozenset({"gold"}))
     # silver counts as grey, champagne as gold
-    assert not colour_conflict(frozenset({"gold"}), extract_colour_families("Champagne Gold"))
+    assert extract_colour_families("Champagne Gold") == frozenset({"gold"})
+    assert extract_colour_families("Dawlance DW-7500 Black Grey") == frozenset({"black", "grey"})
 
 
 def test_title_colours_come_from_brackets() -> None:
@@ -422,6 +420,78 @@ def test_variant_separation_can_be_switched_off() -> None:
         brand="haier",
         strong_text="Haier HRF-538 IFPA refrigerator",
         variant_separation_enabled=False,
+    )
+    assert verdict.matched
+    assert not verdict.tolerated
+
+
+# --------------------------------------------------------------------------- #
+# variant separation: colour (plan: variant-separation, task 3)
+# --------------------------------------------------------------------------- #
+BURGUNDY_TITLE = "Dawlance Avante Freezer-On-Top Refrigerator 7 Cu Ft Burgundy (9160-WB-GD)"
+RED_PAGE = "Dawlance Avante Freezer-On-Top Refrigerator 7 Cu Ft Red (9160-WB-GD)"
+
+
+def test_the_title_carries_its_own_colour_word() -> None:
+    """Computed once with the keys, so the verdict never re-parses the title."""
+    assert build_model_keys(BURGUNDY_TITLE).colour_word == "burgundy"
+    assert build_model_keys("Haier Thunder Inverter AC 1.5 Ton (HSU-18HFT)-Silver").colour_word == "silver"
+    assert build_model_keys("Haier Inventer T3 Air Conitioner 2 Ton (HSU-24HFAB)").colour_word == ""
+
+
+def test_a_page_showing_a_different_colour_is_not_this_product() -> None:
+    """Owner rule: a different colour is a different picture, so the page is rejected.
+
+    Both titles carry the *same* code (9160-WB-GD) and ``burgundy``/``red`` even share a
+    colour family, so nothing else in the pipeline could tell these two rows apart.
+    """
+    keys = build_model_keys(BURGUNDY_TITLE)
+    verdict = match_product(keys=keys, brand="dawlance", strong_text=RED_PAGE)
+    assert not verdict.matched
+    assert verdict.strength == 0
+    assert verdict.rule == "colour_conflict"
+
+
+def test_a_longer_name_for_the_same_colour_still_matches() -> None:
+    """"Pearl Burgundy" is the row's own colour spelled longer, not another variant."""
+    keys = build_model_keys(BURGUNDY_TITLE)
+    verdict = match_product(
+        keys=keys,
+        brand="dawlance",
+        strong_text="Dawlance Avante Freezer-On-Top Refrigerator 7 Cu Ft Pearl Burgundy (9160-WB-GD)",
+    )
+    assert verdict.matched
+    assert not verdict.tolerated
+
+
+def test_a_page_that_omits_the_colour_still_matches() -> None:
+    """Omission never penalises: most pages do not repeat the colourway."""
+    keys = build_model_keys(BURGUNDY_TITLE)
+    verdict = match_product(
+        keys=keys, brand="dawlance", strong_text="Dawlance Avante Freezer-On-Top Refrigerator 9160-WB-GD"
+    )
+    assert verdict.matched
+
+
+def test_a_title_without_a_colour_still_matches() -> None:
+    """360 of the 752 catalogue titles name no colour; those rows must be untouched."""
+    keys = build_model_keys("Haier Inventer T3 Air Conitioner 2 Ton (HSU-24HFAB)")
+    verdict = match_product(keys=keys, brand="haier", strong_text="Haier T3 Inverter AC 2 Ton HSU-24HFAB White")
+    assert verdict.matched
+
+
+def test_a_colour_conflict_outranks_a_tolerated_spelling() -> None:
+    """The colour is about the picture, so it rejects even where the code was tolerated."""
+    keys = build_model_keys("Dawlance Semi Automatic Washing Machine 10kg Black (DW-7500C)")
+    verdict = match_product(keys=keys, brand="dawlance", strong_text="Dawlance DW-7500 twin tub white")
+    assert not verdict.matched
+    assert verdict.rule == "colour_conflict"
+
+
+def test_colour_separation_can_be_switched_off() -> None:
+    keys = build_model_keys(BURGUNDY_TITLE)
+    verdict = match_product(
+        keys=keys, brand="dawlance", strong_text=RED_PAGE, variant_separation_enabled=False
     )
     assert verdict.matched
     assert not verdict.tolerated

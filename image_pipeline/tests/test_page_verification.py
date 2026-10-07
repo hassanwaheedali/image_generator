@@ -53,17 +53,47 @@ def test_weak_page_extracts_gallery() -> None:
     assert result.match_rule == "body_model_key"
 
 
-def test_colour_conflict_flags_the_row_but_keeps_it() -> None:
-    """Customer decision (2026-10-05): a colour difference is a flag, not a failure."""
+def test_a_page_showing_another_colour_is_rejected() -> None:
+    """Customer decision (2026-10-07): another colourway is another product.
+
+    This supersedes the 2026-10-05 rule that flagged the difference and kept the
+    page - publishing the wrong colour costs the company a penalty, so the page is
+    strength 0 and the row keeps looking for the colour it was asked for.
+    """
     html = """<html><head><title>Haier HRF-538 IFGA Refrigerator Black</title></head>
     <body><h1>Haier HRF-538 IFGA Black</h1></body></html>"""
     keys = build_model_keys("Haier Refrigerator HRF-538 IFGA Golden")
     result = verify_page("https://www.haier.com/pk/hrf-538", html, keys, brand="haier")
+    assert result.strength == 0
+    assert result.match_rule == "colour_conflict"
+    assert "another colourway" in result.detail
+    assert result.variant_notes == ()          # the rejection says it, no note needed
+
+
+def test_the_same_colour_in_longer_words_still_matches() -> None:
+    """"Pearl Golden" on the page is the row's own colour, not another variant."""
+    html = """<html><head><title>Haier HRF-538 IFGA Refrigerator Pearl Golden</title></head>
+    <body><h1>Haier HRF-538 IFGA</h1></body></html>"""
+    keys = build_model_keys("Haier Refrigerator HRF-538 IFGA Golden")
+    result = verify_page("https://www.haier.com/pk/hrf-538", html, keys, brand="haier")
     assert result.strength == 2
     assert result.match_rule == "model_key"
-    assert result.variant_notes
-    note = result.variant_notes[0]
-    assert "colour mismatch" in note and "gold" in note and "black" in note
+
+
+def test_variant_separation_can_be_switched_off() -> None:
+    """One config field rolls the whole rule back (colour-blind matching returns)."""
+    html = """<html><head><title>Haier HRF-538 IFGA Refrigerator Black</title></head>
+    <body><h1>Haier HRF-538 IFGA Black</h1></body></html>"""
+    keys = build_model_keys("Haier Refrigerator HRF-538 IFGA Golden")
+    result = verify_page(
+        "https://www.haier.com/pk/hrf-538",
+        html,
+        keys,
+        brand="haier",
+        settings=MatchSettings(variant_separation_enabled=False),
+    )
+    assert result.strength == 2
+    assert result.match_rule == "model_key"
 
 
 def test_colour_silence_ok() -> None:

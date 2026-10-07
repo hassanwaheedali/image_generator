@@ -746,10 +746,12 @@ def _visit_page(
     soup = strip_unwanted_regions(_parse(response.text), resolved_url)
     match = verify_page(resolved_url, response.text, keys, brand=brand, settings=settings)
     relaxed = ""
-    if not match.accepted and is_fallback:
+    if not match.accepted and is_fallback and match.match_rule != "colour_conflict":
         # Owner decision 2026-10-06: a fallback page that names the brand and carries the
         # model's own number publishes its pictures and flags the row for manual review,
-        # instead of failing.  Sheet URLs never come here.
+        # instead of failing.  Sheet URLs never come here.  A page rejected because it
+        # shows another colourway is never rescued: the colour is part of the product
+        # identity (owner decision 2026-10-07), so the row keeps looking instead.
         relaxed = _relaxed_fallback_note(
             page_url=resolved_url, soup=soup, keys=keys, brand=brand, config=config
         )

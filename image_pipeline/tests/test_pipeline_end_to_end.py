@@ -227,8 +227,11 @@ def test_second_url_is_used_when_the_first_fails(tmp_path: Path) -> None:
     assert page_fetcher.requested[1] == "https://www.haier.com/pk/alt.shtml"
 
 
-def test_colour_conflict_is_a_flag_not_a_failure(tmp_path: Path) -> None:
-    """Customer decision (2026-10-05): a colour difference is recorded, nothing more."""
+def test_a_different_colour_fails_the_row_instead_of_publishing_it(tmp_path: Path) -> None:
+    """Customer decision (2026-10-07): the sheet's URL shows the BLACK variant of a
+    GOLDEN row, so the page is rejected and nothing is published - not even with a
+    flag, because a wrong colour costs the company a penalty.  (Supersedes the
+    2026-10-05 "flag it and publish" rule.)"""
     config = live_config(tmp_path)
     html = """<html><head><title>Haier HRF-538 IFGA Refrigerator Black</title></head>
     <body><h1>Haier HRF-538 IFGA Black</h1>
@@ -236,14 +239,34 @@ def test_colour_conflict_is_a_flag_not_a_failure(tmp_path: Path) -> None:
     url = "https://www.haier.com/pk/hrf-538"
     images = {"https://cdn.haier.com/p/hrf-538-ifga-1.jpg": png_bytes(clean_product_image(900, 900))}
     deps, _, _, host = build_deps(tmp_path, {url: html}, images)
-    result, _ = process_product(
+    result, accepted = process_product(
         task(0, "Haier Refrigerator HRF-538 IFGA Golden", (url,)), deps, config
     )
-    assert result.status is Status.PARTIAL          # one image only, but published
-    assert "colour mismatch" in result.note
-    assert len(host.uploads) == 4                   # 1 image + banner on both platforms
-    assert result.digi_urls[-1] == result.alfa_urls[-1].replace("alfa", "digi")
-    assert result.digi_urls[:-1] and result.alfa_urls[:-1]
+    assert result.status is Status.FAILED
+    assert accepted == []
+    assert host.uploads == []          # not one pixel of the black variant went out
+    decisions = [
+        json.loads(line) for line in (tmp_path / "out" / "decisions.jsonl").read_text().splitlines()
+    ]
+    s1 = [line for line in decisions if line["rule_id"] == "S1"]
+    assert s1 and "another colourway" in s1[0]["detail"]
+
+
+def test_switching_variant_separation_off_publishes_the_page_again(tmp_path: Path) -> None:
+    """The single rollback field: with it off, colour is not looked at any more."""
+    config = replace(live_config(tmp_path), variant_separation_enabled=False)
+    html = """<html><head><title>Haier HRF-538 IFGA Refrigerator Black</title></head>
+    <body><h1>Haier HRF-538 IFGA Black</h1>
+    <div class="product-gallery"><img src="https://cdn.haier.com/p/hrf-538-ifga-1.jpg"></div></body></html>"""
+    url = "https://www.haier.com/pk/hrf-538"
+    images = {"https://cdn.haier.com/p/hrf-538-ifga-1.jpg": png_bytes(clean_product_image(900, 900))}
+    deps, _, _, host = build_deps(tmp_path, {url: html}, images)
+    result, accepted = process_product(
+        task(0, "Haier Refrigerator HRF-538 IFGA Golden", (url,)), deps, config
+    )
+    assert accepted                      # the photo is published as before
+    assert result.digi_urls and result.alfa_urls
+    assert host.uploads
 
 
 # --------------------------------------------------------------------------- #

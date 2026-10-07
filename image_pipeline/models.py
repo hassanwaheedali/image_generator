@@ -51,6 +51,7 @@ class ModelKeys:
     ``identities`` - glued identity cores, aligned with ``tokens`` ("hrf538ifga")
     ``colours``  - colour families named in the title, e.g. ("white",)
     ``variant_facts`` - ("axis", "value") pairs, e.g. (("capacity_kg", "10"),)
+    ``colour_word`` - the colour the title is selling ("burgundy"), "" when it names none
     """
 
     cleaned_title: str
@@ -59,6 +60,8 @@ class ModelKeys:
     identities: tuple[str, ...] = ()
     colours: tuple[str, ...] = ()
     variant_facts: tuple[tuple[str, str], ...] = ()
+    #: The title's own colour word, for variant separation ("" when it names no colour).
+    colour_word: str = ""
 
     @property
     def all_keys(self) -> tuple[str, ...]:
@@ -81,9 +84,10 @@ class PageMatchResult:
 
     ``strength`` 0 means: extract nothing (S1).  ``match_rule`` records *how* the
     page was accepted (``model_key`` / ``brand_code`` / ``body_model_key`` /
-    ``body_brand_code`` / ``none``) so the audit trail shows it.  ``variant_notes``
-    carries the colour and variant flags - they annotate the row, they never reject
-    a photo (customer decision).
+    ``body_brand_code`` / ``none``) so the audit trail shows it, and it also names the
+    one rejection that is not about a missing code: ``colour_conflict``.
+    ``variant_notes`` carries the size/type flags - they annotate the row, they never
+    reject a photo (customer decision).
     """
 
     url: str

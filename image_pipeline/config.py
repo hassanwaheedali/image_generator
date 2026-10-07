@@ -205,8 +205,13 @@ class PipelineConfig:
     brand_match_max_extra_tokens: int = 2        # glue "HRF-538 IFGA" -> hrf538ifga
     brand_match_reject_other_brand_domain: bool = True   # never on samsung.com for Dawlance
 
+    # --- variant separation: one switch, two signals (plan: variant-separation)
+    # A page printing another colourway is NOT this product, so it is rejected (S1);
+    # a page that only spells the code's letter tail differently is kept but flagged,
+    # because those tails are printed inconsistently by the brands themselves.
+    variant_separation_enabled: bool = True
+
     # --- flags: they annotate run_report.csv, they never reject a photo ------
-    check_colour_match: bool = True              # title colour vs page colour
     flag_variant_mismatch: bool = True           # size/type mismatch -> publish + flag
 
     # ----- fallback source chain (plan.md section 11, customer-approved) ----
