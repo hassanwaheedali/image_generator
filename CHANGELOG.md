@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **S8 header-probe judged the smallest listed variant, not the asset.** Shopify pages list a
+  `_288x` thumb whose `_1024x` sibling is the real photo; the probe hit the 288px file and rejected
+  at S8 before the large form was requested. The probe now targets the largest rewrite first, and a
+  `shopify-single` rule (`_NNNx.ext` → `_1024x1024.ext`) makes single-dimension thumbs rewrite at
+  all. Live log showed dozens of spurious `too small 288x288 (header probe)` rejects.
 - **JSON-LD / embedded-JSON `image` fields that are page routes no longer burn downloads.** A shop
   may put a timestamped page URL in `image` (live: telex.pk `/products/2026-06-28T…` → HTTP 404).
   Both JSON sources now emit only URLs with a real raster extension (`url_filters.has_image_extension`),

@@ -13,6 +13,7 @@ from url_filters import (
     host_is_other_manufacturer,
     is_fetchable_product_url,
     prioritize_source_urls,
+    upscale_candidates,
 )
 
 
@@ -197,6 +198,12 @@ def test_other_manufacturer_domain_guard() -> None:
     assert not host_is_other_manufacturer("www.dawlance.com.pk", "dawlance")
     assert not host_is_other_manufacturer("www.daraz.pk", "dawlance")
     assert not host_is_other_manufacturer("eshop.pel.com.pk", "pel")
+
+
+def test_shopify_single_dimension_thumb_is_upscaled() -> None:
+    variants = upscale_candidates("https://cdn.shop.example/p/product_288x.png")
+    assert variants[0] == "https://cdn.shop.example/p/product_1024x1024.png"
+    assert variants[-1] == "https://cdn.shop.example/p/product_288x.png"
 
 
 def test_has_image_extension_separates_assets_from_page_routes() -> None:

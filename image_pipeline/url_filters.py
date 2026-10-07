@@ -443,6 +443,9 @@ UPSCALE_REWRITE_RULES: tuple[tuple[str, str, str], ...] = (
     ("haier-thumb", r"_\d{2,3}(\.(?:jpg|jpeg|png|webp))$", r"_1000\1"),
     # Shopify / Shopline sized variants.
     ("shopify-size", r"_(\d{2,4})x(\d{2,4})(\.(?:jpg|jpeg|png|webp))$", r"_1024x1024\3"),
+    # Shopify single-dimension thumbs (``_288x.png``): the same asset exists much larger, and
+    # probing the 288px variant rejects it at S8 before the large sibling is ever requested.
+    ("shopify-single", r"_\d{2,4}x(\.(?:jpg|jpeg|png|webp))$", r"_1024x1024\1"),
     # Magento resized cache directories.
     ("magento-cache", r"/cache/[0-9a-f]{16,}/", "/"),
     # WordPress / WooCommerce resize suffixes.

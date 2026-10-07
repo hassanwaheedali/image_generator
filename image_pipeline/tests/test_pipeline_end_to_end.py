@@ -629,6 +629,38 @@ def test_header_probe_rejects_tiny_image_without_a_download(tmp_path: Path) -> N
     assert s8 and "header probe" in s8[0]["detail"]
 
 
+def test_header_probe_asks_for_the_largest_rewrite_not_the_tiny_variant(tmp_path: Path) -> None:
+    """S8 must judge the asset, not the smallest variant the page happens to list.
+
+    A Shopify page lists ``_288x.png``; the same asset exists as ``_1024x1024.png``.  Before
+    the fix the probe hit the 288px file and rejected the product at S8 without ever asking
+    for the large form.  Now the probe targets the largest rewrite, so the product passes and
+    the large image is downloaded.
+    """
+    config = live_config(tmp_path)
+    small = "https://cdn.shop.example/p/hsu-12hfpaa-1_288x.png"
+    big = "https://cdn.shop.example/p/hsu-12hfpaa-1_1024x1024.png"
+    page = f"""<html><head><title>Haier HSU-12HFPAA Inverter AC</title></head>
+    <body><div class="product-gallery"><img src="{small}"></div></body></html>"""
+
+    def header(side: int) -> bytes:
+        return (
+            b"\x89PNG\r\n\x1a\n" + (13).to_bytes(4, "big") + b"IHDR"
+            + side.to_bytes(4, "big") + side.to_bytes(4, "big")
+        )
+
+    deps, _, image_fetcher, _ = build_deps(tmp_path, {HAIER_PAGE: page}, {big: png_bytes(clean_product_image())})
+    image_fetcher.probe_headers[small] = header(288)
+    image_fetcher.probe_headers[big] = header(1024)
+    result, images = process_product(
+        task(0, "Haier HSU-12HFPAA Inverter AC", (HAIER_PAGE,)), deps, config
+    )
+    assert len(images) == 1
+    assert big in image_fetcher.probes          # the probe went for the large form
+    assert small not in image_fetcher.probes    # ...and never judged the thumbnail
+    assert big in image_fetcher.requested
+
+
 def test_largest_size_rewrite_is_tried_first_then_the_original(tmp_path: Path) -> None:
     config = live_config(tmp_path)
     page = """<html><head><title>Haier HSU-12HFPAA Inverter AC</title></head>

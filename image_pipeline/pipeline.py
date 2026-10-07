@@ -1019,9 +1019,17 @@ def _consume_candidates(
             )
             continue
 
-        # (a) header-only probe: kills thumbnails and banners without downloading them
+        # (a) header-only probe: kills thumbnails and banners without downloading them.
+        # Probe the LARGEST rewrite, not the URL as found: Shopify pages list a tiny
+        # ``_288x`` variant whose ``_1024x`` sibling is the real asset, and probing the small
+        # one rejected the product at S8 before the large form was ever requested.
         if config.image_probe_enabled:
-            dimensions = _probe_dimensions(deps, candidate.url, page_url, config)
+            probe_url = (
+                upscale_candidates(candidate.url)[0]
+                if config.url_rewrite_enabled
+                else candidate.url
+            )
+            dimensions = _probe_dimensions(deps, probe_url, page_url, config)
             rule, detail = probe_verdict(
                 dimensions,
                 min_short_side=config.min_short_side,
