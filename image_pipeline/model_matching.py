@@ -24,6 +24,7 @@ from functools import lru_cache
 from urllib.parse import unquote, urlsplit
 
 from models import ModelKeys
+from similarity import similar
 from textnorm import WHITESPACE_RE, normalize_key, normalize_text
 from variant_terms import (
     COLOUR_FAMILIES,
@@ -941,6 +942,51 @@ def _page_names_another_variant(keys: ModelKeys, strong_text: str) -> bool:
     """
     return suffix_agreement(keys.identities, build_model_keys(strong_text).identities) == "different"
 
+
+@dataclass(frozen=True)
+class ScoreMatch:
+    """The scored matcher's view of (row, page): per-attribute vetoes + a confidence.
+
+    A veto means the page positively contradicts the row on that attribute and may
+    never publish; the pipeline demotes it to the fallback / flagged band instead.
+    ``confidence`` is the share of the row's name words the page also carries - 1.0 when
+    the row names nothing to compare (fail open).
+    """
+
+    series_veto: bool
+    colour_veto: bool
+    size_veto: bool
+    confidence: float = 1.0
+
+    @property
+    def veto(self) -> bool:
+        """Any positive contradiction - the page is not this product."""
+        return self.series_veto or self.colour_veto or self.size_veto
+
+
+def _name_word_confidence(row_words: tuple[str, ...], page_words: tuple[str, ...]) -> float:
+    if not row_words:
+        return 1.0
+    matched = sum(1 for word in row_words if any(similar(word, page) for page in page_words))
+    return matched / len(row_words)
+
+
+def score_match(keys: ModelKeys, strong_text: str) -> ScoreMatch:
+    """Score a page's strong text against the row's keys (additive to match_product).
+
+    Three independent vetoes, each fail-open (an absent attribute is never a veto):
+    * series - the row carries a name word the page does not (``Daimond`` vs ``Cuby``);
+    * colour - the row's colour word conflicts with the page (existing primitive);
+    * size   - a capacity/type fact contradicts (existing ``variant_conflicts``).
+    """
+    page = build_model_keys(strong_text)
+    confidence = _name_word_confidence(keys.name_words, page.name_words)
+    return ScoreMatch(
+        series_veto=bool(keys.name_words) and confidence < 1.0,
+        colour_veto=colour_word_conflict(keys.colour_word, strong_text),
+        size_veto=bool(variant_conflicts(keys.variant_dict(), extract_variant_facts(strong_text))),
+        confidence=confidence,
+    )
 
 def match_product(
     *,
