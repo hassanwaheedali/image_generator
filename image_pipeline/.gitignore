@@ -6,7 +6,6 @@ env.txt
 
 # Run artefacts
 output/
-state/
 
 # Python
 __pycache__/

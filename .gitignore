@@ -16,8 +16,8 @@ env.txt
 # Run Artifacts & Generated State
 output/
 **/output/
-state/
-**/state/
+# state/
+# **/state/
 *.log
 *.sqlite
 *.sqlite3
