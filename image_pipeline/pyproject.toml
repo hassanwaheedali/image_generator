@@ -37,6 +37,7 @@ py-modules = [
     "protocols",
     "sources",
     "url_filters",
+    "variant_terms",
 ]
 
 [project]

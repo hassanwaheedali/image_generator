@@ -24,6 +24,7 @@ from functools import lru_cache
 from urllib.parse import unquote, urlsplit
 
 from models import ModelKeys
+from variant_terms import COLOUR_FAMILIES
 
 # --------------------------------------------------------------------------- #
 # constants
@@ -64,22 +65,11 @@ TAIL_STOPWORDS: frozenset[str] = frozenset(
 
 # --------------------------------------------------------------------------- #
 # colour families (synonyms collapse; plan section 3.6)
+#
+# The vocabulary itself lives in :mod:`variant_terms`, the single source of truth for
+# both colour *recognition* (below) and variant *separation*.  It is imported, not
+# redefined, so the two can never drift apart.
 # --------------------------------------------------------------------------- #
-COLOUR_FAMILIES: dict[str, tuple[str, ...]] = {
-    "white": ("white", "off white", "off-white", "ivory white", "pure white", "pearl"),
-    "black": ("black", "jet black", "midnight black", "matte black"),
-    "grey": ("grey", "gray", "graphite", "silver", "stainless steel", "steel", "chrome"),
-    "gold": ("gold", "golden", "champagne", "bronze", "copper", "rose gold"),
-    "beige": ("beige", "cream", "ivory", "sand"),
-    "brown": ("brown", "walnut", "wood", "wooden", "chocolate", "maroon brown"),
-    "red": ("red", "maroon", "burgundy", "cherry", "wine"),
-    "blue": ("blue", "navy", "sky blue", "azure"),
-    "green": ("green", "olive", "mint"),
-    "purple": ("purple", "violet", "lavender"),
-    "pink": ("pink", "rose"),
-    "orange": ("orange", "amber"),
-    "yellow": ("yellow",),
-}
 
 # --------------------------------------------------------------------------- #
 # variant axes (capacity / size / type words; plan section 3.6)
