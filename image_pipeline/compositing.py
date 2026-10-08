@@ -308,7 +308,7 @@ def template_has_transparency(template: Image.Image, *, min_alpha: int) -> bool:
     template.  ``min_alpha`` is the configurable line between the two cases.
     """
     alpha = np.asarray(template.convert("RGBA"), dtype=np.uint8)[:, :, 3]
-    return bool(alpha.min() < min_alpha)
+    return bool(np.min(alpha) < min_alpha)
 
 
 def make_white_transparent(

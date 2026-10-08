@@ -243,7 +243,7 @@ def border_is_clean(
     if fraction < min_fraction:
         return False
     return all(
-        band.shape[0] <= 8 or float(band.std(axis=0).max()) <= std_max for band in bands
+        band.shape[0] <= 8 or float(np.max(band.std(axis=0))) <= std_max for band in bands
     )
 
 
@@ -261,8 +261,8 @@ def corner_patch_stats(image: Image.Image, ratio: float) -> list[tuple[float, fl
     stats: list[tuple[float, float]] = []
     for patch in patches:
         mean = patch.reshape(-1, 3).mean(axis=0)
-        maximum = float(mean.max()) / 255.0
-        minimum = float(mean.min()) / 255.0
+        maximum = float(np.max(mean)) / 255.0
+        minimum = float(np.min(mean)) / 255.0
         saturation = 0.0 if maximum <= 0 else (maximum - minimum) / maximum
         stats.append((maximum, saturation))
     return stats
@@ -367,7 +367,7 @@ def _scan_promo_band(
             window = array[band_inner : band_inner + gap]
         if window.shape[0] < gap:
             continue
-        if float(window.mean(axis=(1, 2)).min()) < config.promo_band_gap_min_mean:
+        if float(np.min(window.mean(axis=(1, 2)))) < config.promo_band_gap_min_mean:
             continue
         return side, band_edge, band_inner
     return None
