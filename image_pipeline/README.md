@@ -471,7 +471,7 @@ The three built-in extractors are `dawlance.py` (MDM code from the page URL), `h
 ```bash
 python3 -m ruff check .          # lint (must print: All checks passed!)
 python3 -m mypy --strict .       # types (must print: Success: no issues found)
-python3 -m pytest tests -q        # 326 tests, fakes only, no network
+python3 -m pytest tests -q        # 327 tests, fakes only, no network
 python3 -m radon cc . -n C -s --exclude "tests/*"
                                   # code health: 45 blocks at C or worse today (all
                                   # pre-existing hotspots) - a 46th means a function

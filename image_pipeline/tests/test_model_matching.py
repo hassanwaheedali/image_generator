@@ -525,3 +525,16 @@ def test_category_words_are_noise_not_series_names() -> None:
     oven = build_model_keys("Kenwood Microwave Oven KMW-300 Black")
     assert oven.name_words == ("kenwood",)
     assert not score_match(oven, "Kenwood KMW-300 Microwave", "kenwood").series_veto
+
+
+def test_fallback_match_ignores_the_search_query_in_the_url() -> None:
+    """A search-result URL echoes the searched number in ``?_psq=``, so the query must
+    not be evidence - otherwise a wrong product's result "matches" itself (live bug
+    2026-10-08: PWM-1250 row tolerated a PWMS-1050 page purely via the query string)."""
+    keys = build_model_keys("PEL Top Load Washing Machine White 12.5 Kg (PWM-1250)")
+    wrong = "https://shop.pk/products/pel-pwms-1050-twin-tub?_psq=PWM+1250"
+    right = "https://shop.pk/products/pel-pwm-1250-top-load?_psq=PWM+1250"
+    text_wrong = "PEL PWMS-1050 Semi Auto Twin Tub Washing Machine 10kg"
+    text_right = "PEL PWM-1250 Top Load Washing Machine White 12.5kg"
+    assert not relaxed_page_match(wrong, text_wrong, keys, "pel")[0]
+    assert relaxed_page_match(right, text_right, keys, "pel")[0]
