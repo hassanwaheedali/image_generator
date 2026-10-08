@@ -254,9 +254,19 @@ class CheckpointEntry:
         )
 
     def is_resume_done(self, source_url_hash: str) -> bool:
-        """Done = ok/partial, non-empty URL list, and unchanged source URLs."""
+        """Done = ok/partial, publicly published URLs, and unchanged source URLs.
+
+        A ``--dry-run`` entry carries ``file://`` local paths instead of real uploads;
+        resuming one into a live run would publish local paths to the platforms, so
+        dry entries must always be re-processed (owner run 2026-10-08: he deleted
+        ``output/`` and wondered why rows still said "already done" - the resume
+        cache lives in ``state/checkpoint.jsonl``, and dry entries poisoned it).
+        """
         if self.status not in (Status.OK, Status.PARTIAL):
             return False
-        if not self.digi_urls and not self.alfa_urls:
+        urls = (*self.digi_urls, *self.alfa_urls)
+        if not urls:
+            return False
+        if not all(url.startswith(("http://", "https://")) for url in urls):
             return False
         return self.source_url_hash == source_url_hash

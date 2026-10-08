@@ -196,3 +196,32 @@ def test_decisions_log_is_jsonl(tmp_path: Path) -> None:
     payloads = [json.loads(line) for line in lines]
     assert [payload["decision"] for payload in payloads] == ["keep", "reject"]
     assert payloads[1]["rule_id"] == "S5"
+
+
+def test_dry_run_checkpoint_entries_are_never_resumed() -> None:
+    """Owner run 2026-10-08: a dry-run wrote file:// URLs into the checkpoint and the
+    next (live) run skipped the row as done.  Dry entries must always re-process."""
+    from models import CheckpointEntry, Status
+
+    dry = CheckpointEntry(
+        title="Homage HRF-47662-GD",
+        source_url_hash="abc",
+        status=Status.PARTIAL,
+        digi_urls=("file:///tmp/output/images/x.jpg",),
+        alfa_urls=(),
+        reason="",
+        timestamp="2026-10-08T19:21:00",
+    )
+    assert dry.is_resume_done("abc") is False
+
+    live = CheckpointEntry(
+        title="Homage HRF-47662-GD",
+        source_url_hash="abc",
+        status=Status.PARTIAL,
+        digi_urls=("https://iili.io/some-upload.jpg",),
+        alfa_urls=(),
+        reason="",
+        timestamp="2026-10-08T19:21:00",
+    )
+    assert live.is_resume_done("abc") is True
+    assert live.is_resume_done("different-hash") is False
