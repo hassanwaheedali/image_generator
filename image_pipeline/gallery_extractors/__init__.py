@@ -245,7 +245,7 @@ def extract_candidates(context: ExtractionContext) -> list[ImageCandidate]:
     fallback (only when 1-4 produced nothing).  Candidates are de-duplicated by
     ``dedup_key`` and sorted colour-first, model-first, gallery order.
     """
-    from gallery_extractors import embedded_json, generic_gallery, json_ld
+    from gallery_extractors import embedded_json, generic_gallery, json_ld, state_json
 
     collected: list[ImageCandidate] = []
 
@@ -257,6 +257,7 @@ def extract_candidates(context: ExtractionContext) -> list[ImageCandidate]:
 
     collected.extend(json_ld.extract(context))
     collected.extend(embedded_json.extract(context))
+    collected.extend(state_json.extract(context))
     collected.extend(generic_gallery.extract_container_images(context))
 
     if not collected:
