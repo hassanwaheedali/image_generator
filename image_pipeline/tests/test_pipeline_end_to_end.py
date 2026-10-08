@@ -690,7 +690,7 @@ def test_largest_size_rewrite_is_tried_first_then_the_original(tmp_path: Path) -
     page = """<html><head><title>Haier HSU-12HFPAA Inverter AC</title></head>
     <body><div class="product-gallery">
       <img src="https://image.haier.com/p/hsu-12hfpaa-1_60.jpg"></div></body></html>"""
-    big = "https://image.haier.com/p/hsu-12hfpaa-1_1000.jpg"
+    big = "https://image.haier.com/p/hsu-12hfpaa-1_1680.jpg"
     deps, _, image_fetcher, _ = build_deps(
         tmp_path, {HAIER_PAGE: page}, {big: png_bytes(clean_product_image())}
     )
@@ -698,7 +698,7 @@ def test_largest_size_rewrite_is_tried_first_then_the_original(tmp_path: Path) -
         task(0, "Haier HSU-12HFPAA Inverter AC", (HAIER_PAGE,)), deps, config
     )
     assert len(images) == 1
-    assert image_fetcher.requested[0] == big              # the rewrite came first
+    assert image_fetcher.requested[0] == big              # the crisp rung came first
     assert images[0].source_url.endswith("_60.jpg")       # identity stays the page's URL
 
 
