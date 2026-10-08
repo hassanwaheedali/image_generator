@@ -203,7 +203,8 @@ def _non_background_mask(template: Image.Image) -> np.ndarray:
     rgb = array[:, :, :3]
     opaque = alpha > 8
     colourful = rgb.min(axis=2) < 245
-    return opaque & colourful
+    # asarray keeps the declared ndarray return type (mypy --strict) at zero cost
+    return np.asarray(opaque & colourful, dtype=bool)
 
 
 def header_safe_margin(template: Image.Image, config: PipelineConfig) -> int:
