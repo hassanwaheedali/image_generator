@@ -23,8 +23,11 @@ from bs4 import BeautifulSoup
 from PIL import Image
 
 from compositing import (
+    PreparedTemplate,
     apply_template,
     isolate_main_product,
+    prepare_template,
+    product_content_bbox,
     sharpen,
     to_jpeg_bytes,
     to_square_canvas,
@@ -1323,15 +1326,22 @@ def _compose_and_save(
     square_path = _save_local(
         square, config, task.title, ImageRole.ISOLATED, f"{index:02d}-square.jpg"
     )
+    bbox = product_content_bbox(
+        square,
+        white_level=config.product_content_white_level,
+        min_ratio=config.product_content_min_ratio,
+    )
+    digi_prepared = _load_prepared_template(config, "digimall_template")
+    alfa_prepared = _load_prepared_template(config, "alfamall_template")
     digi_path = _save_local(
-        apply_template(square, _load_asset(config, "digimall_template"), config),
+        apply_template(square, digi_prepared.base, config, bbox=bbox, prepared=digi_prepared),
         config,
         task.title,
         ImageRole.FINAL_DIGIMALL,
         f"{index:02d}-digimall.jpg",
     )
     alfa_path = _save_local(
-        apply_template(square, _load_asset(config, "alfamall_template"), config),
+        apply_template(square, alfa_prepared.base, config, bbox=bbox, prepared=alfa_prepared),
         config,
         task.title,
         ImageRole.FINAL_ALFAMALL,
@@ -1362,6 +1372,8 @@ def _compose_and_save(
 
 _ASSET_CACHE: dict[str, Image.Image] = {}
 _ASSET_LOCK = threading.Lock()
+_PREPARED_TEMPLATE_CACHE: dict[tuple[str, float, int, int], PreparedTemplate] = {}
+_PREPARED_LOCK = threading.Lock()
 
 
 def _load_asset(config: PipelineConfig, key: str) -> Image.Image:
@@ -1374,6 +1386,27 @@ def _load_asset(config: PipelineConfig, key: str) -> Image.Image:
             cached = Image.open(path).convert("RGBA")
             cached.load()
             _ASSET_CACHE[cache_key] = cached
+        return cached
+
+
+def _load_prepared_template(config: PipelineConfig, key: str) -> PreparedTemplate:
+    """Load and prepare a template once per run with double-checked locking."""
+    path = config.asset_paths[key]
+    cache_key = (
+        str(path),
+        config.template_top_scan_ratio,
+        config.template_header_gap_px,
+        config.template_white_cutoff,
+    )
+    cached = _PREPARED_TEMPLATE_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    with _PREPARED_LOCK:
+        cached = _PREPARED_TEMPLATE_CACHE.get(cache_key)
+        if cached is None:
+            raw = _load_asset(config, key)
+            cached = prepare_template(raw, config)
+            _PREPARED_TEMPLATE_CACHE[cache_key] = cached
         return cached
 
 

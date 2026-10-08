@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import logging
+from dataclasses import dataclass
 
 import numpy as np
 from PIL import Image, ImageFilter
@@ -197,12 +198,12 @@ def sharpen(image: Image.Image, *, radius: float, percent: int, threshold: int) 
 def _non_background_mask(template: Image.Image) -> np.ndarray:
     """Pixels that are neither transparent nor near-white."""
     rgba = template.convert("RGBA")
-    array = np.asarray(rgba, dtype=int)
+    array = np.asarray(rgba)
     alpha = array[:, :, 3]
     rgb = array[:, :, :3]
     opaque = alpha > 8
     colourful = rgb.min(axis=2) < 245
-    return np.asarray(opaque & colourful, dtype=bool)
+    return opaque & colourful
 
 
 def header_safe_margin(template: Image.Image, config: PipelineConfig) -> int:
@@ -336,23 +337,59 @@ def make_white_transparent(
     return Image.fromarray(array, mode="RGBA")
 
 
+@dataclass(frozen=True)
+class PreparedTemplate:
+    """Immutable precomputed overlay and bounding content box for a template."""
+
+    content_box: tuple[int, int, int, int]
+    base: Image.Image
+
+
+def prepare_template(template: Image.Image, config: PipelineConfig) -> PreparedTemplate:
+    """Precompute template content box and transparency mask once per template asset."""
+    box = template_content_box(template, config)
+    base = template.convert("RGBA")
+    if config.template_make_white_transparent and not template_has_transparency(
+        template, min_alpha=config.template_transparency_min_alpha
+    ):
+        base = make_white_transparent(template, config.template_white_cutoff, box=box)
+    return PreparedTemplate(content_box=box, base=base)
+
+
 def apply_template(
     product_square: Image.Image,
     template: Image.Image,
     config: PipelineConfig,
+    *,
+    bbox: tuple[int, int, int, int] | None = None,
+    prepared: PreparedTemplate | None = None,
 ) -> Image.Image:
     """Composite the product into the template and put the overlay back on top."""
-    left, top, right, bottom = template_content_box(template, config)
+    if prepared is not None:
+        left, top, right, bottom = prepared.content_box
+        base = prepared.base
+    else:
+        left, top, right, bottom = template_content_box(template, config)
+        base = template.convert("RGBA")
+        if config.template_make_white_transparent and not template_has_transparency(
+            template, min_alpha=config.template_transparency_min_alpha
+        ):
+            # Knock white out of the product area only - never out of the logo band or footer.
+            base = make_white_transparent(
+                template, config.template_white_cutoff, box=(left, top, right, bottom)
+            )
+
     box_w, box_h = right - left, bottom - top
 
     # Size from the product's own content box, so a wide shot fills the width and a tall
     # shot fills the height - the padded square is only a carrier.
     canvas_w, canvas_h = product_square.size
-    bbox = product_content_bbox(
-        product_square,
-        white_level=config.product_content_white_level,
-        min_ratio=config.product_content_min_ratio,
-    )
+    if bbox is None:
+        bbox = product_content_bbox(
+            product_square,
+            white_level=config.product_content_white_level,
+            min_ratio=config.product_content_min_ratio,
+        )
     content_w, content_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
     scale = fit_product_size(
         content_w, content_h, box_w, box_h, fill_ratio=config.product_fill_ratio
@@ -360,14 +397,6 @@ def apply_template(
     target = (max(1, round(canvas_w * scale)), max(1, round(canvas_h * scale)))
     product = to_rgb(product_square).resize(target, Image.Resampling.LANCZOS)
 
-    base = template.convert("RGBA")
-    if config.template_make_white_transparent and not template_has_transparency(
-        template, min_alpha=config.template_transparency_min_alpha
-    ):
-        # Knock white out of the product area only - never out of the logo band or footer.
-        base = make_white_transparent(
-            template, config.template_white_cutoff, box=(left, top, right, bottom)
-        )
     canvas = Image.new("RGBA", template.size, (255, 255, 255, 0))
     # Align the *content*, not the carrier: the padded square is bigger than the product,
     # so centring the carrier could push its padding outside the content box and over the

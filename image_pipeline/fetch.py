@@ -88,15 +88,23 @@ class DomainRateLimiter:
         host = urlsplit(url).netloc.lower()
         if not host:
             return
+        delay = 0.0
         with self._lock:
             now = time.monotonic()
+            if len(self._last_hit) > 5000:
+                self._last_hit = {k: v for k, v in self._last_hit.items() if v > now}
             last = self._last_hit.get(host)
-            delay = 0.0
-            if last is not None:
-                delay = self._min_interval_s - (now - last)
-            if delay > 0:
-                time.sleep(delay)
-            self._last_hit[host] = time.monotonic()
+            if last is not None and last > now:
+                target = last + self._min_interval_s
+            elif last is not None:
+                target = max(now, last + self._min_interval_s)
+            else:
+                target = now
+            delay = max(0.0, target - now)
+            self._last_hit[host] = target
+
+        if delay > 0:
+            time.sleep(delay)
 
 
 def retry_with_backoff(

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import logging
+import threading
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
@@ -302,6 +303,39 @@ def neutral_corner_count(
 # --------------------------------------------------------------------------- #
 # S9
 # --------------------------------------------------------------------------- #
+_DETECTOR_TLS = threading.local()
+
+
+def _get_qr_detector() -> Any:
+    """Thread-isolated QRCodeDetector instance."""
+    if not hasattr(_DETECTOR_TLS, "qr_detector"):
+        detector: Any = None
+        try:
+            import cv2
+
+            detector = cv2.QRCodeDetector()
+        except Exception:
+            pass
+        _DETECTOR_TLS.qr_detector = detector
+    return _DETECTOR_TLS.qr_detector
+
+
+def _get_barcode_detector() -> Any:
+    """Thread-isolated BarcodeDetector instance with missing module sentinel caching."""
+    if not hasattr(_DETECTOR_TLS, "barcode_detector"):
+        detector: Any = None
+        try:
+            import cv2
+
+            detector_cls: Any = getattr(getattr(cv2, "barcode", None), "BarcodeDetector", None)
+            if detector_cls is not None:
+                detector = detector_cls()
+        except Exception:
+            pass
+        _DETECTOR_TLS.barcode_detector = detector
+    return _DETECTOR_TLS.barcode_detector
+
+
 def is_qr_or_barcode(image: Image.Image, url: str = "", *, extra_keywords: Iterable[str] = ()) -> bool:
     """Safeguard S9: filename token **and** a real decode attempt.
 
@@ -314,24 +348,26 @@ def is_qr_or_barcode(image: Image.Image, url: str = "", *, extra_keywords: Itera
         tokens = set(url.lower().replace("_", "-").split("/"))
         if any("qr" in token or "barcode" in token for token in tokens):
             return True
-    try:
-        import cv2
-    except Exception:                             # pragma: no cover - optional dep
+
+    qr_detector = _get_qr_detector()
+    barcode_detector = _get_barcode_detector()
+    if qr_detector is None and barcode_detector is None:
         return False
+
     gray = np.asarray(image.convert("L"), dtype=np.uint8)
-    try:
-        data, _points, _straight = cv2.QRCodeDetector().detectAndDecode(gray)
-        if data:
-            return True
-    except Exception:                             # pragma: no cover - cv2 internals
-        pass
-    detector_cls: Any = getattr(getattr(cv2, "barcode", None), "BarcodeDetector", None)
-    if detector_cls is not None:
+    if qr_detector is not None:
         try:
-            ok, _info, _types, _points = detector_cls().detectAndDecode(gray)
+            data, _points, _straight = qr_detector.detectAndDecode(gray)
+            if data:
+                return True
+        except Exception:                             # pragma: no cover - cv2 internals
+            pass
+    if barcode_detector is not None:
+        try:
+            ok, _info, _types, _points = barcode_detector.detectAndDecode(gray)
             if ok:
                 return True
-        except Exception:                         # pragma: no cover - cv2 internals
+        except Exception:                             # pragma: no cover - cv2 internals
             pass
     return False
 
