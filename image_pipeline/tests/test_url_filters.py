@@ -260,7 +260,8 @@ def test_official_haier_page_tries_a_size_ladder_retailers_do_not() -> None:
     retailer = upscale_candidates(url)
     assert retailer == (url.replace("_60.png", "_1000.png"), url)
     official = upscale_candidates(url, True)
-    assert official[:4] == (
+    assert official[:5] == (
+        url.replace("_60.png", ".png"),          # stripped original = full res (live-proven)
         url.replace("_60.png", "_1680.png"),
         url.replace("_60.png", "_1000.png"),
         url.replace("_60.png", "_800.png"),
@@ -269,4 +270,4 @@ def test_official_haier_page_tries_a_size_ladder_retailers_do_not() -> None:
     assert official[-1] == url
     # upper-cased extension on the same ladder
     upper = "https://image.haier.com/pk/tvs/W020260512624867701503_480.PNG"
-    assert upscale_candidates(upper, True)[0] == upper.replace("_480.PNG", "_1680.PNG")
+    assert upscale_candidates(upper, True)[0] == upper.replace("_480.PNG", ".PNG")

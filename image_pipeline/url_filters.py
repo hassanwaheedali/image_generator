@@ -491,7 +491,13 @@ def upscale_candidates(url: str, official: bool = False) -> tuple[str, ...]:
             # stripping it causes an immediate Akamai HTTP/2 stream reset (error 0x1 PROTOCOL_ERROR).
             continue
         if name == "haier-thumb" and official:
-            # Live ladder (2026-10-08): _1680 crisp, then the older _1000/_800, _480 last.
+            # Live probe of image.haier.com (2026-10-08, fetch-calibrated 404 vs 200):
+            # the suffix-less original (W020...819.png) is the full-res asset and
+            # EXISTS; _1680/_1000/_800 are 404 for gallery assets (only some heroes
+            # ship _1680).  So the ladder starts at the stripped original.
+            stripped = re.sub(pattern, r"\1", path)
+            if stripped != path:
+                _add_candidate(out, parts, stripped, query, url)
             for size in (1680, 1000, 800, 480):
                 rewritten = re.sub(pattern, rf"_{size}\1", path)
                 if rewritten != path:

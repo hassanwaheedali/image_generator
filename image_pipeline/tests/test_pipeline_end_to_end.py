@@ -690,7 +690,7 @@ def test_largest_size_rewrite_is_tried_first_then_the_original(tmp_path: Path) -
     page = """<html><head><title>Haier HSU-12HFPAA Inverter AC</title></head>
     <body><div class="product-gallery">
       <img src="https://image.haier.com/p/hsu-12hfpaa-1_60.jpg"></div></body></html>"""
-    big = "https://image.haier.com/p/hsu-12hfpaa-1_1680.jpg"
+    big = "https://image.haier.com/p/hsu-12hfpaa-1.jpg"   # stripped original = full res
     deps, _, image_fetcher, _ = build_deps(
         tmp_path, {HAIER_PAGE: page}, {big: png_bytes(clean_product_image())}
     )
@@ -1920,13 +1920,13 @@ def test_blurry_below_floor_image_is_never_salvaged(tmp_path: Path) -> None:
     assert any(entry["rule_id"] == "S8.salvage" for entry in log)
 
 
-def test_haier_thumb_upgrades_to_the_crisp_1680_rung(tmp_path: Path) -> None:
+def test_haier_thumb_upgrades_to_the_crisp_original_rung(tmp_path: Path) -> None:
     """Live page 2026-10-08 (h55k85guxfux.shtml): the gallery hands out _60/_480
     rungs while the crisp asset is _1680.  The probe and the download must both
     land on the crisp rung on an official page - the owner saw "puri blurred"
     pictures because only _480 was ever fetched."""
     soft = "https://image.haier.com/pk/tvs/W020260512624868079819_480.png"
-    crisp = "https://image.haier.com/pk/tvs/W020260512624868079819_1680.png"
+    crisp = "https://image.haier.com/pk/tvs/W020260512624868079819.png"
     crisp_bytes = png_bytes(clean_product_image(1680, 945))
     page = (
         "<html><head><title>Haier H55K85FUX 55 Inch Google LED TV</title>"
