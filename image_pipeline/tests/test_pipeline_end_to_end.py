@@ -1918,3 +1918,33 @@ def test_blurry_below_floor_image_is_never_salvaged(tmp_path: Path) -> None:
         for line in (tmp_path / "out" / "decisions.jsonl").read_text().splitlines()
     ]
     assert any(entry["rule_id"] == "S8.salvage" for entry in log)
+
+
+def test_haier_thumb_upgrades_to_the_crisp_1680_rung(tmp_path: Path) -> None:
+    """Live page 2026-10-08 (h55k85guxfux.shtml): the gallery hands out _60/_480
+    rungs while the crisp asset is _1680.  The probe and the download must both
+    land on the crisp rung on an official page - the owner saw "puri blurred"
+    pictures because only _480 was ever fetched."""
+    soft = "https://image.haier.com/pk/tvs/W020260512624868079819_480.png"
+    crisp = "https://image.haier.com/pk/tvs/W020260512624868079819_1680.png"
+    crisp_bytes = png_bytes(clean_product_image(1680, 945))
+    page = (
+        "<html><head><title>Haier H55K85FUX 55 Inch Google LED TV</title>"
+        '<script type="application/ld+json">{"@context":"https://schema.org",'
+        '"@type":"Product","name":"Haier H55K85FUX","sku":"H55K85FUX",'
+        f'"image":["{soft}"]}}</script></head><body></body></html>'
+    )
+    config = live_config(tmp_path)
+    deps, _, image_fetcher, _ = build_deps(tmp_path, {HAIER_PAGE: page}, {crisp: crisp_bytes})
+    image_fetcher.probe_headers[crisp] = crisp_bytes[:64]
+    result, accepted = process_product(
+        task(0, "Haier 55 Inch Smart Google LED TV (H55K85FUX)", (HAIER_PAGE,)),
+        deps,
+        config,
+    )
+    assert image_fetcher.requested == [crisp], "the crisp rung, never the soft one"
+    assert len(accepted) == 1
+    # the published picture is built from the downloaded _1680 bytes; the candidate
+    # URL (_480) stays as provenance in source_url
+    assert accepted[0].source_url == soft
+    assert result.status is Status.PARTIAL

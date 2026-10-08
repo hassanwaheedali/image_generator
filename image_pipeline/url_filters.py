@@ -454,8 +454,11 @@ def is_excluded_host(host: str, excluded: Iterable[str]) -> bool:
 #: (name, pattern, replacement) applied in order.  A rewrite is only *tried*, never
 #: forced: the URL the page itself gave is always kept as the last candidate.
 UPSCALE_REWRITE_RULES: tuple[tuple[str, str, str], ...] = (
-    # Haier image.haier.com ships 60-120 px thumbs on its product pages.
-    ("haier-thumb", r"_\d{2,3}(\.(?:jpg|jpeg|png|webp))$", r"_1000\1"),
+    # Haier image.haier.com ships 60px thumbs (_60.png) and a soft _480.png on product
+    # pages; the crisp asset on the same ladder is _1680 (live page 2026-10-08:
+    # h55k85guxfux.shtml hero ..._1680.jpg, gallery _60/_480).  Extensions arrive
+    # upper-cased too (.PNG), hence the inline ignore-case flag.
+    ("haier-thumb", r"(?i)_\d{2,3}(\.(?:jpg|jpeg|png|webp))$", r"_1000\1"),
     # Shopify / Shopline sized variants.
     ("shopify-size", r"_(\d{2,4})x(\d{2,4})(\.(?:jpg|jpeg|png|webp))$", r"_1024x1024\3"),
     # Shopify single-dimension thumbs (``_288x.png``): the same asset exists much larger, and
@@ -488,7 +491,8 @@ def upscale_candidates(url: str, official: bool = False) -> tuple[str, ...]:
             # stripping it causes an immediate Akamai HTTP/2 stream reset (error 0x1 PROTOCOL_ERROR).
             continue
         if name == "haier-thumb" and official:
-            for size in (1000, 800, 480):
+            # Live ladder (2026-10-08): _1680 crisp, then the older _1000/_800, _480 last.
+            for size in (1680, 1000, 800, 480):
                 rewritten = re.sub(pattern, rf"_{size}\1", path)
                 if rewritten != path:
                     _add_candidate(out, parts, rewritten, query, url)

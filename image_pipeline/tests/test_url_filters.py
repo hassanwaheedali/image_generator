@@ -252,16 +252,21 @@ def test_every_catalogue_brand_has_its_official_domain() -> None:
 
 
 def test_official_haier_page_tries_a_size_ladder_retailers_do_not() -> None:
-    """Owner 2026-10-08: Haier's CDN often lacks ``_1000`` but ships ``_800``/``_480``; an
-    official page may try all three so its gallery yields 3 images, while a retailer keeps
-    the single ``_1000`` rewrite (its S8 protection is unchanged)."""
+    """Owner 2026-10-08 (live h55k85guxfux.shtml): the crisp rung of Haier's CDN
+    ladder is ``_1680``; the page hands us ``_60`` thumbs and a soft ``_480``.
+    An official page tries the whole ladder, retailers keep the single ``_1000``
+    rewrite (their S8 protection is unchanged)."""
     url = "https://image.haier.com/pk/tvs/W020260512624867701503_60.png"
     retailer = upscale_candidates(url)
     assert retailer == (url.replace("_60.png", "_1000.png"), url)
     official = upscale_candidates(url, True)
-    assert official[:3] == (
+    assert official[:4] == (
+        url.replace("_60.png", "_1680.png"),
         url.replace("_60.png", "_1000.png"),
         url.replace("_60.png", "_800.png"),
         url.replace("_60.png", "_480.png"),
     )
     assert official[-1] == url
+    # upper-cased extension on the same ladder
+    upper = "https://image.haier.com/pk/tvs/W020260512624867701503_480.PNG"
+    assert upscale_candidates(upper, True)[0] == upper.replace("_480.PNG", "_1680.PNG")
