@@ -30,7 +30,7 @@ LOG = logging.getLogger("pipeline.csv_io")
 
 TITLE_ALIASES: tuple[str, ...] = ("title", "producttitle", "name", "productname")
 URL_ALIASES: tuple[str, ...] = (
-    "sourceurl", "sourcelink", "images", "imageurls", "imageurl", "sourceurls",
+    "sourceurl", "sourcelink", "images", "image", "imageurls", "imageurl", "sourceurls",
     "url", "urls", "link", "pagelink",
 )
 

@@ -47,7 +47,7 @@ def test_normalize_header_and_find_column() -> None:
 
 @pytest.mark.parametrize(
     "header",
-    ["Title,Source URL", "title,source_url", "TITLE,SourceURL", "Title,Images"],
+    ["Title,Source URL", "title,source_url", "TITLE,SourceURL", "Title,Images", "Title,Image"],
 )
 def test_read_input_accepts_header_variants(tmp_path: Path, header: str) -> None:
     path = tmp_path / "sheet.csv"
@@ -56,6 +56,15 @@ def test_read_input_accepts_header_variants(tmp_path: Path, header: str) -> None
     assert len(tasks) == 1
     assert tasks[0].title == "Haier HSU-12HFPAA"
     assert tasks[0].source_urls == ("https://a.example/p", "https://b.example/p")
+
+
+def test_read_input_accepts_products_csv_fixture() -> None:
+    fixture_path = Path(__file__).resolve().parents[0] / "fixtures" / "test_files" / "Products.csv"
+    if fixture_path.exists():
+        tasks = read_input(fixture_path)
+        assert len(tasks) > 0
+        assert tasks[0].title != ""
+        assert len(tasks[0].source_urls) > 0
 
 
 def test_read_input_rejects_unknown_headers(tmp_path: Path) -> None:
