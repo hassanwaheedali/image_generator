@@ -55,6 +55,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mirroring the DOM path's `_looks_like_image` guard.
 
 ### Added
+- **Every catalogue brand now has its official domain, and category words can never veto.**
+  `KNOWN_BRANDS` was missing three brands that appear in the shipped catalogue and in the owner's
+  input sheets - `Superasia` (45 rows), `Hisense` (4 rows) and `Midea` - so their own pages got no
+  priority in `prioritize_source_urls` and no curated-gallery acceptance, and a reseller outranked
+  the manufacturer whenever it came first in the sheet.  Added with each domain verified against the
+  brand's own site (`superasiagroup.com` / `superasiastore.com`, `hisensepakistan.com` /
+  `hisense.com.pk`, `mideapakistan.store` / `mideapakistan.com`), because a wrong "official" host
+  would relax the S7 gallery test and let worse images through.  `detect_brand` now also tries the
+  first **two** title words, so the catalogue's `Super Asia` reaches the one-word key `superasia`
+  (it returned `None` before, i.e. no priority at all).  And every word in the catalogue's 21
+  category paths - `microwaves`, `geysers`, `purifier`, `humdifier`, `sound bars`, `appliances`,
+  ... - is now in `_GENERIC_NAME_WORDS`, so an appliance category can never be mistaken for a
+  series name and veto a correct page.  324 tests, ruff + mypy --strict clean, radon 45.
 - **Probabilistic, format-agnostic variant matching** (`docs/riper/probabilistic-matching-plan.md`,
   owner-approved 2026-10-07).  `similarity.py` (new, stdlib `difflib` only) adds `similar()` and
   `same_digit_runs()`; `ModelKeys.name_words` captures the positional "name" words - series lines
@@ -69,7 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   page; the substitution rule keeps all **94/94** clean, and brand words are dropped before the
   comparison so `Super Asia` ≡ `Superasia` cannot veto.  Measured: same-code colour pairs separated
   274, **0 false rejects**, 157 diff-colour pairs with **0** clean matches; 100-product offline smoke
-  GREEN; 322 tests, ruff + mypy --strict clean, radon baseline unchanged (45).
+  GREEN; 324 tests, ruff + mypy --strict clean, radon baseline unchanged (45).
 - **`image_pipeline/variant_terms.py`** - the variant vocabulary and its pure rules: colour
   families with a neutral (achromatic) carve-out, `suffix_agreement`, `colour_word_conflict`.
   It holds no brand, suffix or colour-code tables, so a colour the vocabulary has never seen

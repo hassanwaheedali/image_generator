@@ -17,6 +17,7 @@ from model_matching import (
     near_miss_codes,
     numeric_stem,
     relaxed_page_match,
+    score_match,
     truncation_variants,
     url_belongs_to_other_model,
     variant_conflicts,
@@ -511,3 +512,16 @@ def test_name_words_keep_series_and_unknown_colourway_but_drop_noise() -> None:
 
     ocean = build_model_keys("PEL Straight 3 Taps Glass Door Water Dispenser (PWD-425-GD)-Ocean Mist")
     assert "ocean" in ocean.name_words and "mist" in ocean.name_words
+
+
+def test_category_words_are_noise_not_series_names() -> None:
+    """Owner 2026-10-08: every word in the catalogue's category paths is generic.
+
+    A category word describes the appliance, so it must never take part in a series
+    veto - otherwise `Microwave Oven` on one page and `Microwave` on another would look
+    like two different product lines.
+    """
+    assert "geyser" not in build_model_keys("Homage Instant Gas Water Geyser HG-10 Silver").name_words
+    oven = build_model_keys("Kenwood Microwave Oven KMW-300 Black")
+    assert oven.name_words == ("kenwood",)
+    assert not score_match(oven, "Kenwood KMW-300 Microwave", "kenwood").series_veto

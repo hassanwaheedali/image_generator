@@ -357,6 +357,16 @@ _GENERIC_NAME_WORDS = frozenset((
     "vertical", "horizontal", "compact", "mini", "large", "small", "luxury",
     "premium", "original", "model", "series", "type", "style", "with", "without",
     "and", "the", "for", "hd", "led", "lcd",
+    # Every word in the catalogue's 21 category paths (2026-10-08), plus the singular /
+    # plural twins a title would actually print.  A category word describes the appliance,
+    # never the product, so it must never take part in a series veto.
+    "appliances", "electronics", "kitchen", "home", "energy", "green", "deep",
+    "microwave", "microwaves", "oven", "geyser", "geysers", "purifier", "purifiers",
+    # "humdifier" is the spelling the catalogue itself uses - kept so the typo cannot veto.
+    "humidifier", "humdifier",
+    "audio", "visuals", "sound", "soundbar", "speaker", "speakers", "bars",
+    "refrigerators", "freezers", "dispensers", "coolers", "washers", "machines",
+    "television",
 ))
 
 

@@ -8,8 +8,10 @@ from url_filters import (
     canonicalize_url,
     dedup_key,
     detect_brand,
+    display_brand,
     has_bad_keyword,
     has_image_extension,
+    host_is_official,
     host_is_other_manufacturer,
     is_fetchable_product_url,
     prioritize_source_urls,
@@ -221,3 +223,29 @@ def test_prioritize_source_urls_prefers_official_domain() -> None:
     ]
     assert prioritize_source_urls(urls, "haier")[0] == urls[1]
     assert prioritize_source_urls(urls, None) == urls
+
+
+def test_every_catalogue_brand_has_its_official_domain() -> None:
+    """Owner 2026-10-08: the three catalogue/input brands that were missing now rank first.
+
+    ``Superasia``, ``Hisense`` and ``Midea`` appear in the shipped catalogue and in the
+    owner's input sheet but were absent from ``KNOWN_BRANDS``, so their official pages
+    got no priority and no curated-gallery acceptance.
+    """
+    sheet_order = [
+        "https://mideapakistan.store/products/midea-go-easy",
+        "https://alizainabelectronics.com/products/midea-go-easy-18hrfnqc6-1-5-ton-dc-inverter-ac",
+        "https://www.mabdullah.pk/products/midea-18hrfn1-qc6-1-5-ton-go-easy-t3-inverter-ac",
+    ]
+    assert prioritize_source_urls(list(reversed(sheet_order)), "midea")[0] == sheet_order[0]
+    assert host_is_official(sheet_order[0], "midea")
+    assert not host_is_official(sheet_order[1], "midea")
+    assert host_is_official("https://superasiastore.com/products/sa-241", "superasia")
+    assert host_is_official("https://hisensepakistan.com/product/a6k-55/", "hisense")
+    # and the brand is found from either the URL or the title
+    assert detect_brand(sheet_order[0], "") == "midea"
+    assert detect_brand("", "Midea Go Easy 1.5 Ton DC Inverter AC") == "midea"
+    # two-word brand: the catalogue writes "Super Asia", the table key is one word
+    assert detect_brand("", "Super Asia Smart Wash Twin Tub 7.5KG Washing Machine") == "superasia"
+    assert display_brand("superasia") == "Super Asia"
+    assert display_brand("midea") == "Midea"

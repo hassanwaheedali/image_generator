@@ -157,6 +157,15 @@ KNOWN_BRANDS: dict[str, tuple[str, ...]] = {
     "changhong": ("changhong.com",),
     "ecostar": ("ecostar.com.pk",),
     "dsm": ("dsm.com.pk",),
+    # Added 2026-10-08 after verifying each domain against the brand's own site, so a
+    # reseller is never mistaken for the manufacturer (an "official" host relaxes the S7
+    # gallery test, so a wrong entry would let worse images through).
+    # Super Asia Muhammad Din Sons Ltd: corporate site + its own online store.
+    "superasia": ("superasiagroup.com", "superasiastore.com"),
+    # Hisense Pakistan (Green Leaves / Hisense): both Pakistani brand sites + global.
+    "hisense": ("hisensepakistan.com", "hisense.com.pk", "hisense.com"),
+    # Midea Pakistan (Green Leaves Pvt Ltd): official online store + corporate + global.
+    "midea": ("mideapakistan.store", "mideapakistan.com", "midea.com"),
 }
 
 #: Manufacturer domain -> brand (reverse map, built once).
@@ -235,18 +244,21 @@ def detect_brand(url: str, title: str = "") -> str | None:
     """Brand for a source URL: manufacturer-domain reverse lookup, then title.
 
     Retail domains are deliberately absent from ``KNOWN_BRANDS``; for those the
-    first alphabetic word of the title decides (which is what the sheet provides).
+    leading words of the title decide (which is what the sheet provides).  Two words
+    are tried because a brand may be spelled with a space while the table key is one
+    word - the catalogue writes ``Super Asia``, the table holds ``superasia``.
     """
     host = urlsplit(url).netloc.lower().split(":")[0]
     for domain, domain_brand in DOMAIN_TO_BRAND.items():
         if _host_matches(host, domain):
             return str(domain_brand)
-    for match in re.finditer(r"[A-Za-z]{2,}", title):
-        candidate = match.group(0).lower()
-        if candidate in KNOWN_BRANDS:
-            return candidate
-        break                                  # only the first alphabetic word
-    return None
+    words = [match.group(0).lower() for match in re.finditer(r"[A-Za-z]{2,}", title)][:2]
+    if not words:
+        return None
+    if words[0] in KNOWN_BRANDS:
+        return words[0]
+    joined = "".join(words)
+    return joined if len(words) == 2 and joined in KNOWN_BRANDS else None
 
 
 def host_is_other_manufacturer(host: str, brand: str | None) -> bool:
@@ -410,6 +422,9 @@ BRAND_DISPLAY: dict[str, str] = {
     "ecostar": "EcoStar",
     "dsm": "DSM",
     "boss": "Boss",
+    "superasia": "Super Asia",
+    "hisense": "Hisense",
+    "midea": "Midea",
 }
 
 
