@@ -10,6 +10,7 @@ from page_verification import (
     MatchSettings,
     is_in_description_region,
     is_linked_to_other_page,
+    selected_colourway,
     strip_unwanted_regions,
     verify_page,
 )
@@ -291,3 +292,49 @@ def test_a_page_naming_another_series_is_a_last_resort_not_proof() -> None:
         keys, brand="dawlance",
     )
     assert same.strength > 0 and not same.tolerated
+
+
+def test_selected_colourway_reads_only_the_labelled_value() -> None:
+    """Owner 2026-10-08: the swatch menu lists every option, so only the labelled value counts."""
+    table = BeautifulSoup(
+        "<table><tr><td>Type</td><td>Straight Glass Door</td></tr>"
+        "<tr><td>Colour</td><td>Red Blaze</td></tr></table>", "lxml")
+    assert selected_colourway(table) == "Red Blaze"
+    inline = BeautifulSoup(
+        "<div><span>Color:</span><span>Marine Impression</span>"
+        "<label>Red Blaze</label><label>Maroon Blaze</label></div>", "lxml")
+    assert selected_colourway(inline) == "Marine Impression"
+    # a page with only the swatch menu gives no opinion at all
+    swatches = BeautifulSoup("<label>Marine Impression</label><label>Red Blaze</label>", "lxml")
+    assert selected_colourway(swatches) == ""
+    # and a flattened whole menu is too long to be a single value
+    toolong = BeautifulSoup("<tr><td>Colour</td><td>Red Blaze Marine Impression Maroon Blaze</td></tr>", "lxml")
+    assert selected_colourway(toolong) == ""
+
+
+def test_labelled_body_colour_separates_variant_pages() -> None:
+    """The PEL case: title names no colour, the body label carries the selected one."""
+    from model_matching import build_model_keys, match_product
+    from models import ModelKeys
+
+    pel = "PEL Straight 3 Taps Glass Door Water Dispenser (PWD-425-GD)"
+    rows = {
+        "Marine": build_model_keys(pel + "-Marine Impression"),
+        "Red": build_model_keys(pel + "-Red Blaze"),
+        "Maroon": build_model_keys(pel + "-Maroon Blaze"),
+    }
+
+    def clean(row: ModelKeys, selected: str) -> bool:
+        m = match_product(keys=row, brand="pel", strong_text=pel, selected_colourway=selected)
+        return m.matched and not m.tolerated
+
+    # no label -> fail open, exactly as today
+    assert clean(rows["Marine"], "")
+    # the page's own label decides
+    assert not clean(rows["Marine"], "Red Blaze")
+    assert clean(rows["Marine"], "Marine Impression")
+    assert clean(rows["Red"], "Red Blaze")
+    assert not clean(rows["Red"], "Maroon Blaze")
+    assert match_product(
+        keys=rows["Red"], brand="pel", strong_text=pel, selected_colourway="Maroon Blaze"
+    ).rule == "colour_conflict"

@@ -240,6 +240,51 @@ def page_body_text(soup: BeautifulSoup) -> str:
     return re.sub(r"\s+", " ", soup.get_text(" ", strip=True))
 
 
+_COLOUR_LABEL_RE = re.compile(r"^colou?r[:\s]*$", re.IGNORECASE)
+_COLOURWAY_VALUE_RE = re.compile(r"^[A-Za-z][A-Za-z -]{0,29}$")
+
+
+def _looks_like_colourway(value: str) -> bool:
+    """A short alphabetic phrase - a colourway, not a sentence or a swatch list.
+
+    At most three words, so the flattened swatch menu (``Red Blaze Marine Impression
+    ...``) can never pass for a single selected value.
+    """
+    value = value.strip()
+    if not _COLOURWAY_VALUE_RE.match(value):
+        return False
+    return 1 <= len(value.split()) <= 3
+
+
+def selected_colourway(soup: BeautifulSoup) -> str:
+    """The colourway the page itself declares as *selected*, or ``""`` (no opinion).
+
+    Variant pages (live: PEL SGD 425) print the chosen colour in exactly two labelled
+    places while the swatch menu lists *every* option, so only the labelled value may be
+    trusted.  We read, in order:
+
+    * a spec table row whose first cell is ``Colour``/``Color`` - the second cell is the
+      selected value (``<tr><td>Colour</td><td>Red Blaze</td></tr>``);
+    * an inline label element holding exactly ``Color:``/``Colour`` whose next sibling
+      carries the value.
+
+    No brand, domain or colour table is involved; a page without such a label simply
+    yields ``""`` and the row stays fail-open, exactly as today.
+    """
+    for row in soup.find_all("tr"):
+        cells = [cell.get_text(" ", strip=True) for cell in row.find_all(["td", "th"])]
+        if len(cells) >= 2 and _COLOUR_LABEL_RE.match(cells[0]) and _looks_like_colourway(cells[1]):
+            return str(cells[1])
+    for label in soup.find_all(string=_COLOUR_LABEL_RE):
+        parent = label.parent
+        sibling = parent.find_next_sibling() if parent is not None else None
+        if sibling is not None:
+            value = str(sibling.get_text(" ", strip=True))
+            if _looks_like_colourway(value):
+                return value
+    return ""
+
+
 def page_product_name(soup: BeautifulSoup) -> str:
     """The page's **own product name**: title, og:title, twitter:title, h1s, JSON-LD.
 
@@ -361,6 +406,7 @@ def verify_page(
         brand=brand,
         strong_text=" \n ".join(strong.values()),
         body_text=page_body_text(soup),
+        selected_colourway=selected_colourway(soup),
         brand_match_enabled=options.brand_match_enabled,
         brand_match_min_length=options.brand_match_min_length,
         brand_match_min_digits=options.brand_match_min_digits,

@@ -55,6 +55,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mirroring the DOM path's `_looks_like_image` guard.
 
 ### Added
+- **Variant pages that print the colour only in the body now match their own colourway.**
+  A PEL dispenser page names no colour in its title; the colour lives in a labelled body line
+  (`Color: Red Blaze` near the swatches and a `| Colour | Red Blaze |` spec row) while the swatch
+  menu lists *every* option.  `page_verification.selected_colourway()` reads only a labelled value
+  (a spec-table row or an inline `Color:` label whose value is a short phrase), never the swatch
+  list, and `match_product` counts that value exactly as if the title had printed it - but only when
+  the page's strong text names no colour of its own, so ordinary pages are untouched.  Result for the
+  PEL 425 page: the `Red Blaze` row clean-matches its own label, the `Marine Impression` row is
+  flagged, and the `Maroon Blaze` row is rejected (`colour_conflict`) - instead of all three rows
+  sitting unmatched.  Pages with no label stay fail-open, as today.  326 tests, ruff + mypy --strict
+  clean, radon 45.
 - **Every catalogue brand now has its official domain, and category words can never veto.**
   `KNOWN_BRANDS` was missing three brands that appear in the shipped catalogue and in the owner's
   input sheets - `Superasia` (45 rows), `Hisense` (4 rows) and `Midea` - so their own pages got no
@@ -67,7 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (it returned `None` before, i.e. no priority at all).  And every word in the catalogue's 21
   category paths - `microwaves`, `geysers`, `purifier`, `humdifier`, `sound bars`, `appliances`,
   ... - is now in `_GENERIC_NAME_WORDS`, so an appliance category can never be mistaken for a
-  series name and veto a correct page.  324 tests, ruff + mypy --strict clean, radon 45.
+  series name and veto a correct page.  326 tests, ruff + mypy --strict clean, radon 45.
 - **Probabilistic, format-agnostic variant matching** (`docs/riper/probabilistic-matching-plan.md`,
   owner-approved 2026-10-07).  `similarity.py` (new, stdlib `difflib` only) adds `similar()` and
   `same_digit_runs()`; `ModelKeys.name_words` captures the positional "name" words - series lines
@@ -82,7 +93,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   page; the substitution rule keeps all **94/94** clean, and brand words are dropped before the
   comparison so `Super Asia` ≡ `Superasia` cannot veto.  Measured: same-code colour pairs separated
   274, **0 false rejects**, 157 diff-colour pairs with **0** clean matches; 100-product offline smoke
-  GREEN; 324 tests, ruff + mypy --strict clean, radon baseline unchanged (45).
+  GREEN; 326 tests, ruff + mypy --strict clean, radon baseline unchanged (45).
 - **`image_pipeline/variant_terms.py`** - the variant vocabulary and its pure rules: colour
   families with a neutral (achromatic) carve-out, `suffix_agreement`, `colour_word_conflict`.
   It holds no brand, suffix or colour-code tables, so a colour the vocabulary has never seen

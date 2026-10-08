@@ -1020,21 +1020,36 @@ def _drop_brand_words(words: tuple[str, ...], brand: str | None) -> tuple[str, .
     return tuple(word for word in words if word not in key and key not in word)
 
 
-def score_match(keys: ModelKeys, strong_text: str, brand: str | None = None) -> ScoreMatch:
+def score_match(
+    keys: ModelKeys,
+    strong_text: str,
+    brand: str | None = None,
+    selected_colourway: str = "",
+) -> ScoreMatch:
     """Score a page's strong text against the row's keys (additive to match_product).
 
     Three independent vetoes, each fail-open (an absent attribute is never a veto):
     * series - the page names a line/colourway in place of the row's (``Daimond``/``Cuby``);
     * colour - the row's colour word conflicts with the page (existing primitive);
     * size   - a capacity/type fact contradicts (existing ``variant_conflicts``).
+
+    ``selected_colourway`` is the page's own labelled "Colour:" value (read by
+    :func:`page_verification.selected_colourway`, never the swatch list).  It is only
+    consulted when the page's strong text names no colour of its own - the variant-page
+    case - so the page's declared colour then counts exactly as if the title had printed it.
     """
     page = build_model_keys(strong_text)
-    row_words = _drop_brand_words(keys.name_words, brand)
     page_words = _drop_brand_words(page.name_words, brand)
+    page_colour_text = strong_text
+    if not page.colour_word and selected_colourway:
+        selected = build_model_keys(selected_colourway)
+        page_words = page_words + _drop_brand_words(selected.name_words, brand)
+        page_colour_text = f"{strong_text} {selected_colourway}"
+    row_words = _drop_brand_words(keys.name_words, brand)
     confidence = _name_word_confidence(row_words, page_words)
     return ScoreMatch(
         series_veto=_name_word_substitution(row_words, page_words),
-        colour_veto=colour_word_conflict(keys.colour_word, strong_text),
+        colour_veto=colour_word_conflict(keys.colour_word, page_colour_text),
         size_veto=bool(variant_conflicts(keys.variant_dict(), extract_variant_facts(strong_text))),
         confidence=confidence,
     )
@@ -1050,6 +1065,7 @@ def match_product(
     brand_match_min_digits: int = 3,
     allow_key_truncation: bool = True,
     variant_separation_enabled: bool = True,
+    selected_colourway: str = "",
 ) -> ProductMatch:
     """The whole recognition rule: recognize the model, then refuse to *prove* a variant.
 
@@ -1073,14 +1089,17 @@ def match_product(
     )
     if not variant_separation_enabled or not match.matched:
         return match
-    if colour_word_conflict(keys.colour_word, strong_text):
+    score = score_match(keys, strong_text, brand, selected_colourway)
+    if score.colour_veto:
         # A different colour is a different picture, so the page is not this product at
         # all - not even as a flagged last resort (owner decision 2026-10-07).  This is
-        # the one signal that rejects, and it outranks a tolerated spelling.
+        # the one signal that rejects, and it outranks a tolerated spelling.  The page's
+        # own labelled "Colour:" value counts too, so a variant page that declares
+        # ``Red Blaze`` is not proof for the ``Maroon Blaze`` row.
         return ProductMatch(False, "colour_conflict", ())
     if not match.tolerated and _page_names_another_variant(keys, strong_text):
         return replace(match, tolerated=True)
-    if not match.tolerated and score_match(keys, strong_text, brand).series_veto:
+    if not match.tolerated and score.series_veto:
         # A series/line name the page does not carry (``Daimond`` vs ``Cuby``) names a
         # different product.  Demote rather than reject - the page may simply omit the
         # line name - so it becomes a flagged last resort, like the suffix case.
