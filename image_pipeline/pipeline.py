@@ -64,6 +64,7 @@ from image_quality import (
     trim_edge_seams,
     validate_image_bytes,
     verify_image_color,
+    sharpness_score,
 )
 from model_matching import (
     build_model_keys,
@@ -739,11 +740,16 @@ def _maybe_offer_salvage(
     used_url: str,
     source_label: str,
     config: PipelineConfig,
+    task: ProductTask,
+    deps: PipelineDeps,
+    rejections: Counter[str],
 ) -> None:
     """Keep a quality-floor reject aside; stage 3c may still need it.
 
     Re-decodes without the lossy floors (bomb guard and decode still apply).  A
-    payload that will not decode is not salvageable by definition.
+    payload that will not decode is not salvageable by definition, and neither is
+    a visibly blurred picture: salvage publishes "kam quality", never "puri
+    blurred" (owner 2026-10-08).
     """
     try:
         image = validate_image_bytes(
@@ -753,6 +759,19 @@ def _maybe_offer_salvage(
             max_pixels=config.max_image_pixels,
         )
     except ImageValidationError:
+        return
+    score = sharpness_score(image)
+    if score < config.salvage_min_sharpness:
+        rejections["S8.salvage"] += 1
+        deps.decisions.reject(
+            title=task.title,
+            url=used_url,
+            rule_id="S8.salvage",
+            detail=(
+                f"too blurred for last-resort publication "
+                f"(sharpness {score:.3f} < {config.salvage_min_sharpness:.3f})"
+            ),
+        )
         return
     pixels = max(1, image.size[0] * image.size[1])
     _offer_salvage(
@@ -1394,6 +1413,9 @@ def _consume_candidates(
                     used_url=used_url,
                     source_label=source_label,
                     config=config,
+                    task=task,
+                    deps=deps,
+                    rejections=rejections,
                 )
             continue
         # (c) page furniture that is not the product: a shop promo strip glued to an edge,

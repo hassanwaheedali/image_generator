@@ -405,6 +405,13 @@ class PipelineConfig:
     #: colour).  1 salvaged image beats a failed row.
     last_resort_salvage_enabled: bool = True
 
+    #: Blur floor for salvaged images (contrast-normalised Laplacian variance, see
+    #: image_quality.sharpness_score): even flat low-contrast sharp shots score
+    #: ~0.029+, textured real photos higher, visibly blurred thumbnails <= 0.01.
+    #: Salvage must never publish "puri blurred" pictures (owner 2026-10-08);
+    #: the normal path is untouched.
+    salvage_min_sharpness: float = 0.02
+
     # ----- compositing -----------------------------------------------------
     canonical_side: int = 1200
     padding_px: int = 6

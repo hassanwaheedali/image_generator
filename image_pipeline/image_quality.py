@@ -761,6 +761,35 @@ def extract_foreground_color_profile(image: Image.Image) -> ForegroundColorProfi
     )
 
 
+def sharpness_score(image: Image.Image) -> float:
+    """Contrast-normalised Laplacian variance on a 256px grey downsample.
+
+    Blur detector for the last-resort salvage path only.  Normalising by the
+    image's own std is what makes it a *blur* metric instead of a contrast
+    metric: a pale champagne fridge on a white background is low-contrast but
+    sharp, and must not read as blurred (first attempt failed exactly this -
+    raw Laplacian variance scored gold 68 vs maroon 523).  Measured margins:
+    crisp studio shots 0.04-0.06 (even at jpeg q12), upscaled thumbnails and
+    smeared shots 0.00-0.01, so the 0.025 floor sits 2-4x away from both sides
+    (owner 2026-10-08: salvaged Haier pictures were "puri blurred").
+    """
+    grey = np.asarray(
+        image.convert("L").resize((256, 256), Image.Resampling.BOX), dtype=np.float64
+    )
+    std = grey.std()
+    if std < 1e-6:
+        return 0.0
+    grey = (grey - grey.mean()) / std
+    laplacian = (
+        grey[1:-1, 2:]
+        + grey[1:-1, :-2]
+        + grey[2:, 1:-1]
+        + grey[:-2, 1:-1]
+        - 4 * grey[1:-1, 1:-1]
+    )
+    return float(laplacian.var())
+
+
 def verify_image_color(
     image: Image.Image,
     target_color_word: str,

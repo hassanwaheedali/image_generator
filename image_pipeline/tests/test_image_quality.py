@@ -820,3 +820,21 @@ def test_only_the_quality_floors_are_salvageable() -> None:
             max_pixels=50_000_000,
         )
     assert broken.value.salvageable is False
+
+
+def test_sharpness_score_separates_crisp_from_blurred() -> None:
+    """Contrast-normalised: flat sharp shots ~0.029+, textured photos higher,
+    blurred <= 0.01; the salvage floor is 0.02."""
+    from image_quality import sharpness_score
+
+    crisp = Image.new("RGB", (800, 800), (240, 240, 240))
+    draw = ImageDraw.Draw(crisp)
+    draw.rounded_rectangle((180, 140, 620, 660), radius=24, fill=(200, 170, 60))
+    pale = Image.new("RGB", (800, 800), (240, 240, 240))
+    ImageDraw.Draw(pale).rounded_rectangle(
+        (180, 140, 620, 660), radius=24, fill=(207, 195, 165)
+    )
+    blurred = crisp.resize((90, 90)).resize((800, 800))
+    assert sharpness_score(crisp) > 0.02
+    assert sharpness_score(pale) > 0.02                 # low contrast but sharp
+    assert sharpness_score(blurred) < 0.01

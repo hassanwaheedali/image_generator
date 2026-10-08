@@ -1892,3 +1892,29 @@ def test_salvage_can_be_disabled(tmp_path: Path) -> None:
     )
     assert images == []
     assert result.status is Status.FAILED
+
+
+def test_blurry_below_floor_image_is_never_salvaged(tmp_path: Path) -> None:
+    """Owner 2026-10-08 (Haier H55K85FX): salvage had published two "puri blurred"
+    pictures.  A below-floor image that is also blurred must stay rejected."""
+    blur_url = "https://cdn.haier.com/p/hsu-12hfpaa-hero-blur.jpg"
+    buf = io.BytesIO()
+    clean_product_image(800, 800, "#c9a227").resize((90, 90)).resize((800, 800)).save(
+        buf, "JPEG", quality=30
+    )
+    payload = buf.getvalue()
+    page = load_fixture("product_ok")
+    for img in (IMG1, IMG2, IMG3):
+        page = page.replace(img, blur_url)
+    config = live_config(tmp_path, min_lossy_image_bytes=len(payload) + 2000)
+    deps, _, _, _ = build_deps(tmp_path, {HAIER_PAGE: page}, {blur_url: payload})
+    result, images = process_product(
+        task(0, "Haier HSU-12HFPAA Inverter AC", (HAIER_PAGE,)), deps, config
+    )
+    assert images == []                                  # blurred stays rejected
+    assert result.status is Status.FAILED
+    log = [
+        json.loads(line)
+        for line in (tmp_path / "out" / "decisions.jsonl").read_text().splitlines()
+    ]
+    assert any(entry["rule_id"] == "S8.salvage" for entry in log)
