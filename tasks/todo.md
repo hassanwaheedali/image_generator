@@ -120,7 +120,7 @@ Checklist view of `tasks/plan.md`. Legend: `[x]` done (evidence in plan.md) · `
 ```
 python3 -m ruff check .            # must print: All checks passed!
 python3 -m mypy --strict .         # must print: Success: no issues found
-python3 -m pytest tests -q         # 328 passed as of 2026-10-07 - never fewer (fakes only, no network)
+python3 -m pytest tests -q         # 330 passed as of 2026-10-07 - never fewer (fakes only, no network)
 python3 main.py --input sample_input.csv --dry-run --workers 4
 ```
 
