@@ -443,6 +443,9 @@ class SourceChain:
         if not urls:
             return []
         matched = [url for url in urls if model_tokens_in_url(url, keys)]
+        LOG.info(
+            "[search] %s: sitemap %d url(s), %d match the model", host, len(urls), len(matched)
+        )
         candidates = [
             PageCandidate(
                 url=url,
@@ -463,6 +466,9 @@ class SourceChain:
         root = f"{base.rstrip('/')}/sitemap.xml"
         text = self._get(root)
         if text is None:
+            # Visible, not silent: the owner kept seeing "www.tcl.com:sitemap:0" with no
+            # way to tell a blocked/missing sitemap from a model-less one.
+            LOG.warning("[search] %s: sitemap.xml fetch failed - official search yields 0", host)
             return []
         pages, children = parse_sitemap(text)
         if children:

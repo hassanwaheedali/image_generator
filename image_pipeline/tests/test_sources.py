@@ -412,3 +412,35 @@ def test_candidate_ranking_prefers_the_sheets_own_variant(tmp_path: Path) -> Non
         mis_slugged.url,
         other.url,
     ]
+
+
+def test_shandaarbuy_is_a_default_retail_shopify_source(tmp_path: Path) -> None:
+    """Owner 2026-10-08: the TCL 98C8L row's only live page anywhere was
+    shandaarbuy.pk/products/tcl-98-c8l-... - the chain must query that shop."""
+    config = _config(tmp_path, fallback_max_pages_per_row=6)
+    assert "https://shandaarbuy.pk" in config.retail_shopify_sources
+    payload = json.dumps(
+        {
+            "resources": {
+                "results": {
+                    "products": [
+                        {
+                            "url": "/products/tcl-98-c8l-qd-mini-led-google-tv",
+                            "title": "TCL 98 C8L QD-Mini LED Google TV",
+                        }
+                    ]
+                }
+            }
+        }
+    )
+    http = FakeHttp(
+        {
+            "https://shandaarbuy.pk/search/suggest.json?q=98C8L"
+            "&resources[type]=product&resources[limit]=6": payload
+        }
+    )
+    chain = SourceChain(config, http, sitemap_cache=SitemapCache(tmp_path / "sm", 7))
+    keys = build_model_keys("TCL 98 Inch SQD Mini LED TV (98C8L)")
+    found, report = chain.find_candidates(title=keys.cleaned_title, brand="tcl", keys=keys)
+    assert any("shandaarbuy" in candidate.url for candidate in found)
+    assert "shandaarbuy.pk:shopify:1" in report.tried

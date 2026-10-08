@@ -239,6 +239,8 @@ class PipelineConfig:
             "www.tcl.com/pk": "sitemap",      # JS gallery is fine now: state_json reads
                                               # the embedded pageData; a missing or HTML
                                               # sitemap.xml simply yields 0 candidates
+            "shandaarbuy.pk": "shopify",      # owner-added 2026-10-08: carries TCL C8L
+                                              # pages when tcl.com's own sitemap yields 0
             "eshop.pel.com.pk": "shopify",
             "homage.com.pk": "woo",
             "www.kenwoodpakistan.com": "woo",
@@ -262,6 +264,7 @@ class PipelineConfig:
         }
     )
     retail_shopify_sources: tuple[str, ...] = (
+        "https://shandaarbuy.pk",          # owner 2026-10-08: has TCL C8L stock pages
         "https://www.surmawala.pk",
         "https://modernelectronics.pk",
     )
