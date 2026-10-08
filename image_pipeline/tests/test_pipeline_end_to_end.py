@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import threading
 from dataclasses import replace
@@ -1039,7 +1040,9 @@ def test_official_gallery_is_read_in_full_not_truncated_by_the_page_allowance(
     """Live bug: the DW 7500 TWIN TUB CLEAR LID (WHITE) page publishes 10 photos, but the
     6-download page allowance meant four of the manufacturer's own pictures were never even
     looked at.  An official curated gallery is no longer truncated."""
-    config = live_config(tmp_path)                       # defaults: 6 per page, 10 per product
+    # default target is 3 (owner speed decision 2026-10-08); this test pins a higher
+    # target so it keeps measuring the *allowance*, not the target stop
+    config = live_config(tmp_path, target_images_per_product=8)
     page = _gallery_page("haier.com", 8)
     images = {f"https://cdn.haier.com/p/hsu-12hfpaa-{i}.jpg": png_bytes(_gallery_image(i))
               for i in range(1, 9)}
@@ -1062,7 +1065,7 @@ def test_official_gallery_is_read_in_full_not_truncated_by_the_page_allowance(
 def test_retail_curated_gallery_is_also_read_in_full(tmp_path: Path) -> None:
     """Owner request 2026-10-06: when the product is found on a retailer (priority 2),
     download its own gallery - not just the first six pictures."""
-    config = live_config(tmp_path)
+    config = live_config(tmp_path, target_images_per_product=10)
     retail = "https://www.surmawala.pk/products/dawlance-semi-automatic-dw-7500"
     page = _gallery_page("surmawala.pk", 10)
     images = {f"https://cdn.surmawala.pk/p/hsu-12hfpaa-{i}.jpg": png_bytes(_gallery_image(i))
@@ -1080,7 +1083,9 @@ def test_scraped_page_still_stops_at_the_per_page_allowance(tmp_path: Path) -> N
     """The live Dawlance protection stays: a page whose images are only a model-bearing
     whole-page fallback (marketing renders) must not eat the row's allowance and starve
     the next candidate page."""
-    config = live_config(tmp_path)
+    # target 8 > allowance 6: the row is still hungry when the page allowance runs
+    # out, which is exactly what produces the S13.fetch "allowance spent" record
+    config = live_config(tmp_path, target_images_per_product=8)
     retail = "https://shop.example/p/hsu-12hfpaa"
     # no gallery container: every image URL carries the model, so source 5 serves them,
     # which is the whole-page fallback path (source = "whole_page").
@@ -1110,7 +1115,7 @@ def test_scraped_page_still_stops_at_the_per_page_allowance(tmp_path: Path) -> N
 def test_max_images_per_product_is_the_publication_ceiling(tmp_path: Path) -> None:
     """Owner request 2026-10-06: up to 10 of the product's own gallery photos may be
     published (the target of 3 still stops the search for *more pages*)."""
-    config = live_config(tmp_path, max_images_per_product=10)
+    config = live_config(tmp_path, max_images_per_product=10, target_images_per_product=10)
     page = _gallery_page("haier.com", 12)
     images = {f"https://cdn.haier.com/p/hsu-12hfpaa-{i}.jpg": png_bytes(_gallery_image(i))
               for i in range(1, 13)}
@@ -1145,7 +1150,9 @@ def test_model_conflict_on_the_brand_page_moves_to_the_priority_2_retailer(
     URL serves the DW-7500**C** page (different model -> S1 rejects), and the row must then
     walk the priority chain: brand sources (1) first, then the retailers (2) in order -
     Surmawala being the first Shopify shop - and publish that shop's whole gallery."""
-    config = live_config(tmp_path)          # fallback_max_pages_per_row=6, per_source=3
+    # fallback_max_pages_per_row=6, per_source=3; target pinned to 10 so this keeps
+    # measuring the retailer-fallback chain, not the new 3-image speed stop
+    config = live_config(tmp_path, target_images_per_product=10)
     sheet_title = "Dawlance DW-7500 WHITE Twin Tub Washing Machine"
 
     # the sheet's own URL: the DW-7500C page -> the sheet's key (dw7500) must NOT match it
@@ -1243,7 +1250,7 @@ def test_shopify_product_json_tops_up_a_one_image_page(tmp_path: Path) -> None:
     """Live complaint 2026-10-06: "shopify json gives only 1 image but we need at least 3".
     The HTML gallery of a Shopify product page can hold a single picture; the product's own
     JSON carries the whole set, and it is fetched when the gallery comes up short."""
-    config = live_config(tmp_path)
+    config = live_config(tmp_path, target_images_per_product=4)
     page = (
         "<html><head><title>Dawlance Semi Automatic Washing Machine DW-7500C - 10Kg</title>"
         "<script>var t='cdn.shopify.com'</script></head><body>"
@@ -1517,7 +1524,7 @@ def test_the_title_model_wins_over_a_wrong_sheet_link(tmp_path: Path) -> None:
     Surmawala, whose `suggest.json?q=DW-7500C` answer carries the real DW-7500C listing, and
     those are the pictures the row publishes.
     """
-    config = live_config(tmp_path)
+    config = live_config(tmp_path, target_images_per_product=4)
     deps, _ = _wrong_link_deps(tmp_path, with_chain=True)
     result, accepted = process_product(task(0, WRONG_LINK_TITLE, (WRONG_LINK,)), deps, config)
 
@@ -1536,7 +1543,7 @@ def test_a_tolerated_sheet_page_is_published_with_a_flag_when_nothing_else_match
     tmp_path: Path,
 ) -> None:
     """No page prints the model: the wrong-link page is still published - flagged, not dropped."""
-    config = live_config(tmp_path)
+    config = live_config(tmp_path, target_images_per_product=4)
     deps, _ = _wrong_link_deps(tmp_path, with_chain=False)
     result, accepted = process_product(task(0, WRONG_LINK_TITLE, (WRONG_LINK,)), deps, config)
 
@@ -1623,7 +1630,9 @@ def test_a_row_with_one_exact_image_is_never_topped_up_by_the_tolerated_page(
 
 def test_the_tolerated_spelling_can_be_switched_off(tmp_path: Path) -> None:
     """With the switch off the tolerated page is the answer, exactly as before this rule."""
-    config = live_config(tmp_path, tolerated_spelling_as_last_resort=False)
+    config = live_config(
+        tmp_path, tolerated_spelling_as_last_resort=False, target_images_per_product=4
+    )
     deps, _ = _wrong_link_deps(tmp_path, with_chain=True)
     result, accepted = process_product(task(0, WRONG_LINK_TITLE, (WRONG_LINK,)), deps, config)
 
@@ -1741,3 +1750,145 @@ def test_multi_image_continuation_does_not_stop_at_single_image(tmp_path: Path) 
     assert len(accepted) == 2
     assert accepted[0].source_url == sheet_img
     assert accepted[1].source_url == fallback_img
+
+
+# --------------------------------------------------------------------------- #
+# owner run 2026-10-08: dead sheet hosts, per-page download target, S16 default
+# --------------------------------------------------------------------------- #
+def test_excluded_host_sheet_url_is_never_fetched(tmp_path: Path) -> None:
+    """A dead host pasted into the sheet must not burn retries x timeout."""
+    config = live_config(tmp_path)
+    deps, page_fetcher, _, _ = build_deps(tmp_path, {}, {})
+    result, _ = process_product(
+        task(
+            0,
+            "TCL 98 Inch SQD Mini LED TV (98C8L)",
+            ("https://fahadelectronics.pk/products/tcl-98c8l-98-inch-4k-mini-led-google-tv",),
+        ),
+        deps,
+        config,
+    )
+    assert page_fetcher.requested == []          # refused before any fetch
+    assert result.status is Status.FAILED
+
+
+def test_page_downloads_stop_at_the_target_not_the_maximum(tmp_path: Path) -> None:
+    """A six-image gallery must cost three downloads (the target), not six."""
+    alt1 = "https://cdn.haier.com/p/alt/hsu-12hfpaa-1b.jpg"
+    alt2 = "https://cdn.haier.com/p/alt/hsu-12hfpaa-2b.jpg"
+    alt3 = "https://cdn.haier.com/p/alt/hsu-12hfpaa-3b.jpg"
+    page = load_fixture("product_ok").replace(
+        '"https://cdn.haier.com/p/hsu-12hfpaa-2.jpg"]',
+        '"https://cdn.haier.com/p/hsu-12hfpaa-2.jpg",'
+        '"https://cdn.haier.com/p/hsu-12hfpaa-3.jpg",'
+        f'"{alt1}","{alt2}","{alt3}"]',
+    )
+    images = gallery_images()
+    images[alt1], images[alt2], images[alt3] = images[IMG1], images[IMG2], images[IMG3]
+    config = live_config(tmp_path)
+    deps, _, image_fetcher, _ = build_deps(tmp_path, {HAIER_PAGE: page}, images)
+    result, accepted = process_product(
+        task(0, "Haier HSU-12HFPAA Inverter AC", (HAIER_PAGE,)), deps, config
+    )
+    assert result.status is Status.OK
+    assert len(accepted) == config.target_images_per_product
+    assert len(image_fetcher.requested) == config.target_images_per_product
+
+
+def test_color_gate_is_off_by_default(tmp_path: Path) -> None:
+    """Owner decision: the S16 pixel-colour gate is opt-in, not on by default."""
+    assert live_config(tmp_path).color_gate_enabled is False
+
+
+# --------------------------------------------------------------------------- #
+# stage 3c: last-resort salvage (owner decision 2026-10-08)
+# --------------------------------------------------------------------------- #
+def _jpeg_bytes(image: Image.Image, quality: int = 15) -> bytes:
+    buf = io.BytesIO()
+    image.save(buf, "JPEG", quality=quality)
+    return buf.getvalue()
+
+
+def test_below_floor_image_is_salvaged_as_last_resort(tmp_path: Path) -> None:
+    """Homage HRF-47662-GD case: the only correct photo misses the lossy byte
+    floor - it must publish (PARTIAL, flagged) instead of failing the row 0/0/0."""
+    small_url = "https://cdn.haier.com/p/hsu-12hfpaa-hero-lowq.jpg"
+    small = _jpeg_bytes(clean_product_image(700, 700, "#c9a227"))
+    page = load_fixture("product_ok")
+    for img in (IMG1, IMG2, IMG3):
+        page = page.replace(img, small_url)
+    config = live_config(tmp_path, min_lossy_image_bytes=len(small) + 2000)
+    deps, _, image_fetcher, _ = build_deps(tmp_path, {HAIER_PAGE: page}, {small_url: small})
+    result, images = process_product(
+        task(0, "Haier HSU-12HFPAA Inverter AC", (HAIER_PAGE,)), deps, config
+    )
+    assert len(images) == 1                              # one beat zero
+    assert result.status is Status.PARTIAL               # still below min_required=2
+    assert "last-resort salvage" in (result.note or "")
+    log = [
+        json.loads(line)
+        for line in (tmp_path / "out" / "decisions.jsonl").read_text().splitlines()
+    ]
+    assert any(entry["rule_id"] == "S13.salvage" for entry in log)
+    assert any(entry["rule_id"] == "S13" for entry in log)   # the floor still rejects
+
+
+def test_salvage_takes_the_correct_colour_not_the_wrong_sibling(tmp_path: Path) -> None:
+    """The same site serves maroon and golden below the floor: salvage must skip
+    the wrong colour (S16.salvage) and publish only the golden one."""
+    maroon_url = "https://www.hadielectronics.com.pk/wp-content/maroon.jpg"
+    gold_url = "https://www.hadielectronics.com.pk/wp-content/golden.jpg"
+    maroon = _jpeg_bytes(clean_product_image(700, 700, "#800000"))
+    gold = _jpeg_bytes(clean_product_image(700, 700, "#d4af37"))
+    page_url = "https://www.hadielectronics.com.pk/product/homage-hrf-47662-gd/"
+    page = (
+        "<!doctype html><html><head>"
+        "<title>Homage HRF-47662-GD Freezer-on-Top Refrigerator 18 Cu Ft Golden</title>"
+        '<script type="application/ld+json">{"@context":"https://schema.org",'
+        '"@type":"Product","name":"Homage HRF-47662-GD Golden Refrigerator",'
+        f'"sku":"HRF-47662-GD","image":["{maroon_url}","{gold_url}"]}}</script>'
+        "</head><body></body></html>"
+    )
+    floor = max(len(maroon), len(gold)) + 2000
+    config = live_config(tmp_path, min_lossy_image_bytes=floor)
+    deps, _, _, _ = build_deps(
+        tmp_path, {page_url: page}, {maroon_url: maroon, gold_url: gold}
+    )
+    result, images = process_product(
+        task(
+            0,
+            "Homage Freezer-on-Top Refrigerator 18 Cu Ft Golden (HRF-47662-GD)",
+            (page_url,),
+        ),
+        deps,
+        config,
+    )
+    log = [
+        json.loads(line)
+        for line in (tmp_path / "out" / "decisions.jsonl").read_text().splitlines()
+    ]
+    rejected = [entry for entry in log if entry["rule_id"] == "S16.salvage"]
+    salvaged = [entry for entry in log if entry["rule_id"] == "S13.salvage"]
+    assert [entry["url"] for entry in rejected] == [maroon_url]   # wrong colour skipped
+    assert [entry["url"] for entry in salvaged] == [gold_url]     # correct one published
+    assert len(images) == 1
+    assert result.status is Status.PARTIAL
+
+
+def test_salvage_can_be_disabled(tmp_path: Path) -> None:
+    small_url = "https://cdn.haier.com/p/hsu-12hfpaa-hero-lowq.jpg"
+    small = _jpeg_bytes(clean_product_image(700, 700, "#c9a227"))
+    page = load_fixture("product_ok")
+    for img in (IMG1, IMG2, IMG3):
+        page = page.replace(img, small_url)
+    config = live_config(
+        tmp_path,
+        min_lossy_image_bytes=len(small) + 2000,
+        last_resort_salvage_enabled=False,
+    )
+    deps, _, _, _ = build_deps(tmp_path, {HAIER_PAGE: page}, {small_url: small})
+    result, images = process_product(
+        task(0, "Haier HSU-12HFPAA Inverter AC", (HAIER_PAGE,)), deps, config
+    )
+    assert images == []
+    assert result.status is Status.FAILED

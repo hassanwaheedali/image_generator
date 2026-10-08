@@ -236,7 +236,9 @@ class PipelineConfig:
             "www.haier.com/pk": "sitemap",
             "haiermall.pk": "none",           # sitemap.xml is an HTML page there
             "www.dawlance.com.pk": "sitemap",
-            "www.tcl.com/pk": "none",         # marketing site, JS gallery
+            "www.tcl.com/pk": "sitemap",      # JS gallery is fine now: state_json reads
+                                              # the embedded pageData; a missing or HTML
+                                              # sitemap.xml simply yields 0 candidates
             "eshop.pel.com.pk": "shopify",
             "homage.com.pk": "woo",
             "www.kenwoodpakistan.com": "woo",
@@ -384,7 +386,21 @@ class PipelineConfig:
     dedup_corr_threshold: float = 0.995
 
     # ----- visual color verification (S16) --------------------------------
-    color_gate_enabled: bool = True
+    #: Owner decision 2026-10-08: the pixel-colour gate is a *rare-condition* tool,
+    #: off by default.  It false-rejected a white Dawlance WD-1051 dispenser whose
+    #: blue accent panel read as hue 213 deg ("conflicts with target 'white'"), and
+    #: on LED TVs the screen shows arbitrary content, so a picture-based colour check
+    #: can never be trusted there.  Flip on manually for a run that really needs it
+    #: (e.g. a colourway-mixing brand page); display products stay exempt regardless.
+    color_gate_enabled: bool = False
+
+    # ----- last-resort salvage --------------------------------------------
+    #: Owner decision 2026-10-08 ("jab kuch na bachey toh kam quality wali hi le lon"):
+    #: when a row would otherwise end with 0 (or below ``min_required_images``) images,
+    #: publish the best already-downloaded picture that only missed a *quality* floor
+    #: (S13 lossy payload / bpp) - never an identity reject (wrong model, banner, wrong
+    #: colour).  1 salvaged image beats a failed row.
+    last_resort_salvage_enabled: bool = True
 
     # ----- compositing -----------------------------------------------------
     canonical_side: int = 1200

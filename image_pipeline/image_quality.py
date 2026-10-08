@@ -27,12 +27,20 @@ _FORBIDDEN_CONTENT_TYPES: frozenset[str] = frozenset(
 
 
 class ImageValidationError(Exception):
-    """S13 failure: the bytes are not a usable raster image."""
+    """S13 failure: the bytes are not a usable raster image.
 
-    def __init__(self, rule_id: str, detail: str) -> None:
+    ``salvageable`` marks the *only* two rejects that are a quality judgement rather
+    than a broken payload: the lossy byte floor and the bpp floor.  The image decoded
+    fine - it is merely compressed.  The pipeline may publish such an image as a last
+    resort when nothing better exists (owner decision 2026-10-08: "jab kuch na bachey
+    toh kam quality wali hi le lon").
+    """
+
+    def __init__(self, rule_id: str, detail: str, salvageable: bool = False) -> None:
         super().__init__(f"{rule_id}: {detail}")
         self.rule_id = rule_id
         self.detail = detail
+        self.salvageable = salvageable
 
 
 # --------------------------------------------------------------------------- #
@@ -82,6 +90,7 @@ def validate_image_bytes(
                     raise ImageValidationError(
                         "S13",
                         f"lossy payload {len(content)} bytes below minimum {min_lossy_bytes}",
+                        salvageable=True,
                     )
                 if min_lossy_bytes_per_pixel > 0.0 and width > 0 and height > 0:
                     bpp = len(content) / float(width * height)
@@ -89,6 +98,7 @@ def validate_image_bytes(
                         raise ImageValidationError(
                             "S13",
                             f"over-compressed blurry image (bpp={bpp:.4f} < {min_lossy_bytes_per_pixel:.4f})",
+                            salvageable=True,
                         )
             probe.load()
             image = ImageOps.exif_transpose(probe)
