@@ -369,6 +369,10 @@ def process_product(
         return replace(base, reason="title has no model-like token"), []
 
     stages.append(f"1 recognition: keys={list(keys.tokens)} brand={base.brand or '-'}")
+    LOG.info(
+        "[row %s] start | %s | %d sheet url(s)",
+        task.index, task.title, len(task.source_urls),
+    )
 
     urls = prioritize_source_urls(task.source_urls, brand)
     settings = MatchSettings.from_config(config)
@@ -498,6 +502,7 @@ def process_product(
         nonlocal fallback_found, fallback_report, fallback_used
         if fallback_found is None:
             if config.fallback_enabled and deps.source_searcher is not None:
+                LOG.info("[row %s] fallback search across retailer sources", task.index)
                 found, report = _search_sources(task=task, brand=brand, keys=keys, deps=deps)
                 fallback_found = found
                 fallback_report = report
@@ -966,6 +971,7 @@ def _visit_page(
     model: a page matching only through the dropped-trailing-letter tolerance is then
     returned untouched, so the caller can come back to it as a flagged last resort.
     """
+    LOG.info("[row %s] fetching %s", task.index, page_url)
     try:
         response = deps.page_fetcher.fetch_page(page_url)
     except (PermanentAPIError, FetchError) as exc:
