@@ -166,7 +166,7 @@ class _SessionFactory:
         if session is None:
             session = cffi_requests.Session(
                 impersonate=self._config.impersonate,
-                timeout=self._config.request_timeout_s,
+                timeout=(self._config.connect_timeout_s, self._config.request_timeout_s),
             )
             session.headers.update(
                 {

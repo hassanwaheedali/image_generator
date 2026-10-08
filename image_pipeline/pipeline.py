@@ -92,6 +92,7 @@ from url_filters import (
     detect_brand,
     display_brand,
     has_bad_keyword,
+    has_image_extension,
     host_is_official,
     is_fetchable_product_url,
     prioritize_source_urls,
@@ -310,6 +311,8 @@ def _decide_candidate(
     key = dedup_key(candidate.url)
     if key in seen_keys:
         return "S10", "same file already queued for this product"
+    if not has_image_extension(candidate.url):
+        return "S5", "URL does not have an image file extension"
     if has_bad_keyword(candidate.url):
         return "S5", "bad keyword in image URL"
     if url_belongs_to_other_model(candidate.url, keys):

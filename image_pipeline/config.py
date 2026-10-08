@@ -225,6 +225,10 @@ class PipelineConfig:
         "symbios.pk",         # broken TLS chain
         "zeesolstore.pk",     # domain dead / no JSON
         "zeesol.com.pk",
+        "telex.pk",           # port 443 unresponsive (connect timeout)
+        "www.telex.pk",
+        "fahadelectronics.pk",# port 443 unresponsive (connect timeout)
+        "www.fahadelectronics.pk",
     )
     #: base URL -> platform, measured (plan.md 11.2).  Add a shop = add one line.
     source_platforms: dict[str, str] = field(
@@ -235,9 +239,9 @@ class PipelineConfig:
             "www.tcl.com/pk": "none",         # marketing site, JS gallery
             "eshop.pel.com.pk": "shopify",
             "homage.com.pk": "woo",
+            "www.kenwoodpakistan.com": "woo",
             "www.surmawala.pk": "shopify",
             "modernelectronics.pk": "shopify",
-            "www.telex.pk": "shopify",
             "www.alfatah.com.pk": "woo",
             "www.almumtaz.com.pk": "woo",
             "hadielectronics.com.pk": "woo",
@@ -252,12 +256,12 @@ class PipelineConfig:
             "tcl": ("https://www.tcl.com/pk",),
             "pel": ("https://eshop.pel.com.pk",),
             "homage": ("https://homage.com.pk",),
+            "kenwood": ("https://www.kenwoodpakistan.com",),
         }
     )
     retail_shopify_sources: tuple[str, ...] = (
         "https://www.surmawala.pk",
         "https://modernelectronics.pk",
-        "https://www.telex.pk",
     )
     retail_woo_sources: tuple[str, ...] = (
         "https://www.alfatah.com.pk",
@@ -308,6 +312,7 @@ class PipelineConfig:
     url_rewrite_enabled: bool = True              # largest-size rewrite before fetch
 
     # ----- page / image fetching ------------------------------------------
+    connect_timeout_s: float = 5.0
     request_timeout_s: float = 25.0
     max_retries: int = 3
     backoff_base_s: float = 0.8
@@ -537,6 +542,8 @@ class PipelineConfig:
             raise ConfigError("limit must be >= 1 when given")
 
     def _validate_fetch(self) -> None:
+        if self.connect_timeout_s <= 0:
+            raise ConfigError("connect_timeout_s must be > 0")
         if self.request_timeout_s <= 0:
             raise ConfigError("request_timeout_s must be > 0")
         if self.max_retries < 1:

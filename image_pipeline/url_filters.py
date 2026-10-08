@@ -152,7 +152,7 @@ KNOWN_BRANDS: dict[str, tuple[str, ...]] = {
     "gree": ("gree.com", "gree.com.pk"),
     "samsung": ("samsung.com",),
     "lg": ("lg.com",),
-    "kenwood": ("kenwood.com", "kenwood.pk"),
+    "kenwood": ("kenwood.com", "kenwoodpakistan.com"),
     "boss": ("bossappliances.com.pk",),
     "changhong": ("changhong.com",),
     "ecostar": ("ecostar.com.pk",),
@@ -483,6 +483,10 @@ def upscale_candidates(url: str, official: bool = False) -> tuple[str, ...]:
     parts = urlsplit(url)
     path, query = parts.path, parts.query
     for name, pattern, replacement in UPSCALE_REWRITE_RULES:
+        if name == "cdn-transform" and "dawlance" in parts.netloc.lower():
+            # Dawlance CDN endpoints require the transform segment (/1000Wx1000H/image.webp);
+            # stripping it causes an immediate Akamai HTTP/2 stream reset (error 0x1 PROTOCOL_ERROR).
+            continue
         if name == "haier-thumb" and official:
             for size in (1000, 800, 480):
                 rewritten = re.sub(pattern, rf"_{size}\1", path)
