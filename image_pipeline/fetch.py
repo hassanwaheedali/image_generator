@@ -16,6 +16,7 @@ from http import HTTPStatus
 from typing import Any, Final, TypeVar
 from urllib.parse import urlsplit
 
+from curl_cffi import CurlOpt
 from curl_cffi import requests as cffi_requests
 
 from config import PipelineConfig
@@ -144,6 +145,19 @@ def retry_with_backoff(
                 attempts_holder.append(attempt)
 
 
+def fetch_curl_options(config: PipelineConfig) -> dict[CurlOpt, int]:
+    """curl options applied to every session - IPv4-only when configured.
+
+    A pure function so it is unit-testable without opening a socket.  ``IPRESOLVE=1`` is
+    ``CURL_IPRESOLVE_V4``: it stops curl burning the connect timeout on an unreachable
+    IPv6 record before ever trying IPv4 (live curl 28 on eshop.pel.com.pk / surmawala).
+    """
+    options: dict[CurlOpt, int] = {}
+    if config.fetch_force_ipv4:
+        options[CurlOpt.IPRESOLVE] = 1
+    return options
+
+
 class _SessionFactory:
     """One curl_cffi session **per host** per worker thread (sessions are not thread-safe).
 
@@ -167,6 +181,7 @@ class _SessionFactory:
             session = cffi_requests.Session(
                 impersonate=self._config.impersonate,
                 timeout=(self._config.connect_timeout_s, self._config.request_timeout_s),
+                curl_options=fetch_curl_options(self._config),
             )
             session.headers.update(
                 {

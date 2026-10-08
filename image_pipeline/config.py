@@ -319,6 +319,10 @@ class PipelineConfig:
     backoff_max_s: float = 8.0
     domain_min_interval_s: float = 1.2
     impersonate: str = "chrome120"
+    #: Force IPv4 for every fetch.  Some PK hosts sit behind an IPv6 record that black-holes
+    #: on crawler networks (browser still works), producing curl 28 connect timeouts while the
+    #: IPv4 address is fine.  IPv4-only is universally reachable for these retail domains.
+    fetch_force_ipv4: bool = True
     user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"

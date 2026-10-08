@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Fetches now go over IPv4, curing curl 28 connect timeouts on IPv6 black-holed hosts.**
+  Live runs showed `eshop.pel.com.pk` and `www.surmawala.pk` dying with `curl: (28) Failed to
+  connect ... after 21000 ms` - a TCP connect timeout that fires *before* any HTTP, because curl
+  burns its budget on an unreachable IPv6 record while the IPv4 address (what a browser uses) is
+  fine.  `fetch_curl_options()` now sets ``CURL_IPRESOLVE_V4`` on every session when
+  ``fetch_force_ipv4`` (default on).  This is the connect-level fix; the separate `curl: (92)`
+  HTTP/2 stream resets on Dawlance are transient and already self-heal through retry, so they are
+  deliberately left alone.  Tests `tests/test_fetch.py`.  330 tests, ruff + mypy --strict clean.
 - **A fallback search-result page can no longer "match" via its own search query.**
   `relaxed_page_match` built its haystack from the whole URL, and fallback search URLs echo the
   searched number in the query string (`?_psq=PWM+1250`).  A wrong product's result therefore
@@ -15,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   appeared in the query.  The query (and fragment) are now excluded; only host + path + page text
   count, so a model number must appear in the page itself, not in the search that found it.
   Legitimate sibling matches (a `DW-7500` page for a `DW-7500C` row) are unchanged.  Regression
-  `test_fallback_match_ignores_the_search_query_in_the_url`.  328 tests, ruff + mypy --strict clean.
+  `test_fallback_match_ignores_the_search_query_in_the_url`.  330 tests, ruff + mypy --strict clean.
 - **A page showing another colourway is no longer accepted as this product.** The colour a
   product comes in is part of its identity, so `... 7 Cu Ft Burgundy (9160-WB-GD)` and its
   `Pearl Red` twin are different products and need different pictures - the wrong colour costs
@@ -70,7 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   falling back to the thumb; retailers keep the single ``_1000`` rewrite, so their S8 protection is
   unchanged.  The S8 gate itself is untouched - a genuinely tiny image still rejects; we only look
   harder for the large sibling on official pages.  Regression
-  `test_official_haier_page_tries_a_size_ladder_retailers_do_not`.  328 tests, ruff + mypy --strict
+  `test_official_haier_page_tries_a_size_ladder_retailers_do_not`.  330 tests, ruff + mypy --strict
   clean.
 - **Variant pages that print the colour only in the body now match their own colourway.**
   A PEL dispenser page names no colour in its title; the colour lives in a labelled body line
@@ -81,7 +89,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the page's strong text names no colour of its own, so ordinary pages are untouched.  Result for the
   PEL 425 page: the `Red Blaze` row clean-matches its own label, the `Marine Impression` row is
   flagged, and the `Maroon Blaze` row is rejected (`colour_conflict`) - instead of all three rows
-  sitting unmatched.  Pages with no label stay fail-open, as today.  328 tests, ruff + mypy --strict
+  sitting unmatched.  Pages with no label stay fail-open, as today.  330 tests, ruff + mypy --strict
   clean, radon 45.
 - **Every catalogue brand now has its official domain, and category words can never veto.**
   `KNOWN_BRANDS` was missing three brands that appear in the shipped catalogue and in the owner's
@@ -95,7 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (it returned `None` before, i.e. no priority at all).  And every word in the catalogue's 21
   category paths - `microwaves`, `geysers`, `purifier`, `humdifier`, `sound bars`, `appliances`,
   ... - is now in `_GENERIC_NAME_WORDS`, so an appliance category can never be mistaken for a
-  series name and veto a correct page.  328 tests, ruff + mypy --strict clean, radon 45.
+  series name and veto a correct page.  330 tests, ruff + mypy --strict clean, radon 45.
 - **Probabilistic, format-agnostic variant matching** (`docs/riper/probabilistic-matching-plan.md`,
   owner-approved 2026-10-07).  `similarity.py` (new, stdlib `difflib` only) adds `similar()` and
   `same_digit_runs()`; `ModelKeys.name_words` captures the positional "name" words - series lines
@@ -110,7 +118,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   page; the substitution rule keeps all **94/94** clean, and brand words are dropped before the
   comparison so `Super Asia` ≡ `Superasia` cannot veto.  Measured: same-code colour pairs separated
   274, **0 false rejects**, 157 diff-colour pairs with **0** clean matches; 100-product offline smoke
-  GREEN; 328 tests, ruff + mypy --strict clean, radon baseline unchanged (45).
+  GREEN; 330 tests, ruff + mypy --strict clean, radon baseline unchanged (45).
 - **`image_pipeline/variant_terms.py`** - the variant vocabulary and its pure rules: colour
   families with a neutral (achromatic) carve-out, `suffix_agreement`, `colour_word_conflict`.
   It holds no brand, suffix or colour-code tables, so a colour the vocabulary has never seen
