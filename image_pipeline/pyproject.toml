@@ -89,7 +89,7 @@ testpaths = ["tests"]
 addopts = "-q"
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 strict = true
 files = ["."]
 exclude = ["tests/fixtures"]

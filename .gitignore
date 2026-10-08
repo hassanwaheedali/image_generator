@@ -16,8 +16,10 @@ env.txt
 # Run Artifacts & Generated State
 output/
 **/output/
-# state/
-# **/state/
+state/checkpoint.jsonl
+**/state/checkpoint.jsonl
+state/banner_urls.json
+**/state/banner_urls.json
 *.log
 *.sqlite
 *.sqlite3
