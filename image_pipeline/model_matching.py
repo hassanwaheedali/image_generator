@@ -290,7 +290,12 @@ def relaxed_page_match(
     """
     if not keys.identities:
         return False, ""
-    haystack = f"{page_url} {page_text}".lower()
+    parts = urlsplit(page_url)
+    # A search-result URL echoes the number we searched for in its query string
+    # (``?_psq=PWM+1250``), so the query can never be evidence - a wrong product's
+    # result would otherwise "match" itself.  Judge by host + path + page text only.
+    url_evidence = f"{parts.netloc} {parts.path}"
+    haystack = f"{url_evidence} {page_text}".lower()
     for identity in keys.identities:
         pattern = _whole_token_pattern(identity)
         if len(identity) >= 5 and pattern is not None and pattern.search(haystack):
@@ -314,7 +319,7 @@ def relaxed_page_match(
     )
     if not hit:
         return False, ""
-    if brand and not brand_token_present(f"{page_url} {page_text}", brand):
+    if brand and not brand_token_present(f"{url_evidence} {page_text}", brand):
         return False, ""
     return True, f"brand + number match ({hit}) without an exact model proof"
 
