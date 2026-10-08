@@ -60,11 +60,11 @@ from image_quality import (
     official_gallery_pass,
     probe_verdict,
     run_quality_gates,
+    sharpness_score,
     strip_promo_band,
     trim_edge_seams,
     validate_image_bytes,
     verify_image_color,
-    sharpness_score,
 )
 from model_matching import (
     build_model_keys,
