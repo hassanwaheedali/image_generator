@@ -1741,3 +1741,51 @@ def test_multi_image_continuation_does_not_stop_at_single_image(tmp_path: Path) 
     assert len(accepted) == 2
     assert accepted[0].source_url == sheet_img
     assert accepted[1].source_url == fallback_img
+
+
+# --------------------------------------------------------------------------- #
+# owner run 2026-10-08: dead sheet hosts, per-page download target, S16 default
+# --------------------------------------------------------------------------- #
+def test_excluded_host_sheet_url_is_never_fetched(tmp_path: Path) -> None:
+    """A dead host pasted into the sheet must not burn retries x timeout."""
+    config = live_config(tmp_path)
+    deps, page_fetcher, _, _ = build_deps(tmp_path, {}, {})
+    result, _ = process_product(
+        task(
+            0,
+            "TCL 98 Inch SQD Mini LED TV (98C8L)",
+            ("https://fahadelectronics.pk/products/tcl-98c8l-98-inch-4k-mini-led-google-tv",),
+        ),
+        deps,
+        config,
+    )
+    assert page_fetcher.requested == []          # refused before any fetch
+    assert result.status is Status.FAILED
+
+
+def test_page_downloads_stop_at_the_target_not_the_maximum(tmp_path: Path) -> None:
+    """A six-image gallery must cost three downloads (the target), not six."""
+    alt1 = "https://cdn.haier.com/p/alt/hsu-12hfpaa-1b.jpg"
+    alt2 = "https://cdn.haier.com/p/alt/hsu-12hfpaa-2b.jpg"
+    alt3 = "https://cdn.haier.com/p/alt/hsu-12hfpaa-3b.jpg"
+    page = load_fixture("product_ok").replace(
+        '"https://cdn.haier.com/p/hsu-12hfpaa-2.jpg"]',
+        '"https://cdn.haier.com/p/hsu-12hfpaa-2.jpg",'
+        '"https://cdn.haier.com/p/hsu-12hfpaa-3.jpg",'
+        f'"{alt1}","{alt2}","{alt3}"]',
+    )
+    images = gallery_images()
+    images[alt1], images[alt2], images[alt3] = images[IMG1], images[IMG2], images[IMG3]
+    config = live_config(tmp_path)
+    deps, _, image_fetcher, _ = build_deps(tmp_path, {HAIER_PAGE: page}, images)
+    result, accepted = process_product(
+        task(0, "Haier HSU-12HFPAA Inverter AC", (HAIER_PAGE,)), deps, config
+    )
+    assert result.status is Status.OK
+    assert len(accepted) == config.target_images_per_product
+    assert len(image_fetcher.requested) == config.target_images_per_product
+
+
+def test_color_gate_is_off_by_default(tmp_path: Path) -> None:
+    """Owner decision: the S16 pixel-colour gate is opt-in, not on by default."""
+    assert live_config(tmp_path).color_gate_enabled is False

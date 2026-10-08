@@ -96,6 +96,7 @@ from url_filters import (
     has_bad_keyword,
     has_image_extension,
     host_is_official,
+    is_excluded_host,
     is_fetchable_product_url,
     prioritize_source_urls,
     upscale_candidates,
@@ -416,6 +417,22 @@ def process_product(
         if page_url in visited_page_urls:
             return True
         visited_page_urls.add(page_url)
+
+        # Dead hosts: the exclusion list already stops the fallback *search* from
+        # proposing them, but a dead host pasted into the sheet itself used to burn
+        # every retry x timeout before failing (live: fahadelectronics.pk in the
+        # 98C8L row, 4 attempts x 5s connect).  Refuse it before any fetch.
+        if is_excluded_host(urlsplit(page_url).netloc.lower(), config.excluded_hosts):
+            pages_rejected += 1
+            if not is_fallback:
+                sheet_pages_rejected += 1
+            deps.decisions.reject(
+                title=task.title,
+                url=page_url,
+                rule_id="S15" if is_fallback else "S11",
+                detail="host is on the excluded list (known unreachable) - not fetched",
+            )
+            return True
 
         if not is_fetchable_product_url(
             page_url,
@@ -1096,7 +1113,11 @@ def _consume_candidates(
     """
     budget.grant(page_url, _page_download_allowance(candidates, config))
     for candidate in candidates:
-        if len(accepted) >= config.max_images_per_product:
+        # Stop at the customer *target* (3 by default), not the hard maximum (10):
+        # downloading 9-11 images per page when 3 publish was the single biggest
+        # per-row time sink (owner run 2026-10-08: ~2 min per product).  Rows that
+        # need more pictures raise ``target_images_per_product`` instead.
+        if _row_is_done(accepted, config):
             break
         verdict = _decide_candidate(candidate, keys, seen_keys)
         if verdict is not None:
