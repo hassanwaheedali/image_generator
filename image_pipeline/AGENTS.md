@@ -46,8 +46,8 @@ variable always wins. **Never print, log, commit or echo the key value.**
 ## Code conventions
 
 - One rule = one named function + one direct test + one `rule_id` in `decisions.jsonl`. Rule ids are
-  `S1`..`S15` plus the scoped sub-rules `S7.band`, `S7.seam`, `S7.official`, `S11.fetch`, `S13.fetch`,
-  `S15.fetch`, `S15.relaxed`, `S15.tolerated`.
+  `S1`..`S17` plus the scoped sub-rules `S7.band`, `S7.seam`, `S7.official`, `S11.fetch`, `S13.fetch`,
+  `S15.fetch`, `S15.relaxed`, `S15.tolerated`, `S16` (Visual Color Gate), and `S17` (Intra-Gallery Consistency).
 - **One config field per threshold.** No magic numbers in stage functions - everything tunable lives in
   `config.PipelineConfig` and is validated in `__post_init__`.
 - `pipeline.py` never imports `requests` / `curl_cffi` / filesystem-network code directly: it talks to
@@ -88,9 +88,13 @@ variable always wins. **Never print, log, commit or echo the key value.**
 - Never log secrets, never commit `secrets.env`/`.env`/`output/`/`state/`.
 - Do not re-litigate settled product decisions. Colour is one, and it moved: another colourway of the
   same model is a **different product**, so it is rejected rather than flagged (owner decision
-  2026-10-07, superseding 2026-10-05) - the wrong picture costs a penalty. Size/type differences are
-  still flags only, photo-level colour differences still only affect ordering, and one field
-  (`config.variant_separation_enabled`) rolls the whole rule back.
+  2026-10-07, superseding 2026-10-05) - the wrong picture costs a penalty. Size/type differences (such
+  as 15 Cu Ft vs 18 Cu Ft) are still flags only in notes/reports, never hard-rejected. On the visual
+  side, `S16` (Visual Color Gate) rejects individual candidate images whose dominant foreground hue
+  conflicts with the title colorway (e.g., Purple/Red images for a Golden refrigerator), and `S17`
+  enforces intra-gallery chromatic consistency. Display products (LED TVs, monitors, OLED/QLED) are
+  exempted from S16 via `is_display_product()` so vibrant screen wallpapers do not trigger false rejections.
+  `config.variant_separation_enabled` and `config.visual_color_gate_enabled` control these safeguards.
 - **Relaxed matching never applies to the sheet's own URLs.** `relaxed_page_match` is only for
   `is_fallback=True` pages, it must always emit `S15.relaxed` **and** a `review_products.csv` row, and
   it must match whole tokens: `dw7500` never matches inside `dw7500c`.

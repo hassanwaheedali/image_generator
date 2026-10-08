@@ -116,12 +116,20 @@ Checklist view of `tasks/plan.md`. Legend: `[x]` done (evidence in plan.md) · `
 - [ ] Task 26: Brand extractor work for the 2 stubborn rows (Dawlance DWF, Homage/Daraz)
 - [ ] Task 27: Source-list extension (more PK shops)
 
+## Phase 12 — S16 Visual Color Gate & Multi-Variant Safeguards
+- [x] Task 42: Foreground Colorway Extractor & HSV Classifier (`image_quality.py`)
+- [x] Task 43: S16 Quality Gate Integration & Config (`config.py`, `pipeline.py`)
+- [x] Task 44: S17 Intra-Gallery Color Consistency Tracker (`dedup.py`, `pipeline.py`)
+- [x] Task 45: S4 Image URL Model & Capacity Discrepancy Fix (`model_matching.py`)
+- [x] Task 46: Regression Test Suite & Verification (`tests/*`)
+- [x] Task 47: Live Pipeline Dry-Run Verification on Homage Row & Products.csv compatibility
+
 ## Standing verification (run after every change)
 ```
-python3 -m ruff check .            # must print: All checks passed!
-python3 -m mypy --strict .         # must print: Success: no issues found
-python3 -m pytest tests -q         # 330 passed as of 2026-10-07 - never fewer (fakes only, no network)
-python3 main.py --input sample_input.csv --dry-run --workers 4
+python -m ruff check .            # must print: All checks passed!
+python -m mypy --strict .         # must print: Success: no issues found
+python -m pytest tests -q         # 340+ passed - never fewer (fakes only, no network)
+python main.py --input sample_input.csv --dry-run --workers 4
 ```
 
 ## Blockers

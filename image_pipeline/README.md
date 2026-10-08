@@ -98,7 +98,7 @@ python3 main.py --input sheet.csv --no-resume
 
 | Flag | Meaning |
 |---|---|
-| `--input` | `.csv` or `.xlsx` sheet. Header aliases: `Title`/`Product Title`/`Name`/`Product Name` and `Images`/`Source URL`/`URL`/`Source_URLs`. Several URLs per cell, separated by `\|` or a newline |
+| `--input` | `.csv` or `.xlsx` sheet. Header aliases: `Title`/`Product Title`/`Name`/`Product Name` and `Image`/`Images`/`Source URL`/`URL`/`Source_URLs`. Several URLs per cell, separated by `\|` or a newline |
 | `--assets-dir` | folder holding the 2 templates + 2 banners (default `assets`) |
 | `--output-dir` | CSVs, images, logs (default `output`) |
 | `--state-dir` | checkpoint + banner-URL cache (default `state`) |
@@ -302,7 +302,7 @@ Editing the list is data, not code: `config.source_platforms`, `config.brand_sou
 
 ---
 
-## 4. Safeguards S1–S15 (each one a named function, a direct test and a rule ID)
+## 4. Safeguards S1–S17 (each one a named function, a direct test and a rule ID)
 
 Every decision is written to `output/decisions.jsonl` with its `rule_id`, so any image can be traced
 back to the rule that kept or rejected it.
@@ -326,9 +326,10 @@ back to the rule that kept or rejected it.
 | S13 | Bytes must really be an image (Content-Type, no SVG/animated GIF, ≤15 MB, decode, EXIF rotation) | `image_quality.validate_image_bytes()` | `test_non_image_and_oversize_rejected`, `test_exif_rotation_applied` |
 | S14 | Nothing uploaded until the selection is final; **both platforms or neither**; banner appended **last** | `pipeline.finalize_and_upload()` | `test_ok_product_urls_are_real_images_then_banner`, `test_failed_product_uploads_nothing`, `test_partial_product_gets_one_banner_per_platform` |
 | — | **The template's logo band is never touched** (paste box starts below `header_safe_margin`, template composited on top, its artwork preserved) | `compositing.apply_template()`, `template_content_box()`, `header_safe_margin()` | `test_logo_band_is_byte_identical_after_compositing`, `test_product_is_never_pasted_above_the_safe_margin`, `test_template_decoration_inside_the_content_area_survives`, `test_real_asset_templates_protect_their_band` (mutation-verified) |
-
 | S15.tolerated | A page that shows the model *without* our exact spelling (the sheet's dropped trailing letter) being published as if it proved the model; used **only when the row found zero exact images** — never to top up a partially-solved row | `model_matching.match_product` (`tolerated`) + `pipeline._visit_page` + stage-3b guard | `test_a_tolerated_spelling_is_not_an_exact_match`, `test_the_title_model_wins_over_a_wrong_sheet_link`, `test_a_tolerated_sheet_page_is_published_with_a_flag_when_nothing_else_matches`, `test_a_row_with_one_exact_image_is_never_topped_up_by_the_tolerated_page` |
 | S15 | A page found by search is only a *candidate*: it must pass the same `verify_page` with the **sheet's** model before any image URL is read | `sources.SourceChain.find_candidates()` + `pipeline._visit_page()` | `test_fallback_candidate_is_verified_before_any_image_is_used`, `test_candidate_is_only_a_page_never_an_image`, `test_fallback_recovers_a_row_and_is_labelled_in_the_output` |
+| S16 | Visual Color Gate: Rejects images whose dominant foreground hue conflicts with the title colourway (e.g. Purple/Red images for a Golden refrigerator); display products (TVs/monitors) exempted via `is_display_product()` | `image_quality.verify_image_color()` + `model_matching.is_display_product()` | `test_verify_image_color_rejects_conflicting_hue`, `test_verify_image_color_accepts_matching_or_neutral`, `test_is_display_product` |
+| S17 | Intra-Gallery Color Consistency: Prevents mixing distinct chromatic color families within the same product gallery | `dedup.check_color_consistency()` | `test_check_color_consistency_blocks_mixed_chromatic`, `test_check_color_consistency_allows_same_or_neutral` |
 
 **Zero-tolerance guarantees** (each proven by a test): no image from description/article content
 (S2), no image from a link to another page (S3), no image carried between products or threads (S10).

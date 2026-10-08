@@ -428,3 +428,113 @@ centred** without touching the logo, and fix the empty Brand column.
   (a brand's own gallery shot that fills the frame, official host only).
 - **`output/` is now self-documenting** (generated `README.md`), and every picture in it can be traced
   back to the decision line that admitted it.
+
+---
+
+# Phase 12 — S16 Visual Color Gate & Intra-Gallery Consistency
+
+**Feature name:** Safeguard S16 (Visual Color Gate), Safeguard S17 (Intra-Gallery Consistency), and S4 Model Discrepancy Tokenizer Fix  
+**Skill used:** `planning-and-task-breakdown`  
+**Problem statement:** E-commerce stores (such as `hadielectronics.com.pk`) frequently bundle all colorway variants (e.g. Golden, Purple, Red) into a single product gallery. When processing a product whose title specifies a distinct color (e.g., `Homage Freezer-on-Top Refrigerator 18 Cu Ft Golden (HRF-47662-GD)`), the pipeline previously accepted Purple and Red refrigerator photos alongside the Golden one.  
+**Objective:** Deterministic, high-performance (<2ms/image) foreground color extraction and validation to ensure that candidate images never depict conflicting colorways, and a single product's gallery never mixes contradictory colors.
+
+## Architecture Decisions
+
+1. **Deterministic Vectorized HSV Analysis (No External APIs / No ML Models):**
+   - High-speed thumbnail downsampling (`96x96` bilinear PIL resize, ~0.5ms).
+   - High-brightness background segmentation (`V > 0.90, S < 0.08` studio white mask) combined with central 75% product bounding mask.
+   - Vectorized NumPy HSV conversion and chromatic clustering.
+   - Execution time budget strictly bounded under **2.5 ms** per image (zero pipeline throughput impact).
+2. **Explicit Hue / Chroma Family Mapping:**
+   - Grounded directly in `variant_terms.COLOUR_FAMILIES`.
+   - Distinct chromatic cones:
+     - `purple`: Hue $260^\circ$ to $330^\circ$ (Magenta-Violet)
+     - `red` / `maroon`: Hue $335^\circ$ to $360^\circ \cup 0^\circ$ to $20^\circ$
+     - `gold` / `champagne`: Warm low-chroma / yellow-gold hue $25^\circ$ to $65^\circ$, warm tone ($R \ge G > B$)
+     - `blue`: Hue $180^\circ$ to $255^\circ$
+     - `green`: Hue $75^\circ$ to $160^\circ$
+     - `black`: Value $< 0.35$, Chroma $< 0.15$
+     - `white`: Value $> 0.75$, Chroma $< 0.12$
+     - `grey` / `silver`: Value $0.35$ to $0.75$, Chroma $< 0.15$
+3. **Fail-Open Policy for Unambiguous Cases:**
+   - If `keys.colour_word` is blank (no color specified in title), S16 is inactive.
+   - If the product foreground has negligible chromaticity (achromatic/metallic) and the target color is neutral, accept.
+   - Hard rejection triggers **only** on positive chromatic conflict (e.g. image foreground exhibits strong Purple or Red cluster when target is Gold/Silver/White/etc.).
+4. **Intra-Gallery Consistency (S17):**
+   - Multi-image gallery coherence: if the first accepted image is predominantly of one chromatic family (or neutral), subsequent images in that product gallery must not belong to a contradicting chromatic family.
+5. **S4 Model Discrepancy URL Tokenizer Fix:**
+   - Improve `url_belongs_to_other_model` so hyphenated filenames like `Homage-HRF-47552-GD-15-Cuft-Refrigerator3` correctly isolate `47552` and reject it when the sheet model is `47662` (and isolate capacity `15-cuft` vs `18-cuft`).
+
+## Task Breakdown
+
+### Task 42: Foreground Colorway Extractor & Classifier (`image_quality.py`)
+- **Description:** Implement `extract_foreground_color_profile` and `classify_color_conflict` in `image_quality.py`. Takes a PIL Image, downsamples to 96x96, masks studio background, extracts foreground chromaticity (chromatic ratio, median hue, mean saturation, mean brightness), and compares with the target `colour_word`.
+- **Acceptance criteria:**
+  - Correctly identifies Image 01 as Purple (hue ~301°) and Image 02 as Maroon/Red (hue ~345°).
+  - Flags both as conflicting with target color `golden` (and family `gold`).
+  - Benchmarked execution time is $< 2.5$ ms per image.
+- **Verification:** Unit test with synthetic patches (pure red, purple, gold, black, white, silver) and actual product fixtures.
+- **Dependencies:** None.
+- **Files touched:** `image_pipeline/image_quality.py`, `image_pipeline/tests/test_image_quality.py`.
+- **Estimated scope:** Small (1-2 files).
+
+### Task 43: S16 Quality Gate Integration & Config (`config.py`, `pipeline.py`)
+- **Description:** Add `color_gate_enabled`, `color_chromatic_threshold`, `color_hue_tolerance` to `PipelineConfig`. Wire `verify_image_color` into `pipeline._consume_candidates` right after `run_quality_gates`. Log rejections under rule ID `S16`.
+- **Acceptance criteria:**
+  - Rejections written to `decisions.jsonl` with rule ID `S16` and detail stating detected color vs expected color.
+  - Can be toggled on/off via `PipelineConfig.color_gate_enabled`.
+- **Verification:** `pytest tests/test_image_quality.py`, `pytest tests/test_pipeline_end_to_end.py`.
+- **Dependencies:** Task 42.
+- **Files touched:** `image_pipeline/config.py`, `image_pipeline/pipeline.py`.
+- **Estimated scope:** Small (2 files).
+
+### Task 44: S17 Intra-Gallery Color Consistency Tracker (`dedup.py`, `pipeline.py`)
+- **Description:** Enhance `ProductDedup` (or create `ProductColorTracker`) to record the chromatic profile of accepted images for the current product. Reject candidate images whose dominant chromatic profile contradicts previously accepted images.
+- **Acceptance criteria:**
+  - Prevents a product gallery from containing a mix of different colored variants even if the title didn't specify a color.
+  - Logs rejection with rule ID `S17` in `decisions.jsonl`.
+- **Verification:** Unit test asserting rejection when adding a purple image after a red image.
+- **Dependencies:** Task 42, Task 43.
+- **Files touched:** `image_pipeline/dedup.py`, `image_pipeline/pipeline.py`, `image_pipeline/tests/test_dedup.py`.
+- **Estimated scope:** Small (2 files).
+
+### Task 45: S4 Image URL Model & Capacity Discrepancy Fix (`model_matching.py`)
+- **Description:** Refactor `url_belongs_to_other_model` to tokenize hyphenated and concatenated URLs properly, extracting numeric model codes (e.g. `47552` vs `47662`) and capacity terms (`15cuft` vs `18cuft`).
+- **Acceptance criteria:**
+  - `url_belongs_to_other_model(".../Homage-HRF-47552-GD-15-Cuft-Refrigerator3.jpg", keys_for("HRF-47662-GD 18 Cu Ft"))` returns `True`.
+  - Legitimate own-model URLs remain unrejected.
+- **Verification:** Unit tests in `test_model_matching.py`.
+- **Dependencies:** None.
+- **Files touched:** `image_pipeline/model_matching.py`, `image_pipeline/tests/test_model_matching.py`.
+- **Estimated scope:** Small (2 files).
+
+### Task 46: Regression Test Suite & Verification (`tests/*`)
+- **Description:** Comprehensive unit and integration test suite covering S16, S17, S4 fixes, asserting zero regressions across the existing 336+ tests.
+- **Acceptance criteria:**
+  - `pytest tests -q` passes 100%.
+  - `ruff check .` and `mypy --strict .` pass with zero warnings or errors.
+- **Verification:** Full automated CI checks.
+- **Dependencies:** Tasks 42–45.
+- **Files touched:** `image_pipeline/tests/*`.
+- **Estimated scope:** Small.
+
+### Task 47: Live Pipeline Dry-Run Verification on Homage Row
+- **Description:** Run `main.py --input sample_input.csv --dry-run` and inspect `Homage Freezer-on-Top Refrigerator 18 Cu Ft Golden (HRF-47662-GD)`.
+- **Acceptance criteria:**
+  - Purple Image 01 (`Refrigerator3.jpg`) and Red Image 02 (`Refrigerator2.jpg`) are rejected with `S16` (or `S4`).
+  - Only Golden Image 03 (`Refrigerator4.jpg`) is accepted.
+  - Zero wrong-colored pictures in final output folder.
+- **Verification:** Inspect `output/images/homage-freezer-on-top-refrigerator-18-cu-ft-golden-hrf-47662-gd/` and `decisions.jsonl`.
+- **Dependencies:** Task 46.
+- **Files touched:** Runtime execution.
+- **Estimated scope:** Small.
+
+## Risk & Mitigation Matrix
+
+| Risk | Impact | Mitigation |
+|---|---|---|
+| False rejection of metallic/champagne finishes | High | Champagne/Gold is identified by warm color balance ($R \ge G > B$) and low/medium saturation; only reject when foreground has strong opposing chromatic hue ($H \in [260^\circ, 330^\circ]$ purple or $[340^\circ, 20^\circ]$ red). |
+| Performance degradation on large images | High | Always downsample to $96 \times 96$ thumbnail before any array operations. Vectorized NumPy operations take $< 2$ ms. |
+| Mixed appliance body (e.g. black door with gold trim) | Medium | Measure both dominant hue and chromatic fraction; multi-panel appliances still pass unless the primary body panel strongly contradicts the target family. |
+| Non-standard color terminology | Low | Grounded in existing `variant_terms.COLOUR_FAMILIES`. Unrecognized colors fail open safely. |
+

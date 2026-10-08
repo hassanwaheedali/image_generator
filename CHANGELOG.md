@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-08
+
+### Added
+- **Visual Color Gate (Safeguard S16)**: Eliminates wrong-color gallery images (e.g. Purple or Red refrigerators published for `Homage 18 Cu Ft Golden (HRF-47662-GD)`). Extracts foreground HSV color profiles from isolated product crops and rejects candidates whose dominant hue directly conflicts with the title colourway. Supports 13 canonical color families (`gold`, `red`, `purple`, `blue`, `green`, `white`, `black`, `grey`, `pink`, `orange`, `yellow`, `beige`, `brown`). Controlled via `config.visual_color_gate_enabled`.
+- **Intra-Gallery Color Consistency (Safeguard S17)**: Prevents mixing conflicting chromatic color variants within the same product gallery (e.g. golden primary with purple secondary images).
+- **Display Product Screen Exemption**: Adds `is_display_product()` identifying LED TVs, smart displays, OLED, QLED, and monitors. Automatically bypasses S16 for display screens so colorful demonstration wallpapers and scenic artwork are never falsely rejected.
+- **Catalogue Header Alias Support**: Added `"image"` (singular) to `URL_ALIASES` in `csv_io.py`, enabling native out-of-the-box processing for catalogue sheets such as `Products.csv` (`Title`, `Image`).
+
+### Changed
+- **Unified Alphanumeric Tokenizer (`code_like_tokens`)**: Replaced competing, fragile regex passes with a single structural tokenizer that splits on word boundaries and glues consecutive prefix+digits+suffix segments (e.g. `HRF` + `47552` + `GD` → `hrf47552gd`, `DW` + `7500` → `dw7500`). Fixes S4 model mismatch detection for URLs containing hyphenated or separated model codes without false positives on capacity numbers (`15 Cu Ft`).
+- **Capacity Policy Formalization**: Confirmed capacity tokens (`15cuft` vs `18cuft`) remain non-discriminating for S4 rejection; mismatched capacity specs between title and page are recorded as flagged annotations in `run_report.csv` (`variant mismatch (flagged)`) and `review_products.csv`, never blocking publication.
+
+### Performance
+- **Optimized Foreground Hue Extraction**: Employs 96x96 vectorized box downsampling and NumPy array filtering in `extract_foreground_color_profile()`, completing visual color verification in <2ms per candidate image with zero latency impact on processing throughput.
+
 ### Fixed
 - **Fetches now go over IPv4, curing curl 28 connect timeouts on IPv6 black-holed hosts.**
   Live runs showed `eshop.pel.com.pk` and `www.surmawala.pk` dying with `curl: (28) Failed to
