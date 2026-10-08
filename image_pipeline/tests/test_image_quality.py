@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 from dataclasses import replace
 from pathlib import Path
 
@@ -110,6 +111,61 @@ def test_non_image_and_oversize_rejected() -> None:
     image = validate_image_bytes(jpeg_bytes(clean_product_image()), "image/jpeg; charset=binary",
                                  max_bytes=10**7, max_pixels=10**7)
     assert image.size == (900, 900)
+
+
+def test_lossy_payload_below_minimum_rejected() -> None:
+    # 470x556 image saved at very low quality so payload < 12,000 bytes
+    img = clean_product_image(470, 556)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=20)
+    low_payload = buf.getvalue()
+
+    with pytest.raises(ImageValidationError) as err:
+        validate_image_bytes(
+            low_payload,
+            "image/jpeg",
+            max_bytes=10**7,
+            max_pixels=10**7,
+            min_lossy_bytes=12_000,
+            min_lossy_bytes_per_pixel=0.025,
+        )
+    assert err.value.rule_id == "S13"
+    assert "below minimum 12000" in err.value.detail or "over-compressed" in err.value.detail
+
+
+def test_lossy_overcompressed_bpp_rejected() -> None:
+    # A larger canvas 800x800 with low byte density (e.g. flat white background + low quality JPEG)
+    img = clean_product_image(800, 800)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=30)
+    low_bpp = buf.getvalue()
+
+    # Pass min_lossy_bytes that passes (1000), but high min_lossy_bytes_per_pixel that fails
+    with pytest.raises(ImageValidationError) as err:
+        validate_image_bytes(
+            low_bpp,
+            "image/jpeg",
+            max_bytes=10**7,
+            max_pixels=10**7,
+            min_lossy_bytes=1_000,
+            min_lossy_bytes_per_pixel=0.5,
+        )
+    assert err.value.rule_id == "S13"
+    assert "over-compressed" in err.value.detail
+
+
+def test_lossless_png_not_subject_to_lossy_thresholds() -> None:
+    # Lossless PNG should never be rejected by lossy thresholds
+    png_data = png_bytes(clean_product_image(200, 200))
+    image = validate_image_bytes(
+        png_data,
+        "image/png",
+        max_bytes=10**7,
+        max_pixels=10**7,
+        min_lossy_bytes=50_000,
+        min_lossy_bytes_per_pixel=1.0,
+    )
+    assert image.size == (200, 200)
 
 
 def test_exif_rotation_applied() -> None:
@@ -617,3 +673,126 @@ def test_official_gallery_acceptance_can_be_switched_off(config: PipelineConfig)
     image = _studio_shot_that_fills_the_frame()
     strict = replace(config, official_gallery_relaxed_s7=False, studio_background_rescue=False)
     assert run_quality_gates(image, strict, official_gallery=True)[0] == "S7"
+
+
+# --------------------------------------------------------------------------- #
+# S16 - Visual Color Gate
+# --------------------------------------------------------------------------- #
+def _create_synthetic_appliance(body_color: tuple[int, int, int]) -> Image.Image:
+    """Create a studio shot: 1000x1000 white background with a central appliance body."""
+    img = Image.new("RGB", (1000, 1000), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    # Refrigerator body in center
+    draw.rectangle((250, 150, 750, 850), fill=body_color)
+    # Neutral black handle and base
+    draw.rectangle((270, 450, 300, 550), fill=(20, 20, 20))
+    draw.rectangle((250, 850, 750, 880), fill=(40, 40, 40))
+    return img
+
+
+def test_visual_color_gate_rejects_purple_and_red_when_golden_expected() -> None:
+    from image_quality import verify_image_color
+
+    purple_shot = _create_synthetic_appliance((120, 65, 125))  # Purple body
+    red_shot = _create_synthetic_appliance((180, 30, 40))      # Red body
+    gold_shot = _create_synthetic_appliance((210, 195, 160))   # Golden/Champagne body
+
+    ok, reason = verify_image_color(purple_shot, "golden")
+    assert not ok, "Purple refrigerator must be rejected when target is golden"
+    assert "purple" in reason.lower()
+
+    ok, reason = verify_image_color(red_shot, "golden")
+    assert not ok, "Red refrigerator must be rejected when target is golden"
+    assert "red" in reason.lower()
+
+    ok, _ = verify_image_color(gold_shot, "golden")
+    assert ok, "Golden refrigerator must be accepted when target is golden"
+
+
+def test_visual_color_gate_fails_open_when_no_target_color() -> None:
+    from image_quality import verify_image_color
+
+    purple_shot = _create_synthetic_appliance((120, 65, 125))
+    ok, _ = verify_image_color(purple_shot, "")
+    assert ok, "When title specifies no color, S16 must fail open"
+
+
+def test_visual_color_gate_live_homage_images() -> None:
+    from image_quality import verify_image_color
+
+    slug = "homage-freezer-on-top-refrigerator-18-cu-ft-golden-hrf-47662-gd"
+    base = Path(__file__).resolve().parents[1] / "output" / "images" / slug / "final_alfamall"
+    p01 = base / "01-alfamall.jpg"
+    p02 = base / "02-alfamall.jpg"
+    p03 = base / "03-alfamall.jpg"
+
+    if not (p01.exists() and p02.exists() and p03.exists()):
+        pytest.skip("Homage images not present in output directory")
+
+    # Image 01 is Purple
+    ok, reason = verify_image_color(Image.open(p01), "golden")
+    assert not ok, f"Image 01 (purple) must be rejected, got {ok} ({reason})"
+
+    # Image 02 is Maroon/Red
+    ok, reason = verify_image_color(Image.open(p02), "golden")
+    assert not ok, f"Image 02 (red) must be rejected, got {ok} ({reason})"
+
+    # Image 03 is Golden
+    ok, reason = verify_image_color(Image.open(p03), "golden")
+    assert ok, f"Image 03 (golden) must be accepted, got {ok} ({reason})"
+
+
+def test_visual_color_gate_expanded_conflicts_matrix() -> None:
+    from image_quality import verify_image_color
+
+    purple_shot = _create_synthetic_appliance((120, 65, 125))  # Purple body
+    red_shot = _create_synthetic_appliance((180, 30, 40))      # Red body
+    blue_shot = _create_synthetic_appliance((30, 60, 180))     # Blue body
+    green_shot = _create_synthetic_appliance((40, 150, 50))    # Green body
+    gold_shot = _create_synthetic_appliance((210, 195, 160))   # Golden body
+    white_shot = _create_synthetic_appliance((245, 245, 245))  # White body
+    black_shot = _create_synthetic_appliance((25, 25, 25))     # Black body
+    silver_shot = _create_synthetic_appliance((180, 180, 180)) # Silver body
+
+    # 1. White target must reject chromatic variants (purple, red, blue, green, gold)
+    for bad_shot in (purple_shot, red_shot, blue_shot, green_shot, gold_shot):
+        ok, reason = verify_image_color(bad_shot, "white")
+        assert not ok, f"Expected rejection for white target with chromatic body, got reason: {reason}"
+    assert verify_image_color(white_shot, "white")[0] is True
+
+    # 2. Black target must reject chromatic variants
+    for bad_shot in (purple_shot, red_shot, blue_shot, green_shot, gold_shot):
+        ok, reason = verify_image_color(bad_shot, "black")
+        assert not ok, f"Expected rejection for black target with chromatic body, got reason: {reason}"
+    assert verify_image_color(black_shot, "black")[0] is True
+
+    # 3. Grey / Silver target must reject chromatic variants
+    for bad_shot in (purple_shot, red_shot, blue_shot, green_shot, gold_shot):
+        ok, reason = verify_image_color(bad_shot, "silver")
+        assert not ok, f"Expected rejection for silver target with chromatic body, got reason: {reason}"
+    assert verify_image_color(silver_shot, "silver")[0] is True
+
+    # 4. Blue target must reject red, purple, gold, green
+    for bad_shot in (purple_shot, red_shot, gold_shot, green_shot):
+        ok, reason = verify_image_color(bad_shot, "blue")
+        assert not ok, f"Expected rejection for blue target, got reason: {reason}"
+    assert verify_image_color(blue_shot, "blue")[0] is True
+
+    # 5. Green target must reject red, purple, gold, blue
+    for bad_shot in (purple_shot, red_shot, gold_shot, blue_shot):
+        ok, reason = verify_image_color(bad_shot, "green")
+        assert not ok, f"Expected rejection for green target, got reason: {reason}"
+    assert verify_image_color(green_shot, "green")[0] is True
+
+    # 6. Gold target must reject purple, red, blue, green
+    for bad_shot in (purple_shot, red_shot, blue_shot, green_shot):
+        ok, reason = verify_image_color(bad_shot, "golden")
+        assert not ok, f"Expected rejection for golden target, got reason: {reason}"
+    assert verify_image_color(gold_shot, "golden")[0] is True
+
+    # 7. Red target must reject purple, gold, blue, green
+    for bad_shot in (purple_shot, gold_shot, blue_shot, green_shot):
+        ok, reason = verify_image_color(bad_shot, "red")
+        assert not ok, f"Expected rejection for red target, got reason: {reason}"
+    assert verify_image_color(red_shot, "red")[0] is True
+

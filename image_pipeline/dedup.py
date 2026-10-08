@@ -77,6 +77,27 @@ class ProductDedup:
         self._soft = soft_threshold
         self._corr = corr_threshold
         self._entries: list[tuple[str, ImageFingerprint]] = []
+        self._accepted_color_families: list[str] = []
+
+    def check_color_consistency(self, image: Image.Image) -> tuple[bool, str]:
+        """Safeguard S17: checks if image foreground color contradicts already-accepted images."""
+        if not self._accepted_color_families:
+            return True, ""
+        from image_quality import extract_foreground_color_profile
+
+        profile = extract_foreground_color_profile(image)
+        if not profile.is_chromatic:
+            return True, ""
+        first_fam = self._accepted_color_families[0]
+        _CHROMATIC_SET = (
+            "purple", "red", "blue", "green", "gold", "orange", "yellow", "pink", "brown",
+        )
+        if profile.dominant_family != first_fam and profile.dominant_family in _CHROMATIC_SET:
+            return False, (
+                f"intra-gallery colour conflict: candidate is {profile.dominant_family} "
+                f"(hue {profile.median_hue:.0f}°) while accepted gallery is {first_fam}"
+            )
+        return True, ""
 
     def is_duplicate(self, image: Image.Image) -> bool:
         """True when this image repeats an already accepted angle of this product."""
@@ -101,6 +122,14 @@ class ProductDedup:
         ):
             return False
         self._entries.append((url, fingerprint))
+        from image_quality import extract_foreground_color_profile
+
+        profile = extract_foreground_color_profile(image)
+        _CHROMATIC_SET = (
+            "purple", "red", "blue", "green", "gold", "orange", "yellow", "pink", "brown",
+        )
+        if profile.is_chromatic and profile.dominant_family in _CHROMATIC_SET:
+            self._accepted_color_families.append(profile.dominant_family)
         return True
 
     @property

@@ -9,6 +9,7 @@ from __future__ import annotations
 import io
 import logging
 from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -42,8 +43,14 @@ def validate_image_bytes(
     *,
     max_bytes: int,
     max_pixels: int,
+    min_lossy_bytes: int = 0,
+    min_lossy_bytes_per_pixel: float = 0.0,
 ) -> Image.Image:
-    """Safeguard S13: size, content type, real decode, bomb guard, EXIF rotation."""
+    """Safeguard S13: size, content type, real decode, bomb guard, EXIF rotation.
+
+    For lossy formats (JPEG, WebP), also validates minimum payload size and byte
+    density (bytes per pixel) to reject heavily-compressed, blurry thumbnails.
+    """
     if not content:
         raise ImageValidationError("S13", "empty body")
     if len(content) > max_bytes:
@@ -69,6 +76,19 @@ def validate_image_bytes(
                 )
             if probe.format == "GIF" and getattr(probe, "n_frames", 1) > 1:
                 raise ImageValidationError("S13", "animated GIF")
+            if probe.format in ("JPEG", "WEBP"):
+                if min_lossy_bytes > 0 and len(content) < min_lossy_bytes:
+                    raise ImageValidationError(
+                        "S13",
+                        f"lossy payload {len(content)} bytes below minimum {min_lossy_bytes}",
+                    )
+                if min_lossy_bytes_per_pixel > 0.0 and width > 0 and height > 0:
+                    bpp = len(content) / float(width * height)
+                    if bpp < min_lossy_bytes_per_pixel:
+                        raise ImageValidationError(
+                            "S13",
+                            f"over-compressed blurry image (bpp={bpp:.4f} < {min_lossy_bytes_per_pixel:.4f})",
+                        )
             probe.load()
             image = ImageOps.exif_transpose(probe)
     except ImageValidationError:
@@ -597,3 +617,154 @@ def run_quality_gates(
     if corners < config.min_neutral_corners:
         return "S7", f"only {corners} neutral corner(s), need {config.min_neutral_corners}"
     return "ok", ""
+
+
+# --------------------------------------------------------------------------- #
+# S16 - Visual Color Gate (Colorway Verification)
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class ForegroundColorProfile:
+    """Foreground chromaticity sampled from a studio product shot."""
+
+    is_chromatic: bool
+    chromatic_ratio: float
+    median_hue: float
+    mean_saturation: float
+    mean_value: float
+    dominant_family: str
+
+
+def extract_foreground_color_profile(image: Image.Image) -> ForegroundColorProfile:
+    """Sample foreground chromaticity in < 2ms using a 96x96 downsample and vectorized HSV."""
+    thumb = image.resize((96, 96), Image.Resampling.BOX)
+    arr = np.asarray(thumb.convert("RGB"), dtype=np.float32) / 255.0
+
+    max_c = arr.max(axis=-1)
+    min_c = arr.min(axis=-1)
+    delta = max_c - min_c
+
+    # Studio background mask (bright and near-neutral)
+    bg_mask = (max_c > 0.90) & (delta < 0.08)
+
+    h, w = arr.shape[:2]
+    central_mask = np.zeros((h, w), dtype=bool)
+    central_mask[int(h * 0.12) : int(h * 0.88), int(w * 0.12) : int(w * 0.88)] = True
+
+    fg_mask = (~bg_mask) & central_mask
+    if not np.any(fg_mask):
+        return ForegroundColorProfile(
+            is_chromatic=False,
+            chromatic_ratio=0.0,
+            median_hue=0.0,
+            mean_saturation=0.0,
+            mean_value=1.0,
+            dominant_family="neutral",
+        )
+
+    fg = arr[fg_mask]
+    fg_max = fg.max(axis=-1)
+    fg_min = fg.min(axis=-1)
+    fg_delta = fg_max - fg_min
+
+    chromatic_mask = fg_delta > 0.10
+    chromatic_ratio = float(np.mean(chromatic_mask))
+    mean_val = float(np.mean(fg_max))
+
+    r, g, b = fg[:, 0], fg[:, 1], fg[:, 2]
+    hues = np.zeros_like(r)
+    nz = fg_delta > 0
+    idx_r = (r == fg_max) & nz
+    hues[idx_r] = ((g[idx_r] - b[idx_r]) / fg_delta[idx_r]) % 6.0
+    idx_g = (g == fg_max) & nz
+    hues[idx_g] = ((b[idx_g] - r[idx_g]) / fg_delta[idx_g]) + 2.0
+    idx_b = (b == fg_max) & nz
+    hues[idx_b] = ((r[idx_b] - g[idx_b]) / fg_delta[idx_b]) + 4.0
+    hues = hues * 60.0
+
+    if chromatic_ratio >= 0.15:
+        med_hue = float(np.median(hues[chromatic_mask]))
+        mean_sat = float(np.mean(fg_delta[chromatic_mask]))
+        if 260.0 <= med_hue <= 330.0:
+            dom = "purple"
+        elif med_hue >= 335.0 or med_hue <= 20.0:
+            dom = "red"
+        elif 25.0 <= med_hue <= 65.0:
+            dom = "gold"
+        elif 180.0 <= med_hue <= 255.0:
+            dom = "blue"
+        elif 75.0 <= med_hue <= 160.0:
+            dom = "green"
+        else:
+            dom = "chromatic"
+        return ForegroundColorProfile(
+            is_chromatic=True,
+            chromatic_ratio=chromatic_ratio,
+            median_hue=med_hue,
+            mean_saturation=mean_sat,
+            mean_value=mean_val,
+            dominant_family=dom,
+        )
+
+    return ForegroundColorProfile(
+        is_chromatic=False,
+        chromatic_ratio=chromatic_ratio,
+        median_hue=0.0,
+        mean_saturation=float(np.mean(fg_delta)),
+        mean_value=mean_val,
+        dominant_family="neutral",
+    )
+
+
+def verify_image_color(
+    image: Image.Image,
+    target_color_word: str,
+) -> tuple[bool, str]:
+    """Safeguard S16: does the image's foreground chromaticity contradict the target colour?
+
+    Fails open (returns True) when target_color_word is empty or not a known colour.
+    Returns (False, reason) when a strong chromatic foreground contradicts the target.
+    """
+    if not target_color_word or not target_color_word.strip():
+        return True, ""
+
+    from variant_terms import COLOUR_FAMILIES
+
+    target_norm = target_color_word.strip().lower()
+    target_family = next(
+        (fam for fam, synonyms in COLOUR_FAMILIES.items() if target_norm in synonyms or target_norm == fam),
+        "",
+    )
+    if not target_family:
+        return True, ""
+
+    profile = extract_foreground_color_profile(image)
+    if not profile.is_chromatic:
+        return True, ""
+
+    # Conflicting chromatic pairings between distinct coloured appliance variants
+    # Covering all vocabulary families from variant_terms.COLOUR_FAMILIES
+    conflicts: dict[str, set[str]] = {
+        "gold": {"purple", "red", "blue", "green", "pink"},
+        "red": {"purple", "gold", "blue", "green", "yellow", "orange"},
+        "purple": {"red", "gold", "blue", "green", "yellow", "orange"},
+        "blue": {"red", "purple", "gold", "green", "yellow", "orange"},
+        "green": {"red", "purple", "gold", "blue", "yellow", "orange"},
+        "white": {"purple", "red", "blue", "green", "gold", "orange", "yellow", "pink", "brown", "chromatic"},
+        "black": {"purple", "red", "blue", "green", "gold", "orange", "yellow", "pink", "brown", "chromatic"},
+        "grey": {"purple", "red", "blue", "green", "gold", "orange", "yellow", "pink", "brown", "chromatic"},
+        "beige": {"purple", "red", "blue", "green", "pink"},
+        "brown": {"purple", "blue", "green"},
+        "yellow": {"purple", "red", "blue", "green"},
+        "orange": {"purple", "blue", "green"},
+        "pink": {"blue", "green", "gold"},
+    }
+
+    banned = conflicts.get(target_family, set())
+    if profile.dominant_family in banned:
+        return False, (
+            f"foreground colour ({profile.dominant_family}, hue {profile.median_hue:.0f}°) "
+            f"conflicts with target '{target_color_word}' (family {target_family})"
+        )
+
+    return True, ""
+

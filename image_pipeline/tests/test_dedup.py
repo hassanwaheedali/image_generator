@@ -63,3 +63,19 @@ def test_hamming_and_soft_thresholds() -> None:
     right = compute_fingerprint(clean_product_image(880, 880))
     assert hamming_distance(left.dhash, right.dhash) <= 6
     assert is_visual_duplicate(left, [right], hard_threshold=6, soft_threshold=14, corr_threshold=0.995)
+
+
+def test_intra_gallery_color_consistency() -> None:
+    from PIL import ImageDraw
+
+    dedup = new_dedup()
+    img_red = Image.new("RGB", (800, 800), (255, 255, 255))
+    ImageDraw.Draw(img_red).rectangle((200, 100, 600, 700), fill=(180, 30, 40))
+
+    img_purple = Image.new("RGB", (800, 800), (255, 255, 255))
+    ImageDraw.Draw(img_purple).rectangle((200, 100, 600, 700), fill=(120, 65, 125))
+
+    assert dedup.add(img_red, "https://cdn.shop/red.png") is True
+    ok, reason = dedup.check_color_consistency(img_purple)
+    assert not ok
+    assert "purple" in reason.lower() and "red" in reason.lower()

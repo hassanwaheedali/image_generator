@@ -335,6 +335,10 @@ class PipelineConfig:
     # ----- byte-level image validation (S13) ------------------------------
     max_image_bytes: int = 15 * 1024 * 1024
     max_image_pixels: int = 40_000_000
+    #: Minimum payload and byte density for lossy (JPEG/WebP) product images.
+    #: Rejects heavily compressed, blurry, and low-fidelity thumbnails (e.g. Daraz 9.6KB 470x556).
+    min_lossy_image_bytes: int = 12_000
+    min_lossy_bytes_per_pixel: float = 0.025
 
     # ----- geometric gates (S6/S8) ----------------------------------------
     min_short_side: int = 180
@@ -378,6 +382,9 @@ class PipelineConfig:
     dedup_hamming_threshold: int = 6
     dedup_hamming_soft_threshold: int = 14
     dedup_corr_threshold: float = 0.995
+
+    # ----- visual color verification (S16) --------------------------------
+    color_gate_enabled: bool = True
 
     # ----- compositing -----------------------------------------------------
     canonical_side: int = 1200

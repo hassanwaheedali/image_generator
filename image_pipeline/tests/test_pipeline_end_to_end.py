@@ -972,17 +972,21 @@ def test_official_page_gallery_is_accepted_when_the_product_fills_the_frame(tmp_
 # --------------------------------------------------------------------------- #
 # official gallery vs the per-page download allowance
 # --------------------------------------------------------------------------- #
-def _gallery_image(index: int) -> Image.Image:
+def _gallery_image(index: int, color: tuple[int, int, int] | None = None) -> Image.Image:
     """A distinct white-background catalog photo (position and shading vary by index)."""
     image = Image.new("RGB", (900, 900), (255, 255, 255))
     draw = ImageDraw.Draw(image)
-    left = 120 + (index % 4) * 95
-    top = 100 + (index // 4) * 115
+    left = 100 + (index % 4) * 110
+    top = 80 + (index // 4) * 120
+    w = 320 + (index % 3) * 30
+    h = 380 + (index % 4) * 25
+    fill = color or (190 - index * 8, 190 - index * 8, 192 - index * 8)
     draw.rounded_rectangle(
-        (left, top, left + 380, top + 430),
+        (left, top, left + w, top + h),
         radius=20,
-        fill=(40 + index * 15, 70, 160 - index * 8),
+        fill=fill,
     )
+    draw.ellipse((left + 30, top + 30, left + 80 + index * 5, top + 80 + index * 5), fill=(80, 80, 80))
     return image
 
 
@@ -1628,3 +1632,112 @@ def test_the_tolerated_spelling_can_be_switched_off(tmp_path: Path) -> None:
     assert all("dawlance.com.pk/media/resize" in image.source_url for image in accepted)
     decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
     assert "deferred as last resort" not in decisions
+
+
+def test_non_official_sheet_url_prioritizes_official_brand_search(tmp_path: Path) -> None:
+    """When sheet URL is non-official (e.g. Daraz), query official brand first."""
+    config = live_config(tmp_path)
+    daraz_url = "https://www.daraz.pk/products/homage-refrigerator-hrf-47662-gd.html"
+    official_url = "https://homage.com.pk/products/hrf-47662-gd"
+    official_img1 = "https://homage.com.pk/media/hrf-47662-gd-1.png"
+    official_img2 = "https://homage.com.pk/media/hrf-47662-gd-2.png"
+    daraz_img = "https://static-01.daraz.pk/p/daraz-blurry-1.jpg"
+
+    official_html = (
+        "<html><head><title>Homage Refrigerator HRF-47662 GD</title></head>"
+        "<body><h1>Homage HRF-47662 GD</h1>"
+        f"<div class='product-gallery'><img src=\"{official_img1}\"><img src=\"{official_img2}\"></div></body></html>"
+    )
+    daraz_html = (
+        "<html><head><title>Homage Refrigerator HRF-47662 GD</title></head>"
+        "<body><h1>Homage HRF-47662 GD</h1>"
+        f"<div class='product-gallery'><img src=\"{daraz_img}\"></div></body></html>"
+    )
+    searcher = FakeSourceSearcher(
+        candidates=[
+            PageCandidate(
+                url=official_url,
+                origin="woo-search:homage.com.pk",
+                method="woo-search",
+                title_hint="Homage HRF-47662 GD",
+            )
+        ],
+        report=SourceSearchReport(tried=("homage.com.pk:woo:1",), used="woo-search:homage.com.pk"),
+    )
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {daraz_url: daraz_html, official_url: official_html},
+        {
+            official_img1: png_bytes(clean_product_image(900, 900, "#2f5fa8")),
+            official_img2: png_bytes(second_angle_image()),
+            daraz_img: png_bytes(third_angle_image()),
+        },
+    )
+    deps.source_searcher = searcher
+
+    result, accepted = process_product(
+        task(0, "Homage Refrigerator HRF-47662 GD", (daraz_url,)),
+        deps,
+        config,
+    )
+
+    assert result.status is Status.OK
+    assert len(accepted) == 2
+    # Official images were prioritized and used; Daraz was completely bypassed
+    assert all("homage.com.pk/media" in img.source_url for img in accepted)
+    assert not any("daraz.pk" in img.source_url for img in accepted)
+
+
+def test_multi_image_continuation_does_not_stop_at_single_image(tmp_path: Path) -> None:
+    """When a sheet URL gives only 1 image, continue fallback search to reach min_required_images."""
+    config = live_config(tmp_path)
+    sheet_url = "https://www.surmawala.pk/products/dawlance-dw-7500c"
+    sheet_img = "https://cdn.surmawala.pk/p/dw7500c-1.png"
+    fallback_url = "https://www.alfatah.com.pk/product/dawlance-dw-7500c"
+    fallback_img = "https://www.alfatah.com.pk/wp-content/uploads/dw7500c-2.png"
+
+    sheet_html = (
+        "<html><head><title>Dawlance Washing Machine DW-7500C</title></head>"
+        "<body><h1>Dawlance DW-7500C</h1>"
+        f"<div class='product-gallery'><img src=\"{sheet_img}\"></div></body></html>"
+    )
+    fallback_html = (
+        "<html><head><title>Dawlance Washing Machine DW-7500C</title></head>"
+        "<body><h1>Dawlance DW-7500C</h1>"
+        f"<div class='product-gallery'><img src=\"{fallback_img}\"></div></body></html>"
+    )
+    searcher = FakeSourceSearcher(
+        candidates=[
+            PageCandidate(
+                url=fallback_url,
+                origin="woo-search:www.alfatah.com.pk",
+                method="woo-search",
+                title_hint="Dawlance DW-7500C",
+            )
+        ],
+        report=SourceSearchReport(
+            tried=("www.alfatah.com.pk:woo:1",),
+            used="woo-search:www.alfatah.com.pk",
+        ),
+    )
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {sheet_url: sheet_html, fallback_url: fallback_html},
+        {
+            sheet_img: png_bytes(clean_product_image(900, 900, "#2f5fa8")),
+            fallback_img: png_bytes(second_angle_image()),
+        },
+    )
+    deps.source_searcher = searcher
+
+    result, accepted = process_product(
+        task(0, "Dawlance Washing Machine DW-7500C", (sheet_url,)),
+        deps,
+        config,
+    )
+
+    assert result.status is Status.OK
+    # Did not stop at 1 image: fetched 2 images across sheet + fallback to fulfill min_required_images
+    assert len(accepted) == 2
+    assert accepted[0].source_url == sheet_img
+    assert accepted[1].source_url == fallback_img

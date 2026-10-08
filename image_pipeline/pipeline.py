@@ -60,9 +60,11 @@ from image_quality import (
     strip_promo_band,
     trim_edge_seams,
     validate_image_bytes,
+    verify_image_color,
 )
 from model_matching import (
     build_model_keys,
+    is_display_product,
     near_miss_codes,
     relaxed_page_match,
     url_belongs_to_other_model,
@@ -144,6 +146,7 @@ CURATED_GALLERY_SOURCES: frozenset[str] = frozenset(
         "registry:magento",
         "json_ld",
         "embedded_json",
+        "state_json",
         "dom_audit",
     }
 )
@@ -386,27 +389,60 @@ def process_product(
         config.image_full_download_max_per_row,
     )
 
-    # ---- stage 2: the sheet's own URLs, in the given order -----------------
-    for url in urls:
+    # ---- stage 2 & 3: sheet URLs and fallback search -----------------------
+    # Customer & Owner rules:
+    # 1. Official brand pages always take priority over third-party marketplace links
+    #    (e.g. Daraz, AlfaMall). When sheet URLs are non-official, query official brand
+    #    sources first for high-quality studio photos.
+    # 2. Multi-image quota: a product requires at least `min_required_images` (2+).
+    #    Never stop early when only 1 image has been found; keep searching fallback
+    #    sources until the required quota is reached.
+    official_sheet_urls = [u for u in urls if host_is_official(u, brand)]
+    non_official_sheet_urls = [u for u in urls if not host_is_official(u, brand)]
+    sheet_pages_tried = 0
+    sheet_pages_rejected = 0
+    visited_page_urls: set[str] = set()
+
+    def _process_candidate_url(
+        page_url: str,
+        source_label: str,
+        is_fallback: bool,
+    ) -> bool:
+        nonlocal pages_tried, pages_rejected, sheet_pages_tried, sheet_pages_rejected
         if cancel_event is not None and cancel_event.is_set():
-            break
+            return False
         if _row_is_done(accepted, config):
-            break
+            return False
+        if page_url in visited_page_urls:
+            return True
+        visited_page_urls.add(page_url)
+
         if not is_fetchable_product_url(
-            url,
+            page_url,
             block_collections_without_products=config.block_collections_without_products,
         ):
             pages_rejected += 1
-            deps.decisions.reject(
-                title=task.title, url=url, rule_id="S11", detail="not a product page URL"
+            if not is_fallback:
+                sheet_pages_rejected += 1
+            rule_id = "S15" if is_fallback else "S11"
+            detail = (
+                "fallback candidate is not a product page URL"
+                if is_fallback
+                else "not a product page URL"
             )
-            continue
+            deps.decisions.reject(
+                title=task.title, url=page_url, rule_id=rule_id, detail=detail
+            )
+            return True
+
         pages_tried += 1
+        if not is_fallback:
+            sheet_pages_tried += 1
         outcome = _visit_page(
             task=task,
-            page_url=url,
-            source_label="sheet",
-            is_fallback=False,
+            page_url=page_url,
+            source_label=source_label,
+            is_fallback=is_fallback,
             keys=keys,
             brand=brand,
             settings=settings,
@@ -421,75 +457,88 @@ def process_product(
             defer_tolerated=True,
         )
         if outcome.deferred:
-            tolerated_pages.append((outcome.page_url, "sheet", False))
+            tolerated_pages.append((outcome.page_url, source_label, is_fallback))
         elif outcome.tolerated:
             relaxed_notes.append(outcome.tolerated)
         if not outcome.fetched or not outcome.matched:
             pages_rejected += 1
+            if not is_fallback:
+                sheet_pages_rejected += 1
+        if outcome.relaxed:
+            relaxed_notes.append(outcome.relaxed)
+        return True
+
+    fallback_found: list[PageCandidate] | None = None
+    fallback_report: SourceSearchReport | None = None
+    fallback_used = False
+
+    def _ensure_fallback_searched() -> tuple[list[PageCandidate], SourceSearchReport | None]:
+        nonlocal fallback_found, fallback_report, fallback_used
+        if fallback_found is None:
+            if config.fallback_enabled and deps.source_searcher is not None:
+                found, report = _search_sources(task=task, brand=brand, keys=keys, deps=deps)
+                fallback_found = found
+                fallback_report = report
+                fallback_used = bool(found)
+                if report is not None:
+                    if report.note:
+                        notes.append(report.note)
+                    if report.tried:
+                        notes.append("sources tried: " + ", ".join(report.tried))
+            else:
+                fallback_found = []
+                fallback_report = None
+        return fallback_found, fallback_report
+
+    # Path 1: If sheet contains official manufacturer URLs, visit them first.
+    if official_sheet_urls:
+        for url in official_sheet_urls:
+            if not _process_candidate_url(url, "sheet", is_fallback=False):
+                break
+        if len(accepted) < config.min_required_images and not _row_is_done(accepted, config):
+            for url in non_official_sheet_urls:
+                if not _process_candidate_url(url, "sheet", is_fallback=False):
+                    break
+        if len(accepted) < config.min_required_images and not _row_is_done(accepted, config):
+            found_candidates, _ = _ensure_fallback_searched()
+            for candidate in found_candidates:
+                if not _process_candidate_url(
+                    candidate.url, f"fallback:{candidate.origin}", is_fallback=True
+                ):
+                    break
+    else:
+        # Path 2: All sheet URLs are non-official marketplaces (or empty).
+        # Query official brand sources first!
+        found_candidates, _ = _ensure_fallback_searched()
+        official_candidates = [c for c in found_candidates if host_is_official(c.url, brand)]
+        other_candidates = [c for c in found_candidates if not host_is_official(c.url, brand)]
+
+        for candidate in official_candidates:
+            if not _process_candidate_url(
+                candidate.url, f"fallback:{candidate.origin}", is_fallback=True
+            ):
+                break
+
+        # If official candidates yielded fewer than min_required_images, try non-official sheet URLs
+        if len(accepted) < config.min_required_images and not _row_is_done(accepted, config):
+            for url in non_official_sheet_urls:
+                if not _process_candidate_url(url, "sheet", is_fallback=False):
+                    break
+
+        # If still fewer than min_required_images, try other fallback candidates (retailers)
+        if len(accepted) < config.min_required_images and not _row_is_done(accepted, config):
+            for candidate in other_candidates:
+                if not _process_candidate_url(
+                    candidate.url, f"fallback:{candidate.origin}", is_fallback=True
+                ):
+                    break
+
     stages.append(
-        f"2 sheet pages: {pages_tried} tried, {pages_rejected} rejected, "
+        f"2 sheet pages: {sheet_pages_tried} tried, {sheet_pages_rejected} rejected, "
         f"{len(accepted)} image(s)"
     )
-
-    # ---- stage 3: the fallback chain, only when the row is still unsolved --
-    fallback_used = False
-    if (
-        config.fallback_enabled
-        and deps.source_searcher is not None
-        and not accepted
-        and not _row_is_done(accepted, config)
-    ):
-        found, report = _search_sources(task=task, brand=brand, keys=keys, deps=deps)
-        fallback_used = bool(found)
-        if report is not None:
-            if report.note:
-                notes.append(report.note)
-            if report.tried:
-                notes.append("sources tried: " + ", ".join(report.tried))
-        stages.append(f"3 fallback search: {len(found)} candidate page(s)")
-        for candidate in found:
-            if cancel_event is not None and cancel_event.is_set():
-                break
-            if _row_is_done(accepted, config):
-                break
-            if not is_fetchable_product_url(
-                candidate.url,
-                block_collections_without_products=config.block_collections_without_products,
-            ):
-                deps.decisions.reject(
-                    title=task.title,
-                    url=candidate.url,
-                    rule_id="S15",
-                    detail="fallback candidate is not a product page URL",
-                )
-                continue
-            pages_tried += 1
-            outcome = _visit_page(
-                task=task,
-                page_url=candidate.url,
-                source_label=f"fallback:{candidate.origin}",
-                is_fallback=True,
-                keys=keys,
-                brand=brand,
-                settings=settings,
-                config=config,
-                deps=deps,
-                dedup=dedup,
-                seen_keys=seen_keys,
-                accepted=accepted,
-                rejections=rejections,
-                notes=notes,
-                budget=budget,
-                defer_tolerated=True,
-            )
-            if outcome.deferred:
-                tolerated_pages.append((outcome.page_url, f"fallback:{candidate.origin}", True))
-            elif outcome.tolerated:
-                relaxed_notes.append(outcome.tolerated)
-            if not outcome.fetched or not outcome.matched:
-                pages_rejected += 1
-            if outcome.relaxed:
-                relaxed_notes.append(outcome.relaxed)
+    if fallback_found is not None:
+        stages.append(f"3 fallback search: {len(fallback_found)} candidate page(s)")
     else:
         stages.append("3 fallback search: skipped (row already solved or disabled)")
 
@@ -1136,6 +1185,8 @@ def _consume_candidates(
                 binary.content_type,
                 max_bytes=config.max_image_bytes,
                 max_pixels=config.max_image_pixels,
+                min_lossy_bytes=config.min_lossy_image_bytes,
+                min_lossy_bytes_per_pixel=config.min_lossy_bytes_per_pixel,
             )
         except ImageValidationError as exc:
             rejections[exc.rule_id] += 1
@@ -1186,6 +1237,19 @@ def _consume_candidates(
                 title=task.title, url=used_url, rule_id=rule_id, detail=detail
             )
             continue
+        if (
+            config.variant_separation_enabled
+            and config.color_gate_enabled
+            and keys.colour_word
+            and not is_display_product(task.title)
+        ):
+            color_ok, color_detail = verify_image_color(image, keys.colour_word)
+            if not color_ok:
+                rejections["S16"] += 1
+                deps.decisions.reject(
+                    title=task.title, url=used_url, rule_id="S16", detail=color_detail
+                )
+                continue
         if dedup.is_duplicate(image):
             rejections["S10"] += 1
             deps.decisions.reject(
