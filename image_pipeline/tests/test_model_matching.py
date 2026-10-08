@@ -161,6 +161,15 @@ def test_other_model_url_rejected() -> None:
     assert url_belongs_to_other_model("https://cdn.haier.com/p/HSU-18HFPAA-front.png", keys)
 
 
+def test_other_model_url_with_numeric_mismatch_rejected() -> None:
+    keys = build_model_keys("Homage Freezer-on-Top Refrigerator 18 Cu Ft Golden (HRF-47662-GD)")
+    # HRF-47552 is a different model number in the same HRF family
+    assert url_belongs_to_other_model(
+        "https://hadielectronics.com.pk/wp-content/uploads/2024/01/Homage-HRF-47552-GD-15-Cuft-Refrigerator3.jpg",
+        keys,
+    )
+
+
 def test_neutral_and_own_model_urls_not_rejected() -> None:
     keys = build_model_keys("Haier HSU-12HFPAA")
     assert not url_belongs_to_other_model("https://cdn.haier.com/p/img123.png", keys)

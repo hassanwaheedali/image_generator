@@ -54,7 +54,6 @@ _NOISE_TOKEN_RES: tuple[re.Pattern[str], ...] = (
 )
 
 _PREFIX_RE = re.compile(r"^\d*[a-z]+")
-_CODE_RUN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._\-]*[A-Za-z0-9]|[A-Za-z0-9]")
 
 #: Words that end a model tail (they describe the product, not the model).
 TAIL_STOPWORDS: frozenset[str] = frozenset(
@@ -568,21 +567,51 @@ def _alpha_prefix(token: str) -> str:
 def code_like_tokens(text: str) -> tuple[str, ...]:
     """Code-like tokens of a filename/folder (rule 4.4), noise filtered out.
 
-    Both hyphen-joined runs (``HSU-18HFPAA``) and their individual segments are
-    considered, and pure noise (``img1234``, ``800x800``, long hex hashes, dates) is
-    dropped so it can never look like a model code.
+    Extracts:
+    1. Direct alpha-numeric codes (``HSU18HFPAA``, ``DW7500C``).
+    2. Consecutive compound runs where a letter prefix is joined to numbers by
+       hyphens/underscores/dots/spaces (e.g. ``HRF-47552`` -> ``hrf47552``,
+       ``DW-7500`` -> ``dw7500``, ``HRF-47552-GD`` -> ``hrf47552gd``).
+
+    Drops pure noise (``img1234``, ``800x800``, long hex hashes, dates) and single-type
+    tokens (pure words like ``refrigerator`` or pure 2-digit numbers like capacity ``15``).
     """
+    segments = [s for s in re.split(r"[^A-Za-z0-9]+", text) if s]
     found: list[str] = []
-    for run in _CODE_RUN_RE.findall(text):
-        for part in (run, *re.split(r"[^A-Za-z0-9]+", run)):
-            core = normalize_key(part)
-            if len(core) < 3:
-                continue
-            if not re.search(r"[a-z]", core) or not re.search(r"[0-9]", core):
-                continue
-            if any(pattern.match(core) for pattern in _NOISE_TOKEN_RES):
-                continue
+
+    # 1. Single segments containing both letters and digits
+    for s in segments:
+        core = normalize_key(s)
+        if (
+            len(core) >= 3
+            and re.search(r"[a-z]", core)
+            and re.search(r"[0-9]", core)
+            and not any(pattern.match(core) for pattern in _NOISE_TOKEN_RES)
+        ):
             found.append(core)
+
+    # 2. Glued pairs: prefix letters (2-5) + numeric model code (2-6 digits, e.g. HSU+18, HRF+47552)
+    for i in range(len(segments) - 1):
+        s1, s2 = segments[i], segments[i + 1]
+        pair = normalize_key(s1 + s2)
+        if (
+            len(pair) >= 4
+            and re.match(r"^[a-z]{2,5}\d{2,6}", pair)
+            and not any(pattern.match(pair) for pattern in _NOISE_TOKEN_RES)
+        ):
+            found.append(pair)
+
+    # 3. Glued triplets: prefix + numbers + suffix letters (e.g. HRF+47552+GD, DW+7500+C)
+    for i in range(len(segments) - 2):
+        s1, s2, s3 = segments[i], segments[i + 1], segments[i + 2]
+        triplet = normalize_key(s1 + s2 + s3)
+        if (
+            len(triplet) >= 5
+            and re.match(r"^[a-z]{2,5}\d{2,6}[a-z]{1,4}$", triplet)
+            and not any(pattern.match(triplet) for pattern in _NOISE_TOKEN_RES)
+        ):
+            found.append(triplet)
+
     return tuple(dict.fromkeys(found))
 
 
@@ -611,6 +640,21 @@ def url_belongs_to_other_model(url: str, keys: ModelKeys) -> bool:
     if not product_prefixes:
         return False
     return any(_alpha_prefix(token) in product_prefixes for token in tokens)
+
+
+def is_display_product(title: str) -> bool:
+    """True for TVs, monitors, and screens where display wallpapers contain arbitrary colours.
+
+    Televisions and monitors do not have distinct chromatic body variants (they are black/grey
+    bezels) and their product photography intentionally displays vivid colourful scenes
+    (nature wallpapers, sunsets, oceans). Safeguard S16 (chromatic variant gating) is therefore
+    bypassed for display products so valid TV shots are not rejected.
+    """
+    t = title.lower()
+    words = set(re.findall(r"[a-z0-9]+", t))
+    if {"tv", "television", "monitor", "oled", "qled"} & words:
+        return True
+    return bool("led" in words and any(w in words for w in ("inch", "in", "smart", "fhd", "uhd", "4k", "2k", "8k")))
 
 
 # --------------------------------------------------------------------------- #
