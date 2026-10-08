@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Sequence
-from urllib.parse import parse_qs, unquote, urljoin, urlsplit, urlunsplit
+from urllib.parse import SplitResult, parse_qs, unquote, urljoin, urlsplit, urlunsplit
 
 # --------------------------------------------------------------------------- #
 # S5 - bad keyword blocklist (token based; substring matching is forbidden)
@@ -471,21 +471,37 @@ UPSCALE_REWRITE_RULES: tuple[tuple[str, str, str], ...] = (
 )
 
 
-def upscale_candidates(url: str) -> tuple[str, ...]:
-    """URL variants to try, largest first, ending with the URL exactly as given."""
+def upscale_candidates(url: str, official: bool = False) -> tuple[str, ...]:
+    """URL variants to try, largest first, ending with the URL exactly as given.
+
+    ``official`` (the page sits on the brand's own domain) unlocks the Haier size ladder:
+    Haier's CDN often lacks ``_1000`` but ships ``_800``/``_480``, so an official page tries
+    all three instead of betting on a single size that 404s.  Retailers keep the single
+    ``_1000`` rewrite - their S8 protection is unchanged.
+    """
     out: list[str] = []
     parts = urlsplit(url)
     path, query = parts.path, parts.query
-    for _name, pattern, replacement in UPSCALE_REWRITE_RULES:
+    for name, pattern, replacement in UPSCALE_REWRITE_RULES:
+        if name == "haier-thumb" and official:
+            for size in (1000, 800, 480):
+                rewritten = re.sub(pattern, rf"_{size}\1", path)
+                if rewritten != path:
+                    _add_candidate(out, parts, rewritten, query, url)
+            continue
         rewritten = re.sub(pattern, replacement, path)
         if rewritten != path:
-            candidate = urlunsplit(
-                (parts.scheme, parts.netloc, rewritten, query, parts.fragment)
-            )
-            if candidate != url and candidate not in out:
-                out.append(candidate)
+            _add_candidate(out, parts, rewritten, query, url)
     out.append(url)
     return tuple(out)
+
+
+def _add_candidate(
+    out: list[str], parts: SplitResult, rewritten: str, query: str, original: str
+) -> None:
+    candidate = urlunsplit((parts.scheme, parts.netloc, rewritten, query, parts.fragment))
+    if candidate != original and candidate not in out:
+        out.append(candidate)
 
 
 def has_image_extension(url: str) -> bool:

@@ -1061,7 +1061,7 @@ def _consume_candidates(
         # one rejected the product at S8 before the large form was ever requested.
         if config.image_probe_enabled:
             probe_url = (
-                upscale_candidates(candidate.url)[0]
+                upscale_candidates(candidate.url, official_page)[0]
                 if config.url_rewrite_enabled
                 else candidate.url
             )
@@ -1084,7 +1084,7 @@ def _consume_candidates(
 
         # (b) the real download: largest rewrite first, then the URL as given
         attempts = (
-            upscale_candidates(candidate.url)
+            upscale_candidates(candidate.url, official_page)
             if config.url_rewrite_enabled
             else (candidate.url,)
         )
