@@ -394,6 +394,14 @@ class PipelineConfig:
     #: (e.g. a colourway-mixing brand page); display products stay exempt regardless.
     color_gate_enabled: bool = False
 
+    # ----- last-resort salvage --------------------------------------------
+    #: Owner decision 2026-10-08 ("jab kuch na bachey toh kam quality wali hi le lon"):
+    #: when a row would otherwise end with 0 (or below ``min_required_images``) images,
+    #: publish the best already-downloaded picture that only missed a *quality* floor
+    #: (S13 lossy payload / bpp) - never an identity reject (wrong model, banner, wrong
+    #: colour).  1 salvaged image beats a failed row.
+    last_resort_salvage_enabled: bool = True
+
     # ----- compositing -----------------------------------------------------
     canonical_side: int = 1200
     padding_px: int = 6

@@ -796,3 +796,27 @@ def test_visual_color_gate_expanded_conflicts_matrix() -> None:
         assert not ok, f"Expected rejection for red target, got reason: {reason}"
     assert verify_image_color(red_shot, "red")[0] is True
 
+
+
+def test_only_the_quality_floors_are_salvageable() -> None:
+    """S13's lossy floors mark their reject salvageable; broken payloads never are."""
+    buf = io.BytesIO()
+    Image.new("RGB", (300, 300), (200, 170, 60)).save(buf, "JPEG", quality=20)
+    payload = buf.getvalue()
+    with pytest.raises(ImageValidationError) as floor_hit:
+        validate_image_bytes(
+            payload,
+            "image/jpeg",
+            max_bytes=10_000_000,
+            max_pixels=50_000_000,
+            min_lossy_bytes=len(payload) + 1000,
+        )
+    assert floor_hit.value.salvageable is True
+    with pytest.raises(ImageValidationError) as broken:
+        validate_image_bytes(
+            b"this is not an image at all",
+            "image/png",
+            max_bytes=10_000_000,
+            max_pixels=50_000_000,
+        )
+    assert broken.value.salvageable is False

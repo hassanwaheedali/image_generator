@@ -88,7 +88,7 @@ from page_verification import (
     strip_unwanted_regions,
     verify_page,
 )
-from protocols import ImageFetcher, ImageHost, PageFetcher, SourceSearcher
+from protocols import BinaryResponse, ImageFetcher, ImageHost, PageFetcher, SourceSearcher
 from url_filters import (
     dedup_key,
     detect_brand,
@@ -389,6 +389,7 @@ def process_product(
         config.image_full_download_max_per_page,
         config.image_full_download_max_per_row,
     )
+    salvage: list[SalvageOffer] = []
 
     # ---- stage 2 & 3: sheet URLs and fallback search -----------------------
     # Customer & Owner rules:
@@ -471,6 +472,7 @@ def process_product(
             rejections=rejections,
             notes=notes,
             budget=budget,
+            salvage=salvage,
             defer_tolerated=True,
         )
         if outcome.deferred:
@@ -588,6 +590,7 @@ def process_product(
             rejections=rejections,
             notes=notes,
             budget=budget,
+            salvage=salvage,
             defer_tolerated=False,
         )
         if outcome.tolerated:
@@ -595,6 +598,29 @@ def process_product(
             stages.append(f"3b tolerated spelling used: {outcome.page_url}")
         if not outcome.fetched or not outcome.matched:
             pages_rejected += 1
+
+    # ---- stage 3c: last-resort salvage (owner decision 2026-10-08) ----------
+    # "2 image hi chahye leken jab mil hi nahi rahi toh 1 hi kafi hay": when the row
+    # is still below min_required_images, the best already-downloaded picture that
+    # only missed a *quality* floor (never identity: wrong model, banner, wrong
+    # colour) becomes a published image.  Live case: the Homage HRF-47662-GD golden
+    # hero, 9772 bytes against a 12000-byte floor, was the ONLY photo of the right
+    # model+colour anywhere - the row failed 0/0/0 while the correct image sat in
+    # the reject pile.
+    if config.last_resort_salvage_enabled and len(accepted) < config.min_required_images:
+        _salvage_row(
+            task=task,
+            keys=keys,
+            config=config,
+            deps=deps,
+            dedup=dedup,
+            seen_keys=seen_keys,
+            accepted=accepted,
+            rejections=rejections,
+            notes=notes,
+            stages=stages,
+            offers=salvage,
+        )
 
     # ---- stage 4/5 summary -------------------------------------------------
     if rejections:
@@ -667,6 +693,140 @@ class _PageOutcome:
     #: Set when such a page *was* consumed (the chain found nothing better): the reason goes
     #: on the row report and into review_products.csv, exactly like ``relaxed``.
     tolerated: str = ""
+
+
+@dataclass(frozen=True)
+class SalvageOffer:
+    """A downloaded image that only missed a *quality* floor (S13 lossy payload / bpp).
+
+    Kept aside while the row is still hunting; if the row ends below
+    ``min_required_images`` the best offers publish as a last resort (owner decision
+    2026-10-08).  ``score`` is bytes-per-pixel: among compressed candidates the least
+    compressed one wins.
+    """
+
+    score: float
+    candidate: ImageCandidate
+    used_url: str
+    source_label: str
+    image: Image.Image
+
+
+def _offer_salvage(
+    offers: list[SalvageOffer],
+    offer: SalvageOffer,
+    cap: int,
+) -> None:
+    """Insert an offer best-first, never keeping more than ``cap`` (best survive)."""
+    offers.append(offer)
+    offers.sort(key=lambda item: item.score, reverse=True)
+    del offers[cap:]
+
+
+def _maybe_offer_salvage(
+    *,
+    salvage: list[SalvageOffer],
+    binary: BinaryResponse,
+    candidate: ImageCandidate,
+    used_url: str,
+    source_label: str,
+    config: PipelineConfig,
+) -> None:
+    """Keep a quality-floor reject aside; stage 3c may still need it.
+
+    Re-decodes without the lossy floors (bomb guard and decode still apply).  A
+    payload that will not decode is not salvageable by definition.
+    """
+    try:
+        image = validate_image_bytes(
+            binary.content,
+            binary.content_type,
+            max_bytes=config.max_image_bytes,
+            max_pixels=config.max_image_pixels,
+        )
+    except ImageValidationError:
+        return
+    pixels = max(1, image.size[0] * image.size[1])
+    _offer_salvage(
+        salvage,
+        SalvageOffer(
+            score=len(binary.content) / float(pixels),
+            candidate=candidate,
+            used_url=used_url,
+            source_label=source_label,
+            image=image,
+        ),
+        cap=config.target_images_per_product,
+    )
+
+
+def _salvage_row(
+    *,
+    task: ProductTask,
+    keys: ModelKeys,
+    config: PipelineConfig,
+    deps: PipelineDeps,
+    dedup: ProductDedup,
+    seen_keys: set[str],
+    accepted: list[AcceptedImage],
+    rejections: Counter[str],
+    notes: list[str],
+    stages: list[str],
+    offers: list[SalvageOffer],
+) -> None:
+    """Stage 3c: publish quality-floor rejects when nothing better exists.
+
+    Identity is still non-negotiable: a wrong-colour sibling from the same site is
+    exactly what must NOT slip in (owner 2026-10-08: the safeguard "should only reject
+    wrong product color and pick one correct color image"), so the colour check runs
+    here even when the S16 gate is off.  Everything else already passed its page's
+    model match - only compression stood between it and the row.
+    """
+    before = len(accepted)
+    for offer in offers:
+        if _row_is_done(accepted, config):
+            break
+        if dedup.is_duplicate(offer.image):
+            continue
+        if keys.colour_word and not is_display_product(task.title):
+            color_ok, color_detail = verify_image_color(offer.image, keys.colour_word)
+            if not color_ok:
+                rejections["S16.salvage"] += 1
+                deps.decisions.reject(
+                    title=task.title,
+                    url=offer.used_url,
+                    rule_id="S16.salvage",
+                    detail=f"wrong colour for the last-resort slot too - {color_detail}",
+                )
+                continue
+        deps.decisions.keep(
+            title=task.title,
+            url=offer.used_url,
+            rule_id="S13.salvage",
+            detail=(
+                "below the quality floor but the only real photo of this product found "
+                "- published as last resort (owner rule 2026-10-08)"
+            ),
+        )
+        seen_keys.add(dedup_key(offer.candidate.url))
+        _compose_and_save(
+            task=task,
+            candidate=offer.candidate,
+            used_url=offer.used_url,
+            source_label=offer.source_label,
+            image=offer.image,
+            config=config,
+            deps=deps,
+            dedup=dedup,
+            accepted=accepted,
+        )
+    salvaged = len(accepted) - before
+    if salvaged:
+        notes.append(
+            f"last-resort salvage: {salvaged} below-floor image(s) published "
+            "- no better photo of this product exists"
+        )
+        stages.append(f"3c salvage: {salvaged} below-floor image(s) published")
 
 
 class _DownloadBudget:
@@ -794,6 +954,7 @@ def _visit_page(
     rejections: Counter[str],
     notes: list[str],
     budget: _DownloadBudget,
+    salvage: list[SalvageOffer],
     defer_tolerated: bool = False,
 ) -> _PageOutcome:
     """Fetch one page, verify it (S1, or S15 for a fallback candidate), extract, gate.
@@ -916,6 +1077,7 @@ def _visit_page(
         official_page=host_is_official(resolved_url, brand),
         source_label=source_label,
         budget=budget,
+        salvage=salvage,
     )
     return _PageOutcome(True, True, resolved_url, relaxed, tolerated=tolerated_reason)
 
@@ -1100,6 +1262,7 @@ def _consume_candidates(
     rejections: Counter[str],
     source_label: str,
     budget: _DownloadBudget,
+    salvage: list[SalvageOffer],
     official_page: bool = False,
 ) -> None:
     """Cheap checks, a header probe, one download, the gates, then compose.
@@ -1214,6 +1377,15 @@ def _consume_candidates(
             deps.decisions.reject(
                 title=task.title, url=used_url, rule_id=exc.rule_id, detail=exc.detail
             )
+            if exc.salvageable and config.last_resort_salvage_enabled:
+                _maybe_offer_salvage(
+                    salvage=salvage,
+                    binary=binary,
+                    candidate=candidate,
+                    used_url=used_url,
+                    source_label=source_label,
+                    config=config,
+                )
             continue
         # (c) page furniture that is not the product: a shop promo strip glued to an edge,
         # or a thin layout seam touching two edges.  Both cross the S7 ring and used to
