@@ -152,7 +152,7 @@ KNOWN_BRANDS: dict[str, tuple[str, ...]] = {
     "gree": ("gree.com", "gree.com.pk"),
     "samsung": ("samsung.com",),
     "lg": ("lg.com",),
-    "kenwood": ("kenwood.com", "kenwoodpakistan.com"),
+    "kenwood": ("kenwood.com", "kenwoodpakistan.com", "kenwoodpakistan.pk"),
     "boss": ("bossappliances.com.pk",),
     "changhong": ("changhong.com",),
     "ecostar": ("ecostar.com.pk",),
@@ -167,6 +167,10 @@ KNOWN_BRANDS: dict[str, tuple[str, ...]] = {
     # Midea Pakistan (Green Leaves Pvt Ltd): official online store + corporate + global.
     "midea": ("mideapakistan.store", "mideapakistan.com", "midea.com"),
 }
+
+#: Model-code prefixes that name the maker when the title prints a line name
+#: instead of the brand ("E-Comfort Pro KEC-1267S" -> kenwood).
+MODEL_PREFIX_BRAND: tuple[tuple[str, str], ...] = (("KEC", "kenwood"),)
 
 #: Manufacturer domain -> brand (reverse map, built once).
 DOMAIN_TO_BRAND: dict[str, str] = {
@@ -263,7 +267,16 @@ def detect_brand(url: str, title: str = "") -> str | None:
     if words[0] in KNOWN_BRANDS:
         return words[0]
     joined = "".join(words)
-    return joined if len(words) == 2 and joined in KNOWN_BRANDS else None
+    if len(words) == 2 and joined in KNOWN_BRANDS:
+        return joined
+    # The SKU prefix names the maker when the title carries a line name instead
+    # (owner 2026-10-09: "E-Comfort Pro KEC-1267S" is a Kenwood - "you can get
+    # kenwood through sku KEC").  Without it the official brand site is never
+    # searched for the row.
+    for prefix, brand in MODEL_PREFIX_BRAND:
+        if re.search(rf"\b{prefix}[-\s]?\d", title, re.IGNORECASE):
+            return brand
+    return None
 
 
 def host_is_other_manufacturer(host: str, brand: str | None) -> bool:

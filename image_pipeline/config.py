@@ -242,6 +242,7 @@ class PipelineConfig:
             "eshop.pel.com.pk": "shopify",
             "homage.com.pk": "woo",
             "www.kenwoodpakistan.com": "woo",
+            "www.kenwoodpakistan.pk": "woo",
             "www.surmawala.pk": "shopify",
             "modernelectronics.pk": "shopify",
             "friendshome.pk": "shopify",
@@ -267,7 +268,10 @@ class PipelineConfig:
             "tcl": ("https://www.tcl.com/pk",),
             "pel": ("https://eshop.pel.com.pk",),
             "homage": ("https://homage.com.pk",),
-            "kenwood": ("https://www.kenwoodpakistan.com",),
+            "kenwood": (
+                "https://www.kenwoodpakistan.com",
+                "https://www.kenwoodpakistan.pk",
+            ),
             "orient": ("https://www.orient.com.pk",),
         }
     )

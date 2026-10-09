@@ -279,3 +279,19 @@ def test_remote_and_accessory_urls_are_badged() -> None:
     assert has_bad_keyword("https://cdn.lg.com/p/lg-ac-remote-control.jpg")
     assert has_bad_keyword("https://cdn.lg.com/p/accessories/dual-cool.png")
     assert not has_bad_keyword("https://cdn.lg.com/p/lg-dual-cool-inverter-i24cgh.jpg")
+
+
+def test_kec_sku_titles_resolve_to_kenwood_and_its_pk_site_is_official() -> None:
+    """Owner 2026-10-09: "E-Comfort Pro KEC-1267S" is a Kenwood row ("you can get
+    kenwood through sku KEC") and the clean picture lives on kenwoodpakistan.pk -
+    the brand must be detected so the official site is searched first."""
+    assert (
+        detect_brand(
+            "https://www.surmawala.pk/products/kenwood-kec-1267s",
+            "E-Comfort Pro KEC-1267S",
+        )
+        == "kenwood"
+    )
+    assert host_is_official(
+        "https://www.kenwoodpakistan.pk/products/kec-1267s-comfort-pro", "kenwood"
+    )
