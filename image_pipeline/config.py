@@ -378,6 +378,12 @@ class PipelineConfig:
     border_bg_tolerance: float = 28.0
     border_std_max: float = 22.0
     neutral_bright_min_value: float = 0.86
+    #: Official brand sites get a calmer corner bar (owner 2026-10-09: "picture
+    #: verification should not be too strict only in brand sites because they are
+    #: official"): their studio grounds run light grey (~0.85) where retail shots
+    #: are white, and the model match (S1) already proves the page.  Retail keeps
+    #: the strict value.
+    official_neutral_bright_min_value: float = 0.80
     neutral_bright_max_saturation: float = 0.14
     min_neutral_corners: int = 2
     #: Official brand pages are curated: the images in their product gallery are the
@@ -423,6 +429,11 @@ class PipelineConfig:
     logo_background_max_value: float = 0.90
     logo_ink_min_fraction: float = 0.06
     logo_ink_max_value: float = 0.60
+    #: A body brighter than the grey ground proves a product (white unit on a grey
+    # studio shot) - emblems carry nothing brighter than their disc.
+    logo_bright_max_fraction: float = 0.10
+    #: Emblem ink is stroke-work; a dark appliance body covers far more.
+    logo_ink_max_fraction: float = 0.30
 
     # ----- visual color verification (S16) --------------------------------
     #: Owner decision 2026-10-08: the pixel-colour gate is a *rare-condition* tool,

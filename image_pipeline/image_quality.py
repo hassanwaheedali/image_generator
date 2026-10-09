@@ -338,11 +338,12 @@ def is_monochrome_emblem(image: Image.Image, config: PipelineConfig) -> bool:
     Live 2026-10-09: Haier's registry gallery mixed the brand's "AI + leaf" emblem -
     dark-grey strokes and a ring on a light-grey disc - into the product images, and
     it sailed through S7 because its border ring *is* one calm colour and its four
-    corners are neutral.  Three signals together name it: the picture is entirely
+    corners are neutral.  The signals that together name it: the picture is entirely
     achromatic (no chroma anywhere, unlike any appliance photo), its ground is not
-    the white studio backdrop (corner value below the white level), and it carries
-    a real share of dark ink strokes.  A white/grey/black appliance on a white
-    backdrop always keeps the white ground, so product shots never trip it.
+    the white studio backdrop (corner value below the white level), it carries
+    stroke-share dark ink (not a product body's coverage), and - the live false
+    positive that same day, Kenwood's perfect white unit on a grey studio ground -
+    it has *nothing brighter than the ground*, which no real product photo lacks.
     """
     if not config.logo_gate_enabled:
         return False
@@ -362,8 +363,19 @@ def is_monochrome_emblem(image: Image.Image, config: PipelineConfig) -> bool:
     )
     if corner >= config.logo_background_max_value:
         return False
+    # A real product on a grey ground always carries a body *brighter* than that
+    # ground (the white Kenwood unit on the grey studio shot, live 2026-10-09 -
+    # the first S14 draft ate exactly that perfect official picture).  An emblem
+    # has nothing brighter than its disc.
+    bright = float((maximum > corner + 0.05).mean())
+    if bright >= config.logo_bright_max_fraction:
+        return False
     ink = float((maximum < config.logo_ink_max_value).mean())
-    return ink >= config.logo_ink_min_fraction
+    if ink < config.logo_ink_min_fraction:
+        return False
+    # An emblem's ink is stroke-work (a few percent to a quarter of the frame);
+    # a dark appliance body covers far more and is a product, not a logo.
+    return ink <= config.logo_ink_max_fraction
 
 
 # --------------------------------------------------------------------------- #
@@ -642,7 +654,7 @@ def official_gallery_pass(image: Image.Image, config: PipelineConfig) -> bool:
     corners = neutral_corner_count(
         image,
         config.corner_patch_ratio,
-        config.neutral_bright_min_value,
+        config.official_neutral_bright_min_value,
         config.neutral_bright_max_saturation,
     )
     return corners >= config.official_gallery_min_neutral_corners
@@ -718,6 +730,16 @@ def run_quality_gates(
         config.neutral_bright_min_value,
         config.neutral_bright_max_saturation,
     )
+    if corners < config.min_neutral_corners and official_gallery:
+        # Official studios print light-grey grounds (~0.85) where retail shots are
+        # white; the page already proved the model (S1), so the brand's own gallery
+        # gets the calmer corner bar (owner 2026-10-09).
+        corners = neutral_corner_count(
+            image,
+            config.corner_patch_ratio,
+            config.official_neutral_bright_min_value,
+            config.neutral_bright_max_saturation,
+        )
     if corners < config.min_neutral_corners:
         return "S7", f"only {corners} neutral corner(s), need {config.min_neutral_corners}"
     return "ok", ""

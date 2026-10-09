@@ -34,6 +34,7 @@ from image_quality import (
     border_is_clean,
     has_extreme_aspect,
     is_large_enough,
+    is_monochrome_emblem,
     is_qr_or_barcode,
     neutral_corner_count,
     run_quality_gates,
@@ -1042,3 +1043,42 @@ def test_product_photos_still_pass_s14() -> None:
     for colour in ("#c9a227", "#e8e8e8", "#101010", "#2f5fa8"):
         rule, _ = run_quality_gates(clean_product_image(900, 900, colour), config)
         assert rule == "ok", colour
+
+
+def test_a_white_product_on_a_grey_ground_is_not_an_emblem() -> None:
+    """Live false positive 2026-10-09: Kenwood's perfect official shot is a white
+    unit on a light-grey studio ground - achromatic, grey corners - and the first
+    S14 draft ate it.  The body brighter than the ground is what proves a product:
+    an emblem carries nothing brighter than its disc."""
+    from PIL import ImageDraw
+
+    shot = Image.new("RGB", (500, 280), (217, 217, 217))
+    draw = ImageDraw.Draw(shot)
+    draw.rounded_rectangle((30, 40, 470, 200), radius=12, fill=(250, 250, 250))
+    draw.rectangle((60, 210, 440, 235), fill=(90, 90, 90))
+    draw.rectangle((215, 150, 285, 162), fill=(60, 60, 60))
+    config = PipelineConfig(output_dir=Path("/tmp/s14"), dry_run=True)
+    assert not is_monochrome_emblem(shot, config)
+    assert run_quality_gates(shot, config)[0] != "S14"
+
+
+def test_an_official_grey_ground_studio_shot_passes_the_gates() -> None:
+    """Owner 2026-10-09: brand sites are official - the model match (S1) proves the
+    page, so their light-grey studio grounds get the calmer corner bar and the
+    perfect Kenwood shot passes instead of dying on S7/S14."""
+    from PIL import ImageDraw
+
+    shot = Image.new("RGB", (500, 280), (217, 217, 217))
+    draw = ImageDraw.Draw(shot)
+    draw.rounded_rectangle((30, 40, 470, 200), radius=12, fill=(250, 250, 250))
+    draw.rectangle((60, 210, 440, 235), fill=(90, 90, 90))
+    draw.rectangle((215, 150, 285, 162), fill=(60, 60, 60))
+    config = PipelineConfig(output_dir=Path("/tmp/s14"), dry_run=True)
+    assert run_quality_gates(shot, config, official_gallery=True) == ("ok", "")
+
+
+def test_the_emblem_still_fails_on_official_galleries() -> None:
+    """S14 is content-based, so the brand's own badge stays rejected even where the
+    S7 bar is relaxed."""
+    config = PipelineConfig(output_dir=Path("/tmp/s14"), dry_run=True)
+    assert run_quality_gates(_grey_emblem(), config, official_gallery=True)[0] == "S14"
