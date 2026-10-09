@@ -84,3 +84,92 @@ images → before/after sheet → measurement → evidence tag → owner approva
 * `CHANGELOG.md` + `docs/PROJECT_MAP.md` rule-registry updates, ruff + `mypy --strict` clean, complexity not increased.
 * An explicit list of what could not be verified from this sandbox (live fetch, owner-side visual pass).
 * Note for Option 2: which components are reusable unchanged and what small seam each needs.
+
+## 5 · EXECUTION LOG (measured, per gate)
+
+**2026-10-10 · S18 Crop Closure — product clipping in isolation. SHIPPED, needs one live re-run to confirm on the shop template.**
+
+Evidence trail, in order:
+1. Owner complaint: "the AC got cut. The product must not be touched, only the background."
+2. First measurement (bbox of raw vs bbox of isolated) was **discarded**: aspect "shifts"
+   it reported were soft-shadow removal, not clipping. Wrong metric, wrong conclusion.
+3. Second measurement, the one that means something: run the shipped `isolate_main_product`
+   on all 72 accepted raws and ask whether the crop's own border cuts ink (scan 6 levels
+   below pure white; the scan is calibrated - the ink box is flat from 2 to 24 levels on
+   these images, so JPEG noise cannot fake it). Result: **41 of 72 crops cut ink.**
+4. Cause: the crop box comes from `_single_body_box(silhouette)`, and the silhouette is
+   built with `isolation_bg_distance = 32`. A white shell fades 250 -> 243 -> 235, so its
+   lower body is invisible to that mask and the box ends at the waist. Lowering 32 was
+   rejected - it feeds the fraction test, the composite guard and dedup too.
+5. Fix: grow-only closure. Label the loose ink, pull in only the bodies touching the crop
+   border, never trim, `isolation_crop_closure = False` restores the old behaviour exactly.
+6. Verified on the owner's own images: +270 % / +203 % / +347 % / +55 % / +46 % height on
+   the five worst crops, the other 67 unchanged, `pytest -q` green, `ruff check` clean,
+   `mypy --strict` clean, sheet `docs/riper/evidence/crop-closure-before-after.png`.
+7. Open, deliberately not hidden: **13 products where the ink already touches the source's
+   own frame edge.** For those the site's file is the cut one; no crop can repair it. That
+   is a *candidate choice* problem (prefer an uncut source), not an isolation problem.
+
+**2026-10-10 · the Frost row — a scraping gap, after two wrong conclusions. SHIPPED, needs a live re-run.**
+
+1. Claim A (mine, from the old log): "the crash hides the reason". Half true - fixing it
+   only produced a *reason*, not an image.
+2. Claim B (mine, from the live capture): "Orient publishes no gallery on this page, the
+   7 S3 rejects are all correct, there is nothing to scrape". **Wrong, and the owner
+   caught it by pointing at the page.** The capture does contain the product image - the
+   page's own JSON-LD `Product` node declares
+   `assets/og-images/frost-18w-classic-white.jpg?v=20260618c`.
+3. Mechanism, reproduced with the shipped code: `json_ld.extract()` returned 0
+   candidates because the identity gate needs a model-key match and this title has
+   `tokens=() identities=()`. So *the extractor never looked at the one image the page
+   admits to having*. `<img>`-only scanning + a model-key gate = a blind spot for every
+   model-code-free row (6 of 34 rows here; the run's only `failed` row is one of them).
+4. Fix, kept narrow on purpose: the node is accepted when it *names this page*
+   (`url`/`@id`/`mainEntityOfPage` == page slug, or `sku` == page slug) - and only for
+   rows that own no model code, so no row that can be matched by model is affected.
+   Proved non-leaky: a page whose JSON-LD also lists `megatron-titanium-12x` yields only
+   the Frost image.
+5. Measurement: same capture, all five sources - 7 candidates -> 8, first = `frost-18w-classic-white.jpg`.
+6. Lesson recorded so it is not repeated: "the page has no images" is a claim about *the
+   extractor's* reach, not about the page. Check `og:image` / `ld+json` before saying it.
+
+**2026-10-10 · doubt cycle on the Haier sibling-extension rung. Result: my claim was only half true; shipped contained.**
+
+Stop condition met after 1 cycle (no reviewer CLI in this sandbox - `gemini`/`codex`
+absent - so Step 3 ran as the skill's degraded self-questioning fallback, and it is
+labelled degraded rather than counted as an independent review).
+
+- CLAIM examined: "adding a `.png` rung is harmless because a rewrite is only *tried*".
+- Finding 1 (real, mine): "only tried" is **not** "only considered". `pipeline.py` probes
+  `upscale_candidates(url, official)[0]` and downloads the tuple in order, so the first
+  rung that answers **replaces** the page's own URL. A guess that resolves to any
+  large-enough file becomes the published picture, and no code compares it to the
+  thumbnail the page named. The blast radius is exactly the failure the repo exists to
+  prevent: right product page, wrong image on the shop.
+- Finding 2 (why the old rung survives): the stripped-`.jpg` rung is *proven* by the run
+  itself - the page listed `…91117.jpg` too, and dedup logged `reject:S10 near-duplicate
+  of an already accepted angle`. Same photo, confirmed by evidence, not by faith.
+- Finding 3 (pre-existing, not caused by me, left open on purpose): that probe has no
+  fallback - if a *guessed* URL measures small while the page's own URL was fine, the
+  candidate dies at S8 without the page's URL ever being probed. Needs its own gate.
+- Containment shipped: `url_rewrite_cross_extension_enabled = False` by default; the
+  ladder only grows when the owner turns it on after a live probe, or after Finding 3 is
+  fixed and the substitution is identity-checked.
+- What I got wrong in the earlier report to the owner: I wrote "a wrong guess costs one
+  request and no decision". The cost is potentially a wrong published image. Corrected
+  here so the paper trail does not carry a false reassurance.
+
+**2026-10-10 · doubt cycle #2: every fix shipped in this pass, adversarially re-examined.**
+Degraded self-review again (no cross-model CLI in this sandbox), and every finding was
+settled by measurement on the owner's real images/log rather than by argument.
+
+| fix | what the review attacked | measured result | action |
+|---|---|---|---|
+| F1 tolerated-spelling crash | does the note hide a real failure? | the run's Frost row now logs a reason instead of `IndexError`; nothing else reads that string | confirmed safe |
+| F2 white-on-white before silhouette | does the order let a bad crop through? | yes - and that gap is what cut products; closed by S18 | fixed via S18 |
+| F7 shape-IoU dedup (0.90 + hamming<=6) | can it drop a legitimate second angle? | on 56 pairs of this run only the 2 owner-confirmed repeats collide; the "both close angles kept" fixture stays green | kept, watch-list: two full-bleed *posters* of one series normalise to similar shapes - revisit when S19 rejects layouts |
+| F8 one fingerprint per candidate | does the gate compare one image and store another? | `compute_fingerprint(image)`, `duplicate_reason(image, ...)` and `add(image, ..., fingerprint=...)` all take the same object; the re-check inside `add` is now dead work (harmless) | confirmed safe |
+| S18 crop closure | ink measured from pure white on dark backgrounds | 413x213 -> 900x600 on a synthetic dark frame = would ship a coloured background | fixed: background-relative ink, near-white only |
+| Haier sibling-extension rung | can a guessed URL replace the page's own file? | yes - probe uses `[0]`, download takes the first answer | contained: `url_rewrite_cross_extension_enabled = False` |
+| JSON-LD page identity | can a related tile claim this page and steal its image? | the first guard was circular (word check read the node's `url`); 3 of 4 lies passed | fixed: name/brand only; `url`/`sku` excluded from vouching |
+| open (pre-existing, not mine) | probe measures only the *guessed* URL | a small guess kills the candidate; the page's own URL is never probed | needs its own gate; proposed next |

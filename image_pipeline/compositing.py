@@ -233,6 +233,10 @@ def isolate_main_product(
     if body is None:
         return rgb, True
     box = _pad_box(body, config.padding_px, rgb.size)
+    if config.isolation_crop_closure:
+        closed = _ink_closed_box(rgb, box, config)
+        if closed != box:                       # only a repaired crop gains a second pad
+            box = _pad_box(closed, config.padding_px, rgb.size)
     area_ratio = ((box[2] - box[0]) * (box[3] - box[1])) / float(rgb.width * rgb.height)
     if area_ratio < config.degenerate_crop_ratio:
         return rgb, True
@@ -240,6 +244,74 @@ def isolate_main_product(
     if crop.width < 2 or crop.height < 2:
         return rgb, True
     return crop, False
+
+
+def _ink_closed_box(
+    rgb: Image.Image, box: tuple[int, int, int, int], config: PipelineConfig
+) -> tuple[int, int, int, int]:
+    """Grow a crop until its border stops cutting visible ink.  Never shrinks it.
+
+    ``isolation_bg_distance`` is strict on purpose, and the strict mask is what picks
+    the body to crop - so the box ends wherever a white shell's shading softens below
+    the threshold, and the product is cut there (owner run 2026-10-10: 40 of 72
+    accepted images, e.g. ``Candy By Haier 0.8 Ton`` 1342x695 -> 1342x195).  Here the
+    same frame is measured against *pure white* with a loose scan, its connected bodies
+    are labelled, and only bodies that actually touch the crop border are pulled in.
+    A mark standing away from the product - a corner logo, a price label - is a
+    separate body and never widens the crop.  Only runs on a near-white studio
+    background, which is the situation the mask goes blind in; anywhere else the mask
+    already sees the product and growing the box would only swallow the frame.
+    """
+    try:
+        from scipy import ndimage
+    except Exception:                                       # pragma: no cover - optional dep
+        return box
+    array = np.asarray(rgb, dtype=float)
+    height, width = array.shape[:2]
+    # The closure exists for ONE problem: a near-white body fading into a near-white
+    # studio background, where the strict mask goes blind. Measuring "ink" against pure
+    # white looked harmless and was not - on a dark or gradient background every pixel is
+    # ink, one connected component touches the crop border, and the crop grew to the whole
+    # frame (measured on a synthetic 900x600: 413x213 -> 900x600), which would have
+    # published a coloured background into a white template. So the guard is restricted to
+    # the case it was built for: near-white studio background.
+    background = detect_background_color(rgb, patch_ratio=config.corner_patch_ratio)
+    if min(background) < 255 - config.white_fallback_tolerance:
+        return box
+    offset = np.array(background, dtype=float)
+    ink = np.asarray(np.abs(array - offset).max(axis=2) > config.isolation_ink_scan_distance, dtype=bool)
+    if not ink.any():
+        return box
+    labels, count = ndimage.label(ink, structure=np.ones((3, 3), dtype=bool))
+    if count == 0:                                           # pragma: no cover - defensive
+        return box
+    closed = box
+    for _ in range(3):
+        left, top, right, bottom = closed
+        left = max(0, min(left, width - 1))
+        top = max(0, min(top, height - 1))
+        right = max(left + 1, min(right, width))
+        bottom = max(top + 1, min(bottom, height))
+        border = np.zeros(ink.shape, dtype=bool)
+        border[top:bottom, left] = True
+        border[top:bottom, right - 1] = True
+        border[top, left:right] = True
+        border[bottom - 1, left:right] = True
+        ids = np.unique(labels[np.logical_and(border, ink)])
+        ids = ids[ids > 0]
+        if ids.size == 0:
+            return closed
+        rows, cols = np.where(np.isin(labels, ids))
+        grown = (
+            min(closed[0], int(cols.min())),
+            min(closed[1], int(rows.min())),
+            max(closed[2], int(cols.max()) + 1),
+            max(closed[3], int(rows.max()) + 1),
+        )
+        if grown == closed:
+            return closed
+        closed = grown
+    return closed
 
 
 def _pad_box(

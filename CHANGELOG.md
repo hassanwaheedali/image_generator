@@ -8,6 +8,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **S18 crop closure now measures ink against the studio background, and only runs on a
+  near-white one.** Doubt-reviewing my own fix found a regression it would have caused:
+  "ink" was every pixel a few levels from *pure white*, so on a dark or gradient
+  background the whole frame is one connected body touching the crop border and the crop
+  grew to the entire picture (measured on a synthetic 900x600 before the fix: 413x213 ->
+  900x600) - which publishes a coloured background into a white template. The closure
+  exists for the white-on-white blindness only, so that is now its only territory.
+  Re-measured on the owner's 72 accepted images after the restriction: 34 crops grown,
+  38 identical, **0 shrunk** - the guard is grow-only by construction.
+- **The JSON-LD page-identity exception cannot be talked past.** First version required
+  one shared word between the node's identity text and the title - worthless, because the
+  identity text *includes* the node's `url`, which is the page slug the check just
+  trusted (measured: a "Megatron Titanium 12X" tile with the Frost URL copied in sailed
+  through). Now only `name`/`brand` are compared, and `url`/`sku` are excluded from
+  vouching for identity - the `sku`-copied-the-slug lie is blocked too, the honest node
+  and the real Orient capture still pass, and rows that own a model code are untouched.
+- **A row whose title has no model code can now use the page's own declared image.**
+  `json_ld` accepted only a node whose name/sku/model matched a model key - and a title
+  like `Frost 18W Classic White | Orient Electronics Pakistan` owns no key to match, so
+  the page's own `Product` node was refused and its declared image never entered the
+  candidate list. Verified on the owner's live capture (`uploads/live/orient_frost.html`,
+  2026-10-10): `extract()` returned **0** candidates while the node carried
+  `assets/og-images/frost-18w-classic-white.jpg`. Such a node is now accepted when it
+  names **this page** as its product page (`url`/`@id`/`mainEntityOfPage`, or a `sku`
+  equal to the page slug) - a claim a cross-sell tile cannot make, which is why the
+  exception is closed for every row that *does* own a model code. On the same capture the
+  row goes 7 candidates (all cross-sell tiles, all correctly S3-rejected) -> 8, first =
+  the Frost image. 6 of 34 rows own no model code; the run's only `failed` row is one of
+  them. **Needs the owner's live re-run**: this sandbox cannot download from
+  `orient.com.pk`, so the image's quality-gate pass is unproven here.
+- **S18 - a crop may not cut the product.** The isolation box followed the strict
+  foreground mask, and a white shell on a white background fades out *inside* that
+  mask, so the box stopped at the product's waist. Measured on the owner run of
+  2026-10-10 (`output/decisions.jsonl` + its 72 accepted images): **41 of 72 crops
+  cut ink** - `Candy By Haier 0.8 Ton #01` kept 1342x195 of a 1342x695 unit (only the
+  blue vent strip), `EcoStar Emperor #01` kept 1066x87 (only the louvers),
+  `eComfort Pro KEC-1267S #01` 427x107. The box is now *closed*: ink connected to the
+  crop border is pulled in, a mark standing away from the product never widens it, and
+  nothing is ever trimmed. Grow-only, and switched off by
+  `isolation_crop_closure = False`. Verified on the owner's own images (height
+  +270 %, +203 %, +347 %, +55 %, +46 % on the five worst; the other 67 crops byte-size
+  identical) and eyeballed in `docs/riper/evidence/crop-closure-before-after.png`. **Untested
+  against a live re-run** - the composed result on the shop template still needs the
+  owner's eyes.
+- **Haier sized thumbnails can now be re-fetched as PNG - switch shipped OFF.** The old
+  run's log shows `image.haier.com` serving `W020230419477905891117_60.jpg` (60 px) with
+  the same asset full-size at the extension-less URL, and five gallery images dying at S8
+  `too small 60x60` while two `.png` assets in the same folder were accepted. The size
+  ladder therefore grew an optional sibling-extension rung. **A doubt review of this
+  change (2026-10-10) found the risk in my own reasoning**: `upscale_candidates` output is
+  consumed as "first candidate that answers wins" (`pipeline.py` probes `[0]`, then
+  downloads `attempts` in order), so *any* rung that happens to resolve replaces the file
+  the page named - with no check that it is the same picture. The stripped-`.jpg` rung is
+  safe on evidence (the run's own S10 line proves the page listed that exact file, i.e. it
+  is the same photo), but the `.png` rung has no such proof. So `url_rewrite_cross_extension_enabled`
+  defaults to `False`: the code ships, nothing changes until a live probe on haier.com
+  confirms the sibling exists. **Untested against the live CDN - this sandbox cannot reach it.**
 - **A row with no model code no longer crashes the run.** `_tolerated_spelling_reason`
   indexed `keys.identities[0]` for rows that own neither a model token nor a glued
   identity, so `Frost 18W Classic White | Orient Electronics Pakistan` came back as

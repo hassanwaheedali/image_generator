@@ -336,6 +336,13 @@ class PipelineConfig:
     image_full_download_max_per_page: int = 6
     image_full_download_max_per_row: int = 18
     url_rewrite_enabled: bool = True              # largest-size rewrite before fetch
+    #: Cross-extension rewrites (Haier ``X_60.jpg`` -> ``X.png``). OFF until the owner
+    #: confirms on haier.com that the sibling really exists: a rewrite is only ever
+    #: *tried*, and the download step takes the first candidate that answers, so a
+    #: guessed URL that happens to resolve to some other file could outrank the URL the
+    #: page itself named. Same-family substitution is the one failure this repo must
+    #: never ship, so the rung stays dark until it is proven by a live probe.
+    url_rewrite_cross_extension_enabled: bool = False
 
     # ----- page / image fetching ------------------------------------------
     connect_timeout_s: float = 5.0
@@ -479,6 +486,17 @@ class PipelineConfig:
     #: A second body this close in area to the largest one means the frame is a layout
     #: (an "in-box items" diagram, a banner with a logo), not one product: crop nothing.
     isolation_multi_body_ratio: float = 0.30
+    #: Grow-only crop closure (S18).  The strict difference mask above decides *which*
+    #: body to crop; this decides that the crop may not *cut* it.  Measured on the owner
+    #: run of 2026-10-10: 40 of the 72 accepted images had their product clipped by the
+    #: crop border (`Candy By Haier 0.8 Ton`: content 1342x695, crop kept 1342x195).
+    isolation_crop_closure: bool = True
+    #: Ink scan for that closure: how many levels below pure white still counts as
+    #: "something is drawn here".  Deliberately far looser than the foreground mask,
+    #: because a white shell on a white background fades through 243, 235, 250.
+    #: Calibrated on the 72 accepted raws: the ink box is stable from 2 to 24 levels
+    #: (median 39.1% -> 37.6% of the frame), so JPEG noise on white cannot inflate it.
+    isolation_ink_scan_distance: int = 6
     degenerate_crop_ratio: float = 0.03
     white_fallback_tolerance: int = 10
     #: White-on-white fallback crops must cover at least this share of the frame;
@@ -717,6 +735,8 @@ class PipelineConfig:
             raise ConfigError("isolation_merge_radius_ratio must be in (0, 0.25]")
         if not 0.0 < self.isolation_multi_body_ratio <= 1.0:
             raise ConfigError("isolation_multi_body_ratio must be in (0, 1]")
+        if not 0 < self.isolation_ink_scan_distance < 64:
+            raise ConfigError("isolation_ink_scan_distance must be in (0, 64)")
         if not 0 <= self.white_fallback_tolerance <= 64:
             raise ConfigError("white_fallback_tolerance must be in [0, 64]")
         if not 0.0 < self.white_fallback_min_area_ratio <= 1.0:
