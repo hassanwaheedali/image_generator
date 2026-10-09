@@ -2108,3 +2108,21 @@ def test_an_official_grey_ground_shot_passes_without_a_curated_gallery(tmp_path:
     assert not [e for e in log if e["url"] == shot_url and e["decision"] == "reject"]
     assert len(images) == 1
     assert result.status is Status.PARTIAL
+
+
+def test_a_row_without_any_model_code_gets_a_note_and_not_a_crash() -> None:
+    """A keyword row (no model token, no glued identity) must still explain itself.
+
+    Live 2026-10-09: ``Frost 18W Classic White | Orient Electronics Pakistan`` came back
+    as ``failed: unexpected error: tuple index out of range``.  The note that explains a
+    tolerated page indexed ``keys.identities[0]`` unguarded, so exactly the rows that own
+    no code - the ones that need the explanation most - crashed instead of reporting.
+    A failed row is a correct outcome; an exception in the reporting is not.
+    """
+    from model_matching import build_model_keys
+    from pipeline import _tolerated_spelling_reason
+
+    keys = build_model_keys("Frost 18W Classic White | Orient Electronics Pakistan")
+    assert not keys.tokens and not keys.identities              # the shape that used to crash
+    reason = _tolerated_spelling_reason("Orient Cooltron Frost 18W", keys)
+    assert reason.startswith("page shows ") and "sheet model" in reason

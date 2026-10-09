@@ -841,6 +841,69 @@ def extract_foreground_color_profile(image: Image.Image) -> ForegroundColorProfi
     )
 
 
+def body_shape(
+    image: Image.Image, *, sample: int = 256, close_px: int = 9, out_size: int = 64
+) -> np.ndarray | None:
+    """The product's largest solid body, as a silhouette normalised to its own box.
+
+    A grey-patch correlation compares *appearance*, so it cannot tell a re-served copy
+    from a second angle: a 600px and an 800px copy of one photo correlate 0.97, while
+    the same AC with its louver flap open correlates 0.45.  The body *shape* does
+    separate them - and because only the largest connected body is kept, a coloured badge
+    pasted into the corner (the ``T3`` sticker that made a duplicate look different) is
+    outside the comparison instead of inside it.
+
+    Returns ``None`` when there is no measurable body, so the caller falls back to the
+    weaker signal rather than guessing.
+    """
+    try:
+        from scipy import ndimage
+    except Exception:                                       # pragma: no cover - optional dep
+        return None
+    array = np.asarray(
+        to_rgb(image).resize((sample, sample), Image.Resampling.LANCZOS), dtype=np.float32
+    ) / 255.0
+    edge = max(4, sample // 18)
+    corners = np.concatenate(
+        [
+            array[:edge, :edge].reshape(-1, 3),
+            array[:edge, -edge:].reshape(-1, 3),
+            array[-edge:, :edge].reshape(-1, 3),
+            array[-edge:, -edge:].reshape(-1, 3),
+        ],
+        axis=0,
+    )
+    background = np.median(corners, axis=0)
+    mask = np.asarray(np.abs(array - background).max(axis=2) > 0.06, dtype=bool)
+    if int(mask.sum()) < 200:
+        return None
+    structure = np.ones((close_px, close_px), dtype=bool)
+    solid = ndimage.binary_fill_holes(ndimage.binary_closing(mask, structure=structure))
+    labels, count = ndimage.label(solid)
+    if count == 0:
+        return None
+    sizes = ndimage.sum(solid, labels, index=range(1, count + 1))
+    body = labels == (int(np.argmax(sizes)) + 1)
+    rows, cols = np.nonzero(body)
+    crop = body[int(rows.min()) : int(rows.max()) + 1, int(cols.min()) : int(cols.max()) + 1]
+    if crop.size == 0:
+        return None
+    small = Image.fromarray((crop * 255).astype(np.uint8)).resize(
+        (out_size, out_size), Image.Resampling.BILINEAR
+    )
+    return np.asarray(small, dtype=np.float32) / 255.0
+
+
+def shape_overlap(one: np.ndarray | None, other: np.ndarray | None) -> float:
+    """Intersection over union of two normalised silhouettes; 0.0 when either is unknown."""
+    if one is None or other is None or one.shape != other.shape:
+        return 0.0
+    left = one > 0.5
+    right = other > 0.5
+    union = int((left | right).sum())
+    return float((left & right).sum() / union) if union else 0.0
+
+
 def sharpness_score(image: Image.Image) -> float:
     """Contrast-normalised Laplacian variance on a 256px grey downsample.
 

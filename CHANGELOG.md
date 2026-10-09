@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A row with no model code no longer crashes the run.** `_tolerated_spelling_reason`
+  indexed `keys.identities[0]` for rows that own neither a model token nor a glued
+  identity, so `Frost 18W Classic White | Orient Electronics Pakistan` came back as
+  `failed: unexpected error: tuple index out of range` - a crash inside the code that
+  *explains* a failure. Such a row now reports a reason (owner run 2026-10-09).
+- **Background removal stops cutting white products.** Isolation measured the raw
+  difference mask, and a body whose shading is softer than `isolation_bg_distance` is
+  *hollow* to that mask: the surviving component was a vent strip or a side panel, so the
+  unit lost its top and kept its bottom. It now measures the product **silhouette**
+  (outline bridged, enclosed background filled). 46 images in a 33-product run had the
+  product pressed against a crop border; 39 do now, and the 10 that changed are the
+  cut-unit rows (Orient Megatron, Gree Charmo, Dawlance Dual Pro, Kenwood eComfort...).
+- **A frame that is not one product is never cropped.** An "In-box items" diagram or a
+  promo banner holds several comparable objects; cropping it to the largest published a
+  fragment (the Inspire Pro row shipped a line-art icon, the LG remote rows a grey blob).
+  Those frames now go through whole, which is strictly better than a fragment.
+
+### Added
+- **Safeguard S10 now says why.** A duplicate rejection records the signal and the
+  measurement (`re-served copy of accepted image #1 (dHash 3 bits apart, correlation
+  0.9688)`) instead of the string "near-duplicate", and an *ambiguous* pair - close
+  enough to look like a repeat, not close enough to prove it - is logged as
+  `S10.review` and kept. Tightening the rule further was measured and rejected: the
+  pair the tests guard (same AC, louver flap open) scores **closer** on dHash (2 vs
+  3-4 bits), silhouette IoU (1.000 vs 0.985) and body correlation (0.965 vs 0.802/0.555)
+  than the two duplicates the owner reported, so no threshold catches one without
+  deleting the other.
+- `config.dedup_shape_iou_min` (calibrated: copies 0.985, best different angle 0.754),
+  `config.isolation_merge_radius_ratio`, `config.isolation_multi_body_ratio`;
+  `image_quality.body_shape` / `shape_overlap` for silhouette comparison;
+  `dedup.ProductDedup.duplicate_reason` and `review_shape_match`.
+
+### Performance
+- One fingerprint per accepted image instead of two (`is_duplicate` and `add` were each
+  resampling the same 1200px photo).
+
+
 ## [1.1.0] - 2026-10-08
 
 ### Added

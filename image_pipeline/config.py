@@ -419,6 +419,11 @@ class PipelineConfig:
     #: re-served copy correlates ~1.0 (live 2026-10-09: a correct second angle was
     #: rejected as "near-duplicate").
     dedup_hard_corr_threshold: float = 0.985
+    #: Inside the hard hamming radius, how much of the product silhouette two images must
+    #: share to be called the same angle.  Calibrated on the owner's 33-product run
+    #: (2026-10-09): re-served copies measure IoU 0.985, the best genuinely different pair
+    #: 0.754 - so 0.90 sits in the gap rather than in the middle of a guess.
+    dedup_shape_iou_min: float = 0.90
 
     # ----- monochrome logo / emblem gate (S14) ------------------------------
     #: Official galleries mix marketing badges (the Haier "AI + leaf" emblem on a
@@ -466,6 +471,14 @@ class PipelineConfig:
     isolation_min_foreground_fraction: float = 0.03
     isolation_min_component_ratio: float = 0.02
     isolation_neighbor_distance_px: float = 35.0
+    #: Radius that bridges a product's own soft outline before the body is measured, as a
+    #: share of the image's short side.  A white shell on a white background is *hollow*
+    #: to a difference mask (its shading is below the threshold), and a hollow body splits
+    #: into strips - which is how an AC lost its top and kept its vents.
+    isolation_merge_radius_ratio: float = 0.012
+    #: A second body this close in area to the largest one means the frame is a layout
+    #: (an "in-box items" diagram, a banner with a logo), not one product: crop nothing.
+    isolation_multi_body_ratio: float = 0.30
     degenerate_crop_ratio: float = 0.03
     white_fallback_tolerance: int = 10
     #: White-on-white fallback crops must cover at least this share of the frame;
@@ -681,6 +694,8 @@ class PipelineConfig:
             )
         if not 0.0 < self.dedup_corr_threshold <= 1.0:
             raise ConfigError("dedup_corr_threshold must be in (0, 1]")
+        if not 0.0 < self.dedup_shape_iou_min <= 1.0:
+            raise ConfigError("dedup_shape_iou_min must be in (0, 1]")
 
     def _validate_compositing(self) -> None:
         if self.canonical_side < 64:
@@ -698,6 +713,10 @@ class PipelineConfig:
                 raise ConfigError(f"{name} must be in (0, 1]")
         if self.isolation_neighbor_distance_px < 0:
             raise ConfigError("isolation_neighbor_distance_px must be >= 0")
+        if not 0.0 < self.isolation_merge_radius_ratio <= 0.25:
+            raise ConfigError("isolation_merge_radius_ratio must be in (0, 0.25]")
+        if not 0.0 < self.isolation_multi_body_ratio <= 1.0:
+            raise ConfigError("isolation_multi_body_ratio must be in (0, 1]")
         if not 0 <= self.white_fallback_tolerance <= 64:
             raise ConfigError("white_fallback_tolerance must be in [0, 64]")
         if not 0.0 < self.white_fallback_min_area_ratio <= 1.0:
