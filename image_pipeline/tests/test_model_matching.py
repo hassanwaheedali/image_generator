@@ -547,3 +547,54 @@ def test_fallback_match_ignores_the_search_query_in_the_url() -> None:
     text_right = "PEL PWM-1250 Top Load Washing Machine White 12.5kg"
     assert not relaxed_page_match(wrong, text_wrong, keys, "pel")[0]
     assert relaxed_page_match(right, text_right, keys, "pel")[0]
+
+
+# --------------------------------------------------------------------------- #
+# slash-variant codes: HSU-13HFCP/023WDC(W) - the part before the slash is the model
+# --------------------------------------------------------------------------- #
+HAIER_SLASH_TITLE = "Haier HSU-13HFCP/023WDC(W)-Triple Inverter-Haier Pakistan"
+
+
+def test_a_slash_variant_title_matches_a_page_printing_only_the_base_model() -> None:
+    """Live bug 2026-10-09: the sheet prints ``HSU-13HFCP/023WDC(W)`` - the part after
+    the slash is a factory code shops routinely leave out (owner: "023WDC likha zarori
+    nahi").  friendshome.pk lists the very same machine as ``HSU-13HFCP-W`` and S1
+    rejected the row for "no model key".  The base segment is model-like in its own
+    right, so it must match - exactly, not tolerated."""
+    keys = build_model_keys(HAIER_SLASH_TITLE)
+    verdict = match_product(
+        keys=keys,
+        brand="haier",
+        strong_text="Haier 1.0 Ton Triple Inverter Split AC Model HSU-13HFCP-W",
+    )
+    assert verdict.matched
+    assert verdict.rule == "model_key"
+    assert not verdict.tolerated
+
+
+def test_a_slash_variant_still_keeps_the_glued_extension_guard() -> None:
+    """A segment never extends into extra characters: HSU-12 never matches inside
+    HSU-12HFPAA, slash code or not."""
+    keys = build_model_keys("Haier HSU-12/023ABC Inverter")
+    assert find_matching_keys("HSU-12HFPAA", keys) == ()
+    assert find_matching_keys("HSU12HFPAA", keys) == ()
+    assert find_matching_keys("HSU-12", keys)
+
+
+def test_a_slash_variant_does_not_match_a_different_base_model() -> None:
+    keys = build_model_keys("Haier HSU-18HFCP/023WDC(W)")
+    assert find_matching_keys("Haier HSU-13HFCP-W price", keys) == ()
+
+
+def test_url_words_are_not_the_page_series_name() -> None:
+    """Live bug 2026-10-09 (same row): the strong text glues the URL in, so the page's
+    name words were ``https``/``friendshome``/``products`` - site furniture that
+    "replaced" the row's words and vetoed the series, demoting a perfect page to
+    tolerated.  URL words must never take part in the series veto."""
+    keys = build_model_keys(HAIER_SLASH_TITLE)
+    strong = (
+        "https://friendshome.pk/products/haier-1-0-ton-triple-inverter-split-ac-model-hsu-13hfcp-w"
+        " \n Haier 1.0 Ton Triple Inverter Split AC Model HSU-13HFCP-W"
+    )
+    score = score_match(keys, strong, "haier")
+    assert not score.series_veto

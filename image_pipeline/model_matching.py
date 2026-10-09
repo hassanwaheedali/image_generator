@@ -512,6 +512,28 @@ def near_miss_codes(text: str, keys: ModelKeys) -> tuple[str, ...]:
     return tuple(dict.fromkeys(hints))[:3]
 
 
+def _slash_segment_hit(token: str, core: str, normalized: str) -> bool:
+    """True when one ``/``-separated segment of the token matches on its own.
+
+    Haier sheets print ``HSU-13HFCP/023WDC(W)``: the part before the slash is the
+    customer model, the rest is a factory code that shops routinely leave out
+    (live 2026-10-09: friendshome.pk lists the very same machine as
+    ``HSU-13HFCP-W`` and the row was rejected for "no model key").  A segment
+    only counts when it is model-like in its own right (letters + digits, >= 3
+    chars) and keeps the boundary-anchored pattern, so ``HSU-12`` still never
+    matches inside ``HSU-12HFPAA``.
+    """
+    for segment in token.split("/"):
+        seg_core = normalize_key(segment)
+        if len(seg_core) < 3 or seg_core == core:
+            continue
+        if not re.search(r"[a-z]", seg_core) or not re.search(r"[0-9]", seg_core):
+            continue
+        if _compiled(seg_core).search(normalized):
+            return True
+    return False
+
+
 @lru_cache(maxsize=16384)
 def find_matching_keys(
     text: str,
@@ -544,6 +566,9 @@ def find_matching_keys(
             if identity and identity != core and _compiled(identity).search(normalized):
                 matched.append(token)
                 continue
+        if include_identities and "/" in token and _slash_segment_hit(token, core, normalized):
+            matched.append(token)
+            continue
         if include_truncation:
             for variant in truncation_variants(core):
                 if _compiled(variant).search(normalized):
@@ -1028,6 +1053,23 @@ class ScoreMatch:
         return self.series_veto or self.colour_veto or self.size_veto
 
 
+_URL_TOKEN_RE = re.compile(r"https?://\S+", re.IGNORECASE)
+
+
+def _page_name_words(strong_text: str, brand: str | None) -> tuple[str, ...]:
+    """The page's name words with any URL removed first.
+
+    A strong field is ``url | title | h1`` glued together, and the URL is a slug:
+    its words (``https``, ``products``, the shop's domain) are site furniture, not
+    the product's name.  Left in, they made every page look like it "replaced" the
+    row's name words and vetoed the series - live 2026-10-09, friendshome.pk demoted
+    a perfect ``HSU-13HFCP`` page to tolerated for exactly that.  Colour words keep
+    reading the full text (a colour in the URL still counts) - see
+    :func:`score_match`.
+    """
+    return _drop_brand_words(build_model_keys(_URL_TOKEN_RE.sub(" ", strong_text)).name_words, brand)
+
+
 def _name_word_confidence(row_words: tuple[str, ...], page_words: tuple[str, ...]) -> float:
     """Share of the row's name words the page also carries (1.0 when the row names none)."""
     if not row_words:
@@ -1088,7 +1130,7 @@ def score_match(
     case - so the page's declared colour then counts exactly as if the title had printed it.
     """
     page = build_model_keys(strong_text)
-    page_words = _drop_brand_words(page.name_words, brand)
+    page_words = _page_name_words(strong_text, brand)
     page_colour_text = strong_text
     if not page.colour_word and selected_colourway:
         selected = build_model_keys(selected_colourway)
