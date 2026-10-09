@@ -1,0 +1,529 @@
+2026-10-10 00:37:23,461 INFO    pipeline.main      freeimage key: not needed (dry-run)
+2026-10-10 00:37:23,462 INFO    pipeline.main      input: D:\image_generator\image_pipeline\input\images.csv
+2026-10-10 00:37:23,463 INFO    pipeline.main      dry-run: True | workers: 12
+2026-10-10 00:37:23,464 INFO    pipeline.main      rows to process: 34
+2026-10-10 00:37:23,471 INFO    pipeline           [row 0] start | Midea Go Easy 18HRFNQC6 1.5 Ton DC Inverter AC | 3 sheet url(s)
+2026-10-10 00:37:23,472 INFO    pipeline           [row 1] start | E-Comfort Pro KEC-1267S | 3 sheet url(s)
+2026-10-10 00:37:23,474 INFO    pipeline           [row 2] start | Candy By Haier Premium Heat And Cool DC Inverter Air Conditioner White CSU 19HF | 3 sheet url(s)
+2026-10-10 00:37:23,474 INFO    pipeline           [row 0] fetching https://mideapakistan.store/products/midea-go-easy
+2026-10-10 00:37:23,475 INFO    pipeline           [row 1] fetching https://www.kenwoodpakistan.pk/products/kec-1267s-comfort-pro
+2026-10-10 00:37:23,476 INFO    pipeline           [row 3] start | Midea 2 Ton 24HRFN1-QC6 GO EASY T3 Inverter AC | 3 sheet url(s)
+2026-10-10 00:37:23,476 INFO    pipeline           [row 2] fallback search across retailer sources
+2026-10-10 00:37:23,477 INFO    pipeline           [row 4] start | EcoStar ES-18EM02WS Emperor Series 1.5 Ton DC Inverter Split AC | 3 sheet url(s)
+2026-10-10 00:37:23,478 INFO    pipeline           [row 3] fetching https://mideapakistan.store/products/midea-go-easy
+2026-10-10 00:37:23,478 INFO    pipeline           [row 5] start | Dawlance Split AC Dual Pro T3 Inverter 30 | 3 sheet url(s)
+2026-10-10 00:37:23,480 INFO    pipeline           [row 6] start | GREE Pular T3 1 TON Split AC - GS-12PITH17G-T3 | 3 sheet url(s)
+2026-10-10 00:37:23,481 INFO    pipeline           [row 7] start | Inspire Pro T3 Inverter 1 Ton | 3 sheet url(s)
+2026-10-10 00:37:23,482 INFO    pipeline           [row 4] fallback search across retailer sources
+2026-10-10 00:37:23,482 INFO    pipeline           [row 8] start | Midea 1.5 Ton Xtreme Plus Inverter AC MSEZ2C-18HRFN1 | 3 sheet url(s)
+2026-10-10 00:37:23,484 INFO    pipeline           [row 5] fetching https://www.dawlance.com.pk/inverter-split-ac
+2026-10-10 00:37:23,484 INFO    pipeline           [row 6] fallback search across retailer sources
+2026-10-10 00:37:23,484 INFO    pipeline           [row 7] fetching https://www.dawlance.com.pk/inverter-split-ac/inspire-pro-inverter-15-dawlance-singlecoupon-mint-rewards-mda-voucher-category
+2026-10-10 00:37:23,485 INFO    pipeline           [row 8] fetching https://mideapakistan.store/products/midea-xtremeplus-wall-mounted-dc-inverter-r-410
+2026-10-10 00:37:23,487 INFO    pipeline           [row 9] start | Dawlance Split AC Dual Pro T3 Inverter 15 | 3 sheet url(s)
+2026-10-10 00:37:23,490 INFO    pipeline           [row 10] start | Mega T3 Pro 1 Ton | Inverter Split AC | Air Conditioners - Dawlance | 3 sheet url(s)
+2026-10-10 00:37:23,491 INFO    pipeline           [row 11] start | Haier HSU-13HFCP/023WDC(W)-Triple Inverter-Haier Pakistan | 3 sheet url(s)
+2026-10-10 00:37:23,491 INFO    pipeline           [row 10] fetching https://www.dawlance.com.pk/inverter-split-ac/mega-t3-pro-inverter-15-split-air-conditioners
+2026-10-10 00:37:23,490 INFO    pipeline           [row 9] fallback search across retailer sources
+2026-10-10 00:37:23,492 INFO    pipeline           [row 11] fetching https://www.haier.com/pk/air-conditioners/hsu-13hfcp023wdc-w-.shtml
+2026-10-10 00:37:23,492 INFO    pipeline           [row 9] fetching https://umarelectronics.pk/product/dawlance-split-ac-dual-pro-t3-inverter-15/
+2026-10-10 00:37:23,559 INFO    pipeline.decisions [reject:S11.fetch] Dawlance Split AC Dual Pro T3 Inverter 15 | page https://umarelectronics.pk/product/dawlance-split-ac-dual-pro-t3-inverter-15/ returned HTTP 403
+2026-10-10 00:37:23,559 INFO    pipeline           [row 9] fetching https://www.aysonline.pk/dawlance-dual-pro-t3-inverter-15-ac-1-ton-heat-and-cool-amp-lock/
+2026-10-10 00:37:28,382 INFO    pipeline.decisions [reject:S1] Midea Go Easy 18HRFNQC6 1.5 Ton DC Inverter AC | page strength 0 - no model key found on the page
+2026-10-10 00:37:28,383 INFO    pipeline           [row 0] fetching https://alizainabelectronics.com/products/midea-go-easy-18hrfnqc6-1-5-ton-dc-inverter-ac
+2026-10-10 00:37:28,529 INFO    pipeline.decisions [reject:S1] Midea 2 Ton 24HRFN1-QC6 GO EASY T3 Inverter AC | page strength 0 - no model key found on the page
+2026-10-10 00:37:28,531 INFO    pipeline           [row 3] fetching https://www.lahorecentre.com/products/midea-2-ton-24hrfn1-qc6-go-easy-t3-inverter-ac
+2026-10-10 00:37:29,117 INFO    pipeline           [row 8] fetching https://estore.zahidbrothers.com/shop/air-conditioner/midea/midea-1-5-ton-xtreme-plus-inverter-ac-msez2c-18hrfn1/
+2026-10-10 00:37:30,038 INFO    pipeline.decisions [reject:S11.fetch] Midea 1.5 Ton Xtreme Plus Inverter AC MSEZ2C-18HRFN1 | page https://estore.zahidbrothers.com/shop/air-conditioner/midea/midea-1-5-ton-xtreme-plus-inverter-ac-msez2c-18hrfn1/ returned HTTP 403
+2026-10-10 00:37:30,084 INFO    pipeline           [row 8] fetching https://subhanelectronics.pk/product/midea-1-5-ton-xtreme-plus-inverter-ac-msez2c-18hrfn1-t3-heat-cool-2026-model/
+2026-10-10 00:37:33,417 INFO    pipeline           [row 2] fetching https://www.daraz.pk/products/candy-by-haier-premium-heat-and-cool-dc-inverter-air-conditioner-white-csu-19hf-with-10-years-warranty-i276897976.html
+2026-10-10 00:37:58,940 INFO    pipeline.decisions [reject:S7] Dawlance Split AC Dual Pro T3 Inverter 15 | border ring is not a clean background
+2026-10-10 00:38:04,521 INFO    pipeline.decisions [reject:S7] Candy By Haier Premium Heat And Cool DC Inverter Air Conditioner White CSU 19HF | border ring is not a clean background
+2026-10-10 00:38:04,663 INFO    pipeline.decisions [reject:S3] Candy By Haier Premium Heat And Cool DC Inverter Air Conditioner White CSU 19HF | image is linked to a different page
+2026-10-10 00:38:04,941 INFO    pipeline.decisions [reject:S3] Candy By Haier Premium Heat And Cool DC Inverter Air Conditioner White CSU 19HF | image is linked to a different page
+2026-10-10 00:38:05,147 INFO    pipeline.decisions [reject:S3] Candy By Haier Premium Heat And Cool DC Inverter Air Conditioner White CSU 19HF | image is linked to a different page
+2026-10-10 00:38:05,268 INFO    pipeline.decisions [reject:S3] Candy By Haier Premium Heat And Cool DC Inverter Air Conditioner White CSU 19HF | image is linked to a different page
+2026-10-10 00:38:05,345 INFO    pipeline.decisions [reject:S3] Candy By Haier Premium Heat And Cool DC Inverter Air Conditioner White CSU 19HF | image is linked to a different page
+2026-10-10 00:38:05,453 INFO    pipeline.decisions [reject:S3] Candy By Haier Premium Heat And Cool DC Inverter Air Conditioner White CSU 19HF | image is linked to a different page
+2026-10-10 00:38:05,459 INFO    pipeline.decisions [reject:S3] Candy By Haier Premium Heat And Cool DC Inverter Air Conditioner White CSU 19HF | image is linked to a different page
+2026-10-10 00:38:05,465 INFO    pipeline.decisions [reject:S3] Candy By Haier Premium Heat And Cool DC Inverter Air Conditioner White CSU 19HF | image is linked to a different page
+2026-10-10 00:38:05,468 INFO    pipeline.decisions [reject:S3] Candy By Haier Premium Heat And Cool DC Inverter Air Conditioner White CSU 19HF | image is linked to a different page
+2026-10-10 00:38:05,471 INFO    pipeline.decisions [reject:S3] Candy By Haier Premium Heat And Cool DC Inverter Air Conditioner White CSU 19HF | image is linked to a different page
+2026-10-10 00:38:05,473 INFO    pipeline           [row 2] fetching https://lahorelectronics.com/product/csu-19hf/
+2026-10-10 00:38:05,854 INFO    pipeline           [row 6] fetching https://dwphome.pk/product/gree-pular-t3-1-ton-split-ac-439994
+2026-10-10 00:38:32,486 INFO    pipeline           [accept] E-Comfort Pro KEC-1267S | sheet | embedded_json
+2026-10-10 00:38:32,532 INFO    pipeline           [row 1] fetching https://waqarelectronics.pk/products/kenwood-e-comfort-pro-kec-1267s-1-ton
+2026-10-10 00:38:34,317 INFO    pipeline           [accept] Inspire Pro T3 Inverter 1 Ton | sheet | gallery_container
+2026-10-10 00:38:37,683 INFO    pipeline           [accept] Mega T3 Pro 1 Ton | Inverter Split AC | Air Conditioners - Dawlance | sheet | gallery_container
+2026-10-10 00:38:41,441 INFO    pipeline           [accept] Dawlance Split AC Dual Pro T3 Inverter 15 | sheet | gallery_container
+2026-10-10 00:38:41,490 INFO    pipeline           [row 9] fetching https://pak-electronics.pk/product/dawlance-1-ton-inverter-split-ac-dual-pro-t3-15/
+2026-10-10 00:38:46,183 INFO    pipeline.decisions [reject:S1] Dawlance Split AC Dual Pro T3 Inverter 30 | page strength 0 - no model key found on the page
+2026-10-10 00:38:46,214 INFO    pipeline           [row 5] fetching https://umarelectronics.pk/product/dawlance-split-ac-dual-pro-t3-inverter-30/
+2026-10-10 00:38:46,972 INFO    pipeline.decisions [reject:S11.fetch] Dawlance Split AC Dual Pro T3 Inverter 30 | page https://umarelectronics.pk/product/dawlance-split-ac-dual-pro-t3-inverter-30/ returned HTTP 403
+2026-10-10 00:38:47,019 INFO    pipeline           [row 5] fetching https://www.surmawala.pk/products/dawlance-dual-pro-t3-inverter-30-ac-1-5-ton-heat-and-cool-amp-lock
+2026-10-10 00:38:49,093 INFO    pipeline           [accept] Haier HSU-13HFCP/023WDC(W)-Triple Inverter-Haier Pakistan | sheet | registry:haier
+2026-10-10 00:38:58,877 INFO    pipeline.decisions [reject:S8] Haier HSU-13HFCP/023WDC(W)-Triple Inverter-Haier Pakistan | too small 60x60 (need short>=180, long>=350)
+2026-10-10 00:38:59,715 INFO    pipeline           [accept] Mega T3 Pro 1 Ton | Inverter Split AC | Air Conditioners - Dawlance | sheet | gallery_container
+2026-10-10 00:38:59,903 INFO    pipeline           [accept] Inspire Pro T3 Inverter 1 Ton | sheet | gallery_container
+2026-10-10 00:39:00,962 INFO    pipeline           [row 4] fetching https://dwphome.pk/shop/ecostar/split-ac
+2026-10-10 00:39:06,226 INFO    pipeline.decisions [reject:S8] Haier HSU-13HFCP/023WDC(W)-Triple Inverter-Haier Pakistan | too small 60x60 (need short>=180, long>=350)
+2026-10-10 00:39:09,616 INFO    pipeline.decisions [reject:S7] E-Comfort Pro KEC-1267S | border ring is not a clean background
+2026-10-10 00:39:09,723 INFO    pipeline.decisions [reject:S10] E-Comfort Pro KEC-1267S | same file already queued for this product
+2026-10-10 00:39:09,848 INFO    pipeline.decisions [reject:S3] E-Comfort Pro KEC-1267S | image is linked to a different page
+2026-10-10 00:39:10,143 INFO    pipeline.decisions [reject:S2] E-Comfort Pro KEC-1267S | image sits inside a description/article region
+2026-10-10 00:39:10,203 INFO    pipeline           [row 1] fetching https://www.surmawala.pk/products/kenwood-1-ton-full-dc-inverter-split-air-conditioner-kec-1267s-comfort-pro-heat-and-cool-t3-compressor
+2026-10-10 00:39:11,847 INFO    pipeline           [accept] Inspire Pro T3 Inverter 1 Ton | sheet | gallery_container
+2026-10-10 00:39:11,987 INFO    pipeline           [accept] Mega T3 Pro 1 Ton | Inverter Split AC | Air Conditioners - Dawlance | sheet | gallery_container
+2026-10-10 00:39:12,381 INFO    pipeline           [stages] Inspire Pro T3 Inverter 1 Ton | 1 recognition: keys=[] brand=Dawlance -> 2 sheet pages: 1 tried, 0 rejected, 3 image(s) -> 3 fallback search: skipped (row already solved or disabled) -> 4 images: 3 accepted, 0 rejected -> 5 compose: 3 final set(s) on both templates -> 6 upload: 4 digimall / 4 alfamall URL(s) -> 7 status: ok
+2026-10-10 00:39:12,383 INFO    pipeline           [stages] Mega T3 Pro 1 Ton | Inverter Split AC | Air Conditioners - Dawlance | 1 recognition: keys=[] brand=Dawlance -> 2 sheet pages: 1 tried, 0 rejected, 3 image(s) -> 3 fallback search: skipped (row already solved or disabled) -> 4 images: 3 accepted, 0 rejected -> 5 compose: 3 final set(s) on both templates -> 6 upload: 4 digimall / 4 alfamall URL(s) -> 7 status: ok
+2026-10-10 00:39:12,385 INFO    pipeline           [row 13] start | Orient Megatron Titanium 12X Olive Black 1 Ton Inverter AC–T3 Tropical Wind Puff Heat & Cool 4D Air Throw | 3 sheet url(s)
+2026-10-10 00:39:12,383 INFO    pipeline           [row 12] start | Orient Split AC Hyper 18X Super White | 3 sheet url(s)
+2026-10-10 00:39:12,386 INFO    pipeline           [row 13] fallback search across retailer sources
+2026-10-10 00:39:12,388 INFO    pipeline           [row 12] fallback search across retailer sources
+2026-10-10 00:39:14,726 INFO    pipeline.sources   [search] www.orient.com.pk: sitemap 272 url(s), 0 match the model
+2026-10-10 00:39:15,284 INFO    pipeline.sources   [search] www.orient.com.pk: sitemap 272 url(s), 0 match the model
+2026-10-10 00:39:15,822 INFO    pipeline.decisions [reject:S8] Haier HSU-13HFCP/023WDC(W)-Triple Inverter-Haier Pakistan | too small 60x60 (need short>=180, long>=350)
+2026-10-10 00:39:20,512 INFO    pipeline           [accept] Midea Go Easy 18HRFNQC6 1.5 Ton DC Inverter AC | sheet | json_ld
+2026-10-10 00:39:20,596 INFO    pipeline.decisions [reject:S3] Midea Go Easy 18HRFNQC6 1.5 Ton DC Inverter AC | image is linked to a different page
+2026-10-10 00:39:20,598 INFO    pipeline.decisions [reject:S5] Midea Go Easy 18HRFNQC6 1.5 Ton DC Inverter AC | URL does not have an image file extension
+2026-10-10 00:39:20,600 INFO    pipeline           [row 0] fetching https://www.mabdullah.pk/products/midea-18hrfn1-qc6-1-5-ton-go-easy-t3-inverter-ac
+2026-10-10 00:39:20,603 INFO    pipeline           [row 13] fetching https://www.daraz.pk/products/orient-megatron-titanium-12x-olive-black-1-ton-inverter-act3-tropical-wind-puff-heat-cool-4d-air-throw-i891538318.html
+2026-10-10 00:39:22,151 INFO    pipeline           [row 12] fetching https://umarelectronics.pk/product/orient-split-ac-hyper-18x-super-white/
+2026-10-10 00:39:23,423 INFO    pipeline.decisions [reject:S11.fetch] Orient Split AC Hyper 18X Super White | page https://umarelectronics.pk/product/orient-split-ac-hyper-18x-super-white/ returned HTTP 403
+2026-10-10 00:39:23,499 INFO    pipeline           [row 12] fetching https://www.bijlibazar.com/orient-inverter-ac-1-5-ton-hyper-18x-t3-super/
+2026-10-10 00:39:24,233 INFO    pipeline.decisions [reject:S8] Haier HSU-13HFCP/023WDC(W)-Triple Inverter-Haier Pakistan | too small 60x60 (need short>=180, long>=350)
+2026-10-10 00:39:29,243 INFO    pipeline           [accept] GREE Pular T3 1 TON Split AC - GS-12PITH17G-T3 | sheet | json_ld
+2026-10-10 00:39:32,651 INFO    pipeline.decisions [reject:S8] Haier HSU-13HFCP/023WDC(W)-Triple Inverter-Haier Pakistan | too small 60x60 (need short>=180, long>=350)
+2026-10-10 00:39:41,499 INFO    pipeline           [accept] Candy By Haier Premium Heat And Cool DC Inverter Air Conditioner White CSU 19HF | sheet | gallery_container
+2026-10-10 00:39:41,520 INFO    pipeline.decisions [reject:S10] Haier HSU-13HFCP/023WDC(W)-Triple Inverter-Haier Pakistan | re-served copy of accepted image #1 (dHash 0 bits apart, correlation 1.0000)
+2026-10-10 00:39:41,869 INFO    pipeline           [accept] Dawlance Split AC Dual Pro T3 Inverter 15 | sheet | gallery_container
+2026-10-10 00:39:42,165 INFO    pipeline.decisions [reject:S3] Dawlance Split AC Dual Pro T3 Inverter 15 | image is linked to a different page
+2026-10-10 00:39:42,318 INFO    pipeline.decisions [reject:S3] Dawlance Split AC Dual Pro T3 Inverter 15 | image is linked to a different page
+2026-10-10 00:39:43,072 INFO    pipeline           [stages] Dawlance Split AC Dual Pro T3 Inverter 15 | 1 recognition: keys=[] brand=Dawlance -> 2 sheet pages: 3 tried, 1 rejected, 2 image(s) -> 3 fallback search: 0 candidate page(s) -> 4 images: 2 accepted, 4 rejected -> 5 compose: 2 final set(s) on both templates -> 6 upload: 3 digimall / 3 alfamall URL(s) -> 7 status: ok
+2026-10-10 00:39:43,180 INFO    pipeline           [row 14] start | LG 1.0 Ton Dual Inverter AC S4NWABJAF31 | 3 sheet url(s)
+2026-10-10 00:39:43,182 INFO    pipeline           [row 14] fallback search across retailer sources
+2026-10-10 00:39:44,850 INFO    pipeline           [accept] GREE Pular T3 1 TON Split AC - GS-12PITH17G-T3 | sheet | gallery_container
+2026-10-10 00:39:52,295 INFO    pipeline           [accept] GREE Pular T3 1 TON Split AC - GS-12PITH17G-T3 | sheet | gallery_container
+2026-10-10 00:39:52,847 INFO    pipeline           [stages] GREE Pular T3 1 TON Split AC - GS-12PITH17G-T3 | 1 recognition: keys=['GS-12PITH17G-T3'] brand=Gree -> 2 sheet pages: 1 tried, 0 rejected, 3 image(s) -> 3 fallback search: 6 candidate page(s) -> 4 images: 3 accepted, 0 rejected -> 5 compose: 3 final set(s) on both templates -> 6 upload: 4 digimall / 4 alfamall URL(s) -> 7 status: ok
+2026-10-10 00:39:52,925 INFO    pipeline           [row 15] start | Midea 12HRFN1 QC6 1 Ton GO EASY T3 Inverter AC | 3 sheet url(s)
+2026-10-10 00:39:52,957 INFO    pipeline           [row 15] fetching https://mideapakistan.store/products/midea-go-easy
+2026-10-10 00:39:57,335 INFO    pipeline           [accept] Haier HSU-13HFCP/023WDC(W)-Triple Inverter-Haier Pakistan | sheet | registry:haier
+2026-10-10 00:39:59,537 INFO    pipeline           [row 14] fetching https://pakref.com/shop/air-conditioners/full-dc-inverter-ac/lg-1-ton-dual-cool-inverter-ac-i12cgh/
+2026-10-10 00:40:01,849 INFO    pipeline           [accept] Candy By Haier Premium Heat And Cool DC Inverter Air Conditioner White CSU 19HF | sheet | gallery_container
+2026-10-10 00:40:08,427 INFO    pipeline           [accept] Orient Megatron Titanium 12X Olive Black 1 Ton Inverter AC–T3 Tropical Wind Puff Heat & Cool 4D Air Throw | sheet | json_ld
+2026-10-10 00:40:08,817 INFO    pipeline.decisions [reject:S3] Orient Megatron Titanium 12X Olive Black 1 Ton Inverter AC–T3 Tropical Wind Puff Heat & Cool 4D Air Throw | image is linked to a different page
+2026-10-10 00:40:08,910 INFO    pipeline.decisions [reject:S1] Midea 12HRFN1 QC6 1 Ton GO EASY T3 Inverter AC | page strength 0 - no model key found on the page
+2026-10-10 00:40:08,972 INFO    pipeline           [row 15] fetching https://www.mabdullah.pk/products/midea-12hrfn1-qc6-1-ton-go-easy-t3-inverter-ac
+2026-10-10 00:40:09,037 INFO    pipeline.decisions [reject:S3] Orient Megatron Titanium 12X Olive Black 1 Ton Inverter AC–T3 Tropical Wind Puff Heat & Cool 4D Air Throw | image is linked to a different page
+2026-10-10 00:40:09,100 INFO    pipeline.decisions [reject:S3] Orient Megatron Titanium 12X Olive Black 1 Ton Inverter AC–T3 Tropical Wind Puff Heat & Cool 4D Air Throw | image is linked to a different page
+2026-10-10 00:40:09,236 INFO    pipeline.decisions [reject:S3] Orient Megatron Titanium 12X Olive Black 1 Ton Inverter AC–T3 Tropical Wind Puff Heat & Cool 4D Air Throw | image is linked to a different page
+2026-10-10 00:40:09,439 INFO    pipeline.decisions [reject:S3] Orient Megatron Titanium 12X Olive Black 1 Ton Inverter AC–T3 Tropical Wind Puff Heat & Cool 4D Air Throw | image is linked to a different page
+2026-10-10 00:40:09,998 INFO    pipeline.decisions [reject:S3] Orient Megatron Titanium 12X Olive Black 1 Ton Inverter AC–T3 Tropical Wind Puff Heat & Cool 4D Air Throw | image is linked to a different page
+2026-10-10 00:40:10,599 INFO    pipeline.decisions [reject:S3] Orient Megatron Titanium 12X Olive Black 1 Ton Inverter AC–T3 Tropical Wind Puff Heat & Cool 4D Air Throw | image is linked to a different page
+2026-10-10 00:40:10,987 INFO    pipeline.decisions [reject:S3] Orient Megatron Titanium 12X Olive Black 1 Ton Inverter AC–T3 Tropical Wind Puff Heat & Cool 4D Air Throw | image is linked to a different page
+2026-10-10 00:40:11,221 INFO    pipeline.decisions [reject:S3] Orient Megatron Titanium 12X Olive Black 1 Ton Inverter AC–T3 Tropical Wind Puff Heat & Cool 4D Air Throw | image is linked to a different page
+2026-10-10 00:40:11,745 INFO    pipeline.decisions [reject:S3] Orient Megatron Titanium 12X Olive Black 1 Ton Inverter AC–T3 Tropical Wind Puff Heat & Cool 4D Air Throw | image is linked to a different page
+2026-10-10 00:40:11,899 INFO    pipeline           [row 13] fetching https://www.aysonline.pk/orient-titanium-12x-1-ton-inverter-split-air-conditioner-t3-compressor/
+2026-10-10 00:40:13,808 INFO    pipeline           [accept] Midea 1.5 Ton Xtreme Plus Inverter AC MSEZ2C-18HRFN1 | sheet | json_ld
+2026-10-10 00:40:17,786 INFO    pipeline           [accept] Midea 2 Ton 24HRFN1-QC6 GO EASY T3 Inverter AC | sheet | json_ld
+2026-10-10 00:40:17,873 INFO    pipeline           [accept] Haier HSU-13HFCP/023WDC(W)-Triple Inverter-Haier Pakistan | sheet | registry:haier
+2026-10-10 00:40:17,894 INFO    pipeline           [stages] Haier HSU-13HFCP/023WDC(W)-Triple Inverter-Haier Pakistan | 1 recognition: keys=['HSU-13HFCP/023WDC-Triple'] brand=Haier -> 2 sheet pages: 1 tried, 0 rejected, 3 image(s) -> 3 fallback search: skipped (row already solved or disabled) -> 4 images: 3 accepted, 6 rejected -> 5 compose: 3 final set(s) on both templates -> 6 upload: 4 digimall / 4 alfamall URL(s) -> 7 status: ok
+2026-10-10 00:40:17,895 INFO    pipeline           [row 16] start | Haier Super T3 Pro Inverter HSU-13HFS/013WDC(S)-T3 Pro | 3 sheet url(s)
+2026-10-10 00:40:17,902 INFO    pipeline           [row 16] fetching https://www.haier.com/pk/air-conditioners/hsu-13hfs013wdc-s--t3pro.shtml
+2026-10-10 00:40:32,439 INFO    pipeline           [accept] Candy By Haier Premium Heat And Cool DC Inverter Air Conditioner White CSU 19HF | sheet | gallery_container
+2026-10-10 00:40:33,263 INFO    pipeline           [stages] Candy By Haier Premium Heat And Cool DC Inverter Air Conditioner White CSU 19HF | 1 recognition: keys=['19HF'] brand=Candy -> 2 sheet pages: 2 tried, 0 rejected, 3 image(s) -> 3 fallback search: 6 candidate page(s) -> 4 images: 3 accepted, 11 rejected -> 5 compose: 3 final set(s) on both templates -> 6 upload: 4 digimall / 4 alfamall URL(s) -> 7 status: ok
+2026-10-10 00:40:33,297 INFO    pipeline           [row 17] start | Hitachi Wall Mounted Air Conditioner RAK-AJ24PHAM / RAC-AJ24PHAM 2 Ton (Cool Only) | 2 sheet url(s)
+2026-10-10 00:40:33,360 INFO    pipeline           [row 17] fallback search across retailer sources
+2026-10-10 00:40:37,568 INFO    pipeline           [accept] Dawlance Split AC Dual Pro T3 Inverter 30 | sheet | shopify_json
+2026-10-10 00:40:37,599 INFO    pipeline.decisions [reject:S5] Dawlance Split AC Dual Pro T3 Inverter 30 | image filename contains 'logo' (site branding)
+2026-10-10 00:40:37,635 INFO    pipeline.decisions [reject:S3] Dawlance Split AC Dual Pro T3 Inverter 30 | image is linked to a different page
+2026-10-10 00:40:37,676 INFO    pipeline           [row 5] fallback search across retailer sources
+2026-10-10 00:40:38,206 INFO    pipeline           [stages] Dawlance Split AC Dual Pro T3 Inverter 30 | 1 recognition: keys=[] brand=Dawlance -> 2 sheet pages: 3 tried, 2 rejected, 1 image(s) -> 3 fallback search: 0 candidate page(s) -> 4 images: 1 accepted, 4 rejected -> 5 compose: 1 final set(s) on both templates -> 6 upload: 2 digimall / 2 alfamall URL(s) -> 7 status: partial
+2026-10-10 00:40:38,238 INFO    pipeline           [row 18] start | QG 12X Aura White T3+ | Orient Electronics Pakistan | 3 sheet url(s)
+2026-10-10 00:40:38,252 INFO    pipeline           [row 18] fetching https://www.orient.com.pk/products/qg-12x-aura-white-t3-plus.html
+2026-10-10 00:40:42,812 INFO    pipeline           [accept] Midea 1.5 Ton Xtreme Plus Inverter AC MSEZ2C-18HRFN1 | sheet | json_ld
+2026-10-10 00:40:51,799 INFO    pipeline           [accept] Midea 2 Ton 24HRFN1-QC6 GO EASY T3 Inverter AC | sheet | json_ld
+2026-10-10 00:41:03,210 INFO    pipeline           [accept] Midea 1.5 Ton Xtreme Plus Inverter AC MSEZ2C-18HRFN1 | sheet | json_ld
+2026-10-10 00:41:04,007 INFO    pipeline           [stages] Midea 1.5 Ton Xtreme Plus Inverter AC MSEZ2C-18HRFN1 | 1 recognition: keys=['MSEZ2C-18HRFN1'] brand=Midea -> 2 sheet pages: 3 tried, 1 rejected, 3 image(s) -> 3 fallback search: skipped (row already solved or disabled) -> 4 images: 3 accepted, 1 rejected -> 5 compose: 3 final set(s) on both templates -> 6 upload: 4 digimall / 4 alfamall URL(s) -> 7 status: ok
+2026-10-10 00:41:04,037 INFO    pipeline           [row 19] start | GREE Charmo Series 1.5 TON (Fixed Speed) Split AC - GS-18CM12 | 3 sheet url(s)
+2026-10-10 00:41:04,100 INFO    pipeline           [row 19] fallback search across retailer sources
+2026-10-10 00:41:22,152 INFO    pipeline           [accept] Midea 2 Ton 24HRFN1-QC6 GO EASY T3 Inverter AC | sheet | json_ld
+2026-10-10 00:41:22,449 INFO    pipeline.decisions [reject:S7] E-Comfort Pro KEC-1267S | border ring is not a clean background
+2026-10-10 00:41:22,653 INFO    pipeline.decisions [reject:S5] E-Comfort Pro KEC-1267S | image filename contains 'logo' (site branding)
+2026-10-10 00:41:22,807 INFO    pipeline.decisions [reject:S3] E-Comfort Pro KEC-1267S | image is linked to a different page
+2026-10-10 00:41:22,886 INFO    pipeline           [row 1] fallback search across retailer sources
+2026-10-10 00:41:22,886 INFO    pipeline           [stages] Midea 2 Ton 24HRFN1-QC6 GO EASY T3 Inverter AC | 1 recognition: keys=['24HRFN1-QC6'] brand=Midea -> 2 sheet pages: 2 tried, 1 rejected, 3 image(s) -> 3 fallback search: skipped (row already solved or disabled) -> 4 images: 3 accepted, 1 rejected -> 5 compose: 3 final set(s) on both templates -> 6 upload: 4 digimall / 4 alfamall URL(s) -> 7 status: ok
+2026-10-10 00:41:23,011 INFO    pipeline           [row 20] start | LG 1.5 Ton Dual Inverter AC S4NWAHKL31 | 3 sheet url(s)
+2026-10-10 00:41:23,026 INFO    pipeline           [row 20] fallback search across retailer sources
+2026-10-10 00:41:26,852 INFO    pipeline.decisions [reject:S1] Midea Go Easy 18HRFNQC6 1.5 Ton DC Inverter AC | page strength 0 - no model key found on the page
+2026-10-10 00:41:26,854 INFO    pipeline           [row 0] fallback search across retailer sources
+2026-10-10 00:41:28,303 INFO    pipeline           [accept] QG 12X Aura White T3+ | Orient Electronics Pakistan | sheet | json_ld
+2026-10-10 00:41:28,430 INFO    pipeline.decisions [reject:S3] QG 12X Aura White T3+ | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:41:28,616 INFO    pipeline.decisions [reject:S3] QG 12X Aura White T3+ | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:41:28,849 INFO    pipeline.decisions [reject:S3] QG 12X Aura White T3+ | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:41:29,064 INFO    pipeline.decisions [reject:S3] QG 12X Aura White T3+ | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:41:29,207 INFO    pipeline.decisions [reject:S3] QG 12X Aura White T3+ | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:41:29,331 INFO    pipeline.decisions [reject:S3] QG 12X Aura White T3+ | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:41:29,366 INFO    pipeline.decisions [reject:S3] QG 12X Aura White T3+ | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:41:29,367 INFO    pipeline           [row 18] fetching https://www.mabdullah.pk/products/orient-t3-inverter-qg-12x-aux-white-r410a-air-conditioner
+2026-10-10 00:41:32,955 INFO    pipeline           [accept] LG 1.0 Ton Dual Inverter AC S4NWABJAF31 | sheet | json_ld
+2026-10-10 00:41:34,449 INFO    pipeline           [accept] Haier Super T3 Pro Inverter HSU-13HFS/013WDC(S)-T3 Pro | sheet | registry:haier
+2026-10-10 00:41:38,547 INFO    pipeline           [row 17] fetching https://airextrading.com.pk/rak-aj24pham/
+2026-10-10 00:41:40,538 INFO    pipeline           [row 20] fetching https://pakref.com/shop/air-conditioners/full-dc-inverter-ac/lg-1-5-ton-dual-inverter-ac-i18cgh/
+2026-10-10 00:41:43,159 INFO    pipeline.decisions [reject:S8] Haier Super T3 Pro Inverter HSU-13HFS/013WDC(S)-T3 Pro | too small 60x60 (need short>=180, long>=350)
+2026-10-10 00:41:44,871 INFO    pipeline           [stages] Midea Go Easy 18HRFNQC6 1.5 Ton DC Inverter AC | 1 recognition: keys=['18HRFNQC6'] brand=Midea -> 2 sheet pages: 3 tried, 2 rejected, 1 image(s) -> 3 fallback search: 0 candidate page(s) -> 4 images: 1 accepted, 4 rejected -> 5 compose: 1 final set(s) on both templates -> 6 upload: 2 digimall / 2 alfamall URL(s) -> 7 status: partial
+2026-10-10 00:41:44,934 INFO    pipeline           [row 21] start | LG 2 Ton Dual Cool Inverter AC I24CGH Price in Pakistan - S4UWBDK2F31 | 2 sheet url(s)
+2026-10-10 00:41:44,998 INFO    pipeline           [row 21] fallback search across retailer sources
+2026-10-10 00:41:45,573 INFO    pipeline           [accept] Orient Split AC Hyper 18X Super White | sheet | json_ld
+2026-10-10 00:41:45,715 INFO    pipeline.decisions [reject:S5] Orient Split AC Hyper 18X Super White | image filename contains 'logo' (site branding)
+2026-10-10 00:41:45,779 INFO    pipeline.decisions [reject:S3] Orient Split AC Hyper 18X Super White | image is linked to a different page
+2026-10-10 00:41:45,919 INFO    pipeline.decisions [reject:S3] Orient Split AC Hyper 18X Super White | image is linked to a different page
+2026-10-10 00:41:46,057 INFO    pipeline           [row 12] fetching https://selectronics.com.pk/product/orient-super-1-5-ton-dc-inverter-air-conditioner-t3-18g-eva
+2026-10-10 00:41:46,089 INFO    pipeline           [accept] LG 1.0 Ton Dual Inverter AC S4NWABJAF31 | sheet | gallery_container
+2026-10-10 00:41:46,943 INFO    pipeline.decisions [reject:S13.fetch] Midea 12HRFN1 QC6 1 Ton GO EASY T3 Inverter AC | image https://mabdullah.pk/cdn/shop/files/Midea-Xtreme-Plus-1-Ton-Inverter-AC-MSEZ2B-12HRFN1.webp returned HTTP 404
+2026-10-10 00:41:49,628 INFO    pipeline.decisions [reject:S13.fetch] Midea 12HRFN1 QC6 1 Ton GO EASY T3 Inverter AC | image https://mabdullah.pk/cdn/shop/files/Midea-Xtreme-Plus-1-Ton-Inverter-AC-MSEZ2B-12HRFN1-1.webp returned HTTP 404
+2026-10-10 00:41:49,719 INFO    pipeline           [row 15] fetching https://alfamall.com/midea-ac-1-ton-inverter-go-easy-12hrfn-t3-compressor-latest-model-%7C-official-warranty-%7C-free-installation-in-major-cities-by-midea-0-markup-et
+2026-10-10 00:41:51,513 INFO    pipeline.decisions [reject:S8] Haier Super T3 Pro Inverter HSU-13HFS/013WDC(S)-T3 Pro | too small 60x60 (need short>=180, long>=350)
+2026-10-10 00:42:02,732 INFO    pipeline           [row 1] fetching https://shandaarbuy.pk/products/kenwood-kec-1267s-e-comfort-pro-1-ton-inverter-split-ac?_pos=1&_psq=KEC-1267S&_psid=21007ffee&_ss=e
+2026-10-10 00:42:02,763 INFO    pipeline           [row 19] fetching https://dwphome.pk/product/gree-charmo-series-1-5-ton-fixed-speed-split-ac-441552
+2026-10-10 00:42:02,932 INFO    pipeline.decisions [reject:S8] Haier Super T3 Pro Inverter HSU-13HFS/013WDC(S)-T3 Pro | too small 59x60 (need short>=180, long>=350)
+2026-10-10 00:42:12,084 INFO    pipeline.decisions [reject:S8] Haier Super T3 Pro Inverter HSU-13HFS/013WDC(S)-T3 Pro | too small 60x60 (need short>=180, long>=350)
+2026-10-10 00:42:16,352 INFO    pipeline           [accept] LG 1.0 Ton Dual Inverter AC S4NWABJAF31 | sheet | gallery_container
+2026-10-10 00:42:17,319 INFO    pipeline           [stages] LG 1.0 Ton Dual Inverter AC S4NWABJAF31 | 1 recognition: keys=['S4NWABJAF31'] brand=LG -> 2 sheet pages: 1 tried, 0 rejected, 3 image(s) -> 3 fallback search: 4 candidate page(s) -> 4 images: 3 accepted, 0 rejected -> 5 compose: 3 final set(s) on both templates -> 6 upload: 4 digimall / 4 alfamall URL(s) -> 7 status: ok
+2026-10-10 00:42:17,335 INFO    pipeline           [row 22] start | Orient Megatron Infinity 12X eComfort DC Inverter AC - 1 Ton | 2 sheet url(s)
+2026-10-10 00:42:17,336 INFO    pipeline           [row 22] fallback search across retailer sources
+2026-10-10 00:42:17,605 INFO    pipeline.sources   [search] www.orient.com.pk: sitemap 272 url(s), 0 match the model
+2026-10-10 00:42:21,198 INFO    pipeline.decisions [reject:S8] Haier Super T3 Pro Inverter HSU-13HFS/013WDC(S)-T3 Pro | too small 60x60 (need short>=180, long>=350)
+2026-10-10 00:42:25,945 INFO    pipeline           [row 21] fetching https://pakref.com/shop/air-conditioners/full-dc-inverter-ac/lg-2-ton-dual-cool-inverter-ac-i24cgh/
+2026-10-10 00:42:26,147 INFO    pipeline           [row 22] fetching https://www.aysonline.pk/orient-megatron-infinity-12x-ecomfort-dc-inverter-ac-1ton-t3-compressor/
+2026-10-10 00:42:28,919 INFO    pipeline           [row 4] fetching https://subhanelectronics.pk/product/ecostar-es-18em02ws-emperor-series-1-5-ton-dc-inverter-split-ac/
+2026-10-10 00:42:29,113 INFO    pipeline.decisions [reject:S1] Midea 12HRFN1 QC6 1 Ton GO EASY T3 Inverter AC | page strength 0 - no model key found on the page
+2026-10-10 00:42:29,116 INFO    pipeline           [row 15] fallback search across retailer sources
+2026-10-10 00:42:32,067 INFO    pipeline.decisions [reject:S10] Haier Super T3 Pro Inverter HSU-13HFS/013WDC(S)-T3 Pro | re-served copy of accepted image #1 (dHash 0 bits apart, correlation 1.0000)
+2026-10-10 00:42:33,750 INFO    pipeline           [row 13] fetching https://www.bijlibazar.com/orient-inverter-split-ac-1-ton-megatron-titanium-12x-t3-olive-black/
+2026-10-10 00:42:38,290 INFO    pipeline           [row 15] fetching https://shandaarbuy.pk/products/midea-12hrfn1-qrdow-1-ton-ceiling-dc-inverter-cassette?_pos=1&_psq=12HRFN1&_psid=bf67557ee&_ss=e
+2026-10-10 00:42:40,046 INFO    pipeline.decisions [reject:S7] LG 1.5 Ton Dual Inverter AC S4NWAHKL31 | border ring is not a clean background
+2026-10-10 00:42:41,154 INFO    pipeline           [row 17] fetching https://yasirelectronics.com/product/hitachi-wall-mounted-air-conditioner-rak-aj24pham-rac-aj24pham-2-ton-cool-only/
+2026-10-10 00:42:42,234 INFO    pipeline.decisions [reject:S11.fetch] Hitachi Wall Mounted Air Conditioner RAK-AJ24PHAM / RAC-AJ24PHAM 2 Ton (Cool Only) | page https://yasirelectronics.com/product/hitachi-wall-mounted-air-conditioner-rak-aj24pham-rac-aj24pham-2-ton-cool-only/ returned HTTP 403
+2026-10-10 00:42:42,236 INFO    pipeline           [row 17] fetching https://hadielectronics.com.pk/product/hitachi-rak-aj24pham-rac-aj24pham-2-ton-non-inverter-wall-mounted-ac/
+2026-10-10 00:42:47,859 INFO    pipeline           [accept] Haier Super T3 Pro Inverter HSU-13HFS/013WDC(S)-T3 Pro | sheet | registry:haier
+2026-10-10 00:42:49,555 INFO    pipeline           [row 18] fetching https://japanelectronics.com.pk/products/orient-split-ac-inverter-1-0-ton-12x-aura-t3-white
+2026-10-10 00:43:00,374 INFO    pipeline           [accept] LG 1.5 Ton Dual Inverter AC S4NWAHKL31 | sheet | gallery_container
+2026-10-10 00:43:02,367 INFO    pipeline.decisions [reject:S7] GREE Charmo Series 1.5 TON (Fixed Speed) Split AC - GS-18CM12 | border ring is not a clean background
+2026-10-10 00:43:02,528 INFO    pipeline           [accept] Haier Super T3 Pro Inverter HSU-13HFS/013WDC(S)-T3 Pro | sheet | registry:haier
+2026-10-10 00:43:02,550 INFO    pipeline           [stages] Haier Super T3 Pro Inverter HSU-13HFS/013WDC(S)-T3 Pro | 1 recognition: keys=['HSU-13HFS/013WDC-T3'] brand=Haier -> 2 sheet pages: 1 tried, 0 rejected, 3 image(s) -> 3 fallback search: skipped (row already solved or disabled) -> 4 images: 3 accepted, 6 rejected -> 5 compose: 3 final set(s) on both templates -> 6 upload: 4 digimall / 4 alfamall URL(s) -> 7 status: ok
+2026-10-10 00:43:02,553 INFO    pipeline           [row 23] start | Pulse 19C Ultra White T3 | Orient Electronics Pakistan | 3 sheet url(s)
+2026-10-10 00:43:02,555 INFO    pipeline           [row 23] fetching https://www.orient.com.pk/products/pulse-19c-ultra-white-t3.html
+2026-10-10 00:43:18,804 INFO    pipeline           [accept] LG 1.5 Ton Dual Inverter AC S4NWAHKL31 | sheet | gallery_container
+2026-10-10 00:43:27,823 INFO    pipeline           [accept] Orient Split AC Hyper 18X Super White | sheet | json_ld
+2026-10-10 00:43:29,195 INFO    pipeline           [stages] Orient Split AC Hyper 18X Super White | 1 recognition: keys=['18X'] brand=Orient -> 2 sheet pages: 3 tried, 1 rejected, 2 image(s) -> 3 fallback search: 6 candidate page(s) -> 4 images: 2 accepted, 4 rejected -> 5 compose: 2 final set(s) on both templates -> 6 upload: 3 digimall / 3 alfamall URL(s) -> 7 status: ok
+2026-10-10 00:43:29,335 INFO    pipeline           [row 24] start | CS-UE18XKF-9, Split Air Conditioner - Panasonic | 3 sheet url(s)
+2026-10-10 00:43:29,414 INFO    pipeline           [row 24] fallback search across retailer sources
+2026-10-10 00:43:29,646 INFO    pipeline           [row 18] fallback search across retailer sources
+2026-10-10 00:43:29,926 INFO    pipeline           [accept] LG 2 Ton Dual Cool Inverter AC I24CGH Price in Pakistan - S4UWBDK2F31 | sheet | json_ld
+2026-10-10 00:43:30,156 INFO    pipeline.sources   [search] www.orient.com.pk: sitemap 272 url(s), 1 match the model
+2026-10-10 00:43:33,472 INFO    pipeline           [accept] GREE Charmo Series 1.5 TON (Fixed Speed) Split AC - GS-18CM12 | sheet | gallery_container
+2026-10-10 00:43:41,853 INFO    pipeline           [row 18] fetching https://www.surmawala.pk/products/crown-appliances-20-gallon-12x16-electric-plus-gas-geyser?_pos=1&_psq=12X&_psid=0253b721f&_ss=e
+2026-10-10 00:43:42,989 INFO    pipeline.decisions [reject:S4] E-Comfort Pro KEC-1267S | image URL belongs to another model
+2026-10-10 00:43:42,995 INFO    pipeline.decisions [reject:S3] E-Comfort Pro KEC-1267S | image is linked to a different page
+2026-10-10 00:43:42,996 INFO    pipeline           [row 1] fetching https://www.surmawala.pk/products/kenwood-1-ton-full-dc-inverter-split-air-conditioner-kec-1267s-comfort-pro-heat-and-cool-t3-compressor?_pos=1&_psq=KEC-1267S&_psid=4ebc874c2&_ss=e
+2026-10-10 00:43:43,642 INFO    pipeline           [accept] LG 1.5 Ton Dual Inverter AC S4NWAHKL31 | sheet | gallery_container
+2026-10-10 00:43:43,839 INFO    pipeline           [accept] Pulse 19C Ultra White T3 | Orient Electronics Pakistan | sheet | json_ld
+2026-10-10 00:43:44,000 INFO    pipeline.decisions [reject:S3] Pulse 19C Ultra White T3 | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:43:44,000 INFO    pipeline           [stages] LG 1.5 Ton Dual Inverter AC S4NWAHKL31 | 1 recognition: keys=['S4NWAHKL31'] brand=LG -> 2 sheet pages: 1 tried, 0 rejected, 3 image(s) -> 3 fallback search: 1 candidate page(s) -> 4 images: 3 accepted, 1 rejected -> 5 compose: 3 final set(s) on both templates -> 6 upload: 4 digimall / 4 alfamall URL(s) -> 7 status: ok
+2026-10-10 00:43:44,165 INFO    pipeline           [row 25] start | EcoStar ES-24AR02W-T3 2 Ton T3 Inverter AC - Prince Series | 3 sheet url(s)
+2026-10-10 00:43:44,180 INFO    pipeline           [row 25] fallback search across retailer sources
+2026-10-10 00:43:44,211 INFO    pipeline.decisions [reject:S3] Pulse 19C Ultra White T3 | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:43:44,413 INFO    pipeline.decisions [reject:S3] Pulse 19C Ultra White T3 | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:43:44,537 INFO    pipeline.decisions [reject:S3] Pulse 19C Ultra White T3 | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:43:44,586 INFO    pipeline.decisions [reject:S3] Pulse 19C Ultra White T3 | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:43:44,771 INFO    pipeline.decisions [reject:S3] Pulse 19C Ultra White T3 | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:43:44,819 INFO    pipeline.decisions [reject:S3] Pulse 19C Ultra White T3 | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:43:44,865 INFO    pipeline           [row 23] fetching https://www.orient.com.pk/air-conditioners.html
+2026-10-10 00:43:44,881 INFO    pipeline           [accept] LG 2 Ton Dual Cool Inverter AC I24CGH Price in Pakistan - S4UWBDK2F31 | sheet | gallery_container
+2026-10-10 00:43:47,587 INFO    pipeline           [accept] GREE Charmo Series 1.5 TON (Fixed Speed) Split AC - GS-18CM12 | sheet | gallery_container
+2026-10-10 00:43:47,591 INFO    pipeline.decisions [reject:S3] GREE Charmo Series 1.5 TON (Fixed Speed) Split AC - GS-18CM12 | image is linked to a different page
+2026-10-10 00:43:47,594 INFO    pipeline.decisions [reject:S3] GREE Charmo Series 1.5 TON (Fixed Speed) Split AC - GS-18CM12 | image is linked to a different page
+2026-10-10 00:43:47,597 INFO    pipeline.decisions [reject:S3] GREE Charmo Series 1.5 TON (Fixed Speed) Split AC - GS-18CM12 | image is linked to a different page
+2026-10-10 00:43:47,603 INFO    pipeline.decisions [reject:S3] GREE Charmo Series 1.5 TON (Fixed Speed) Split AC - GS-18CM12 | image is linked to a different page
+2026-10-10 00:43:47,610 INFO    pipeline.decisions [reject:S3] GREE Charmo Series 1.5 TON (Fixed Speed) Split AC - GS-18CM12 | image is linked to a different page
+2026-10-10 00:43:47,612 INFO    pipeline           [row 19] fetching https://www.hcsupermart.com/product/gree-ac-charmo-gs-18cm12-1-5-ton/
+2026-10-10 00:43:51,909 INFO    pipeline           [row 13] fetching https://shandaarbuy.pk/products/haier-2-ton-hsu-24hfab-grey-t3-series-split-ac?_pos=1&_psq=AC%E2%80%93T3&_psid=d3ac544ae&_ss=e
+2026-10-10 00:43:55,949 INFO    pipeline           [row 15] fetching https://www.surmawala.pk/products/midea-1-0-ton-inverter-extreme-ac-model-msagb-12hrfn1?_pos=1&_psq=12HRFN1&_psid=e992b44c2&_ss=e
+2026-10-10 00:43:58,016 INFO    pipeline           [accept] LG 2 Ton Dual Cool Inverter AC I24CGH Price in Pakistan - S4UWBDK2F31 | sheet | gallery_container
+2026-10-10 00:43:58,734 INFO    pipeline           [stages] LG 2 Ton Dual Cool Inverter AC I24CGH Price in Pakistan - S4UWBDK2F31 | 1 recognition: keys=['I24CGH', 'S4UWBDK2F31'] brand=LG -> 2 sheet pages: 1 tried, 0 rejected, 3 image(s) -> 3 fallback search: 2 candidate page(s) -> 4 images: 3 accepted, 0 rejected -> 5 compose: 3 final set(s) on both templates -> 6 upload: 4 digimall / 4 alfamall URL(s) -> 7 status: ok
+2026-10-10 00:43:58,736 INFO    pipeline           [row 26] start | EcoStar Duke Series ES‑18DU02 1.5 Ton Black Split AC | 3 sheet url(s)
+2026-10-10 00:43:58,746 INFO    pipeline           [row 26] fallback search across retailer sources
+2026-10-10 00:44:07,229 INFO    pipeline           [row 26] fetching https://gulfelectronics.pk/products/ecostar-duke-series-es-18du02-1-5-ton-black-split-ac
+2026-10-10 00:44:22,892 INFO    pipeline           [row 23] fetching https://newglacier.pk/product/orient-blaze-19c-glide-19c-pulse-19c-1-5-ton-19000-btu-dc-inverter-air-conditioners-smartron-plus-series/
+2026-10-10 00:44:26,944 INFO    pipeline           [row 24] fetching https://www.panasonic.com/mea/en/consumer/air-solutions/residential-air-conditioners/wall-type/cs-ue18xkf-9.html
+2026-10-10 00:44:41,248 INFO    pipeline.decisions [reject:S7] Orient Megatron Infinity 12X eComfort DC Inverter AC - 1 Ton | border ring is not a clean background
+2026-10-10 00:44:41,328 INFO    pipeline.decisions [reject:S5] Orient Megatron Infinity 12X eComfort DC Inverter AC - 1 Ton | bad keyword in image URL
+2026-10-10 00:44:41,344 INFO    pipeline           [row 22] fetching https://hadielectronics.com.pk/product/orient-infinity-18x-1-5-ton-inverter-split-ac-heat-cool-t3/
+2026-10-10 00:44:46,734 INFO    pipeline           [row 25] fetching https://www.aysonline.pk/ecostar-es-24ar02w-t3-2-ton-t3-inverter-ac/
+2026-10-10 00:44:48,164 INFO    pipeline           [row 17] fetching https://airextrading.com.pk/rak-aj24pham/
+2026-10-10 00:44:56,121 INFO    pipeline           [row 18] fetching https://www.surmawala.pk/products/crown-appliances-30-gallon-12x16-gas-geyser?_pos=2&_psq=12X&_psid=0253b721f&_ss=e
+2026-10-10 00:45:02,419 INFO    pipeline.decisions [reject:S1] GREE Charmo Series 1.5 TON (Fixed Speed) Split AC - GS-18CM12 | page strength 0 - no model key found on the page (page shows gs18cm12/gs18zith1w)
+2026-10-10 00:45:02,420 INFO    pipeline           [row 19] fetching https://izyanhome.com/products/gree-charmo-fixed-speed-series-cm12
+2026-10-10 00:45:03,375 INFO    pipeline           [accept] EcoStar ES-18EM02WS Emperor Series 1.5 Ton DC Inverter Split AC | sheet | json_ld
+2026-10-10 00:45:03,377 INFO    pipeline           [row 4] fetching https://www.aysonline.pk/ecostar-es-18em02ws-1.5-ton-inverter-split-air-conditioner-e28093-heat-and-cool/
+2026-10-10 00:45:04,158 INFO    pipeline           [row 23] fallback search across retailer sources
+2026-10-10 00:45:04,429 INFO    pipeline.sources   [search] www.orient.com.pk: sitemap 272 url(s), 3 match the model
+2026-10-10 00:45:11,180 INFO    pipeline           [row 23] fetching https://www.orient.com.pk/products/blaze-19c-ultra-golden-t3.html
+2026-10-10 00:45:13,034 INFO    pipeline.decisions [reject:S7] E-Comfort Pro KEC-1267S | border ring is not a clean background
+2026-10-10 00:45:13,038 INFO    pipeline.decisions [reject:S5] E-Comfort Pro KEC-1267S | image filename contains 'logo' (site branding)
+2026-10-10 00:45:13,109 INFO    pipeline.decisions [reject:S3] E-Comfort Pro KEC-1267S | image is linked to a different page
+2026-10-10 00:45:13,132 INFO    pipeline           [row 1] fetching https://jalalelectronics.com/products/kenwood-split-inverter-ac-1-0-ton-ecomfort-pro-t3-kec-1267s?_pos=1&_psq=KEC-1267S&_psid=a8781131d&_ss=e
+2026-10-10 00:45:13,140 INFO    pipeline.decisions [reject:S15] Orient Megatron Titanium 12X Olive Black 1 Ton Inverter AC–T3 Tropical Wind Puff Heat & Cool 4D Air Throw | fallback candidate rejected - no model key found on the page
+2026-10-10 00:45:13,141 INFO    pipeline           [row 13] fetching https://shandaarbuy.pk/products/haier-1-ton-hsu-13hfab-grey-t3-series-split-ac?_pos=2&_psq=AC%E2%80%93T3&_psid=d3ac544ae&_ss=e
+2026-10-10 00:45:20,073 INFO    pipeline           [row 15] fetching https://www.surmawala.pk/products/midea-titan-t3-1-0-ton-inverter-ac-msez1b-12hrfn1?_pos=2&_psq=12HRFN1&_psid=e992b44c2&_ss=e
+2026-10-10 00:45:22,431 INFO    pipeline.decisions [reject:S15] Pulse 19C Ultra White T3 | Orient Electronics Pakistan | fallback candidate rejected - page shows another colourway (title: white) - a different colour is a different product
+2026-10-10 00:45:22,434 INFO    pipeline           [row 23] fetching https://www.orient.com.pk/products/glide-19c-ultra-silver-t3.html
+2026-10-10 00:45:29,280 INFO    pipeline.decisions [reject:S15] Pulse 19C Ultra White T3 | Orient Electronics Pakistan | fallback candidate rejected - page shows another colourway (title: white) - a different colour is a different product
+2026-10-10 00:45:29,296 INFO    pipeline           [row 23] fetching https://www.surmawala.pk/products/orient-pulse-19c-1-5-ton-19000-btu-dc-inverter-air-conditioner-smartron-plus-series?_pos=1&_psq=19C&_psid=9d889609e&_ss=e
+2026-10-10 00:45:34,091 INFO    pipeline.decisions [reject:S5] CS-UE18XKF-9, Split Air Conditioner - Panasonic | URL does not have an image file extension
+2026-10-10 00:45:34,097 INFO    pipeline.decisions [reject:S5] CS-UE18XKF-9, Split Air Conditioner - Panasonic | URL does not have an image file extension
+2026-10-10 00:45:34,108 INFO    pipeline.decisions [reject:S3] CS-UE18XKF-9, Split Air Conditioner - Panasonic | image is linked to a different page
+2026-10-10 00:45:34,115 INFO    pipeline.decisions [reject:S3] CS-UE18XKF-9, Split Air Conditioner - Panasonic | image is linked to a different page
+2026-10-10 00:45:34,270 INFO    pipeline.decisions [reject:S3] CS-UE18XKF-9, Split Air Conditioner - Panasonic | image is linked to a different page
+2026-10-10 00:45:34,459 INFO    pipeline.decisions [reject:S3] CS-UE18XKF-9, Split Air Conditioner - Panasonic | image is linked to a different page
+2026-10-10 00:45:34,648 INFO    pipeline.decisions [reject:S3] CS-UE18XKF-9, Split Air Conditioner - Panasonic | image is linked to a different page
+2026-10-10 00:45:34,680 INFO    pipeline           [row 24] fetching https://japanelectronics.com.pk/products/panasonic-split-ac-inverter-1-5-ton-ue18xkf-9
+2026-10-10 00:45:40,711 INFO    pipeline.decisions [reject:S4] EcoStar Duke Series ES‑18DU02 1.5 Ton Black Split AC | image URL belongs to another model
+2026-10-10 00:45:40,716 INFO    pipeline.decisions [reject:S4] EcoStar Duke Series ES‑18DU02 1.5 Ton Black Split AC | image URL belongs to another model
+2026-10-10 00:45:40,721 INFO    pipeline.decisions [reject:S5] EcoStar Duke Series ES‑18DU02 1.5 Ton Black Split AC | bad keyword in image URL
+2026-10-10 00:45:40,770 INFO    pipeline.decisions [reject:S10] GREE Charmo Series 1.5 TON (Fixed Speed) Split AC - GS-18CM12 | re-served copy of accepted image #2 (dHash 0 bits apart, correlation 1.0000)
+2026-10-10 00:45:40,776 INFO    pipeline.decisions [reject:S5] GREE Charmo Series 1.5 TON (Fixed Speed) Split AC - GS-18CM12 | bad keyword in image URL
+2026-10-10 00:45:40,789 INFO    pipeline.decisions [reject:S2] GREE Charmo Series 1.5 TON (Fixed Speed) Split AC - GS-18CM12 | image sits inside a description/article region
+2026-10-10 00:45:40,794 INFO    pipeline.decisions [reject:S5] GREE Charmo Series 1.5 TON (Fixed Speed) Split AC - GS-18CM12 | bad keyword in image URL
+2026-10-10 00:45:40,797 INFO    pipeline.decisions [reject:S2] GREE Charmo Series 1.5 TON (Fixed Speed) Split AC - GS-18CM12 | image sits inside a description/article region
+2026-10-10 00:45:40,979 INFO    pipeline.decisions [reject:S2] GREE Charmo Series 1.5 TON (Fixed Speed) Split AC - GS-18CM12 | image sits inside a description/article region
+2026-10-10 00:45:41,570 INFO    pipeline           [stages] GREE Charmo Series 1.5 TON (Fixed Speed) Split AC - GS-18CM12 | 1 recognition: keys=['GS-18CM12'] brand=Gree -> 2 sheet pages: 3 tried, 1 rejected, 2 image(s) -> 3 fallback search: 3 candidate page(s) -> 4 images: 2 accepted, 13 rejected -> 5 compose: 2 final set(s) on both templates -> 6 upload: 3 digimall / 3 alfamall URL(s) -> 7 status: ok
+2026-10-10 00:45:41,571 INFO    pipeline           [row 27] start | Candy By Haier 0.8 Ton Heat And Cool DC Inverter Split Air Conditioner White CSU 10HF | 3 sheet url(s)
+2026-10-10 00:45:41,617 INFO    pipeline           [row 27] fallback search across retailer sources
+2026-10-10 00:45:42,473 INFO    pipeline.decisions [reject:S4] E-Comfort Pro KEC-1267S | image URL belongs to another model
+2026-10-10 00:45:42,519 INFO    pipeline.decisions [reject:S5] E-Comfort Pro KEC-1267S | URL does not have an image file extension
+2026-10-10 00:45:42,519 INFO    pipeline           [row 1] fetching https://electrociti.pk/products/kenwood-kee-1267s-comfort-pro-1-ton-inverter-ac?_pos=1&_psq=KEC+1267S&_psid=597b4a08e&_ss=e
+2026-10-10 00:45:44,435 INFO    pipeline           [row 27] fetching https://www.daraz.pk/products/candy-by-haier-08-ton-heat-and-cool-dc-inverter-split-air-conditioner-white-csu-10hf-model-energy-saving-eco-friendly-ac-i944636766.html
+2026-10-10 00:45:51,926 INFO    pipeline           [accept] Hitachi Wall Mounted Air Conditioner RAK-AJ24PHAM / RAC-AJ24PHAM 2 Ton (Cool Only) | sheet | embedded_json
+2026-10-10 00:45:51,937 INFO    pipeline.decisions [reject:S3] Hitachi Wall Mounted Air Conditioner RAK-AJ24PHAM / RAC-AJ24PHAM 2 Ton (Cool Only) | image is linked to a different page
+2026-10-10 00:45:51,972 INFO    pipeline           [stages] Hitachi Wall Mounted Air Conditioner RAK-AJ24PHAM / RAC-AJ24PHAM 2 Ton (Cool Only) | 1 recognition: keys=['RAK-AJ24PHAM', 'RAC-AJ24PHAM'] brand=Hitachi -> 2 sheet pages: 2 tried, 1 rejected, 0 image(s) -> 3 fallback search: 1 candidate page(s) -> 3b tolerated spelling used: https://airextrading.com.pk/rak-aj24pham/ -> 4 images: 1 accepted, 2 rejected -> 5 compose: 1 final set(s) on both templates -> 6 upload: 2 digimall / 2 alfamall URL(s) -> 7 status: partial
+2026-10-10 00:45:51,975 INFO    pipeline           [row 28] start | Haier Split AC Inverter 1.5 Ton Solar Hybrid-IV (OW)-T3 | 3 sheet url(s)
+2026-10-10 00:45:51,976 INFO    pipeline           [row 28] fetching https://www.haier.com/pk/air-conditioners/solarhybrid-iii-ow--t3.shtml
+2026-10-10 00:45:52,398 INFO    pipeline           [accept] EcoStar Duke Series ES‑18DU02 1.5 Ton Black Split AC | sheet | gallery_container
+2026-10-10 00:45:52,446 INFO    pipeline.decisions [reject:S5] EcoStar Duke Series ES‑18DU02 1.5 Ton Black Split AC | URL does not have an image file extension
+2026-10-10 00:45:52,556 INFO    pipeline.decisions [reject:S5] EcoStar Duke Series ES‑18DU02 1.5 Ton Black Split AC | URL does not have an image file extension
+2026-10-10 00:45:52,589 INFO    pipeline.decisions [reject:S5] EcoStar Duke Series ES‑18DU02 1.5 Ton Black Split AC | URL does not have an image file extension
+2026-10-10 00:45:52,620 INFO    pipeline           [row 26] fetching https://www.aysonline.pk/ecostar-es-18du02-wg-split-air-conditioner-1.5-ton-inverter-heat-and-cool/
+2026-10-10 00:45:59,018 INFO    pipeline.decisions [reject:S7] EcoStar ES-24AR02W-T3 2 Ton T3 Inverter AC - Prince Series | border ring is not a clean background
+2026-10-10 00:46:05,672 INFO    pipeline           [row 18] fetching https://www.surmawala.pk/products/crown-appliances-20-gallon-12x16-gas-geyser?_pos=3&_psq=12X&_psid=0253b721f&_ss=e
+2026-10-10 00:46:06,833 INFO    pipeline.decisions [reject:S1] CS-UE18XKF-9, Split Air Conditioner - Panasonic | page strength 0 - no model key found on the page
+2026-10-10 00:46:06,835 INFO    pipeline           [row 24] fetching https://bismillahelectronics.pk/products/panasonic-ac-1-5-ton-ue18xkf-9-inverter-copy
+2026-10-10 00:46:10,105 INFO    pipeline           [accept] EcoStar ES-24AR02W-T3 2 Ton T3 Inverter AC - Prince Series | sheet | gallery_container
+2026-10-10 00:46:10,113 INFO    pipeline           [row 25] fetching https://abpasha.pk/products/gree-2-ton-inverter-ac-es-24ar02w-nv02w-t3
+2026-10-10 00:46:18,124 INFO    pipeline           [row 22] fetching https://www.surmawala.pk/products/crown-appliances-20-gallon-12x16-electric-plus-gas-geyser?_pos=1&_psq=12X&_psid=0253b721f&_ss=e
+2026-10-10 00:46:18,955 INFO    pipeline.decisions [reject:S7] Candy By Haier 0.8 Ton Heat And Cool DC Inverter Split Air Conditioner White CSU 10HF | border ring is not a clean background
+2026-10-10 00:46:19,035 INFO    pipeline.decisions [reject:S3] Candy By Haier 0.8 Ton Heat And Cool DC Inverter Split Air Conditioner White CSU 10HF | image is linked to a different page
+2026-10-10 00:46:19,112 INFO    pipeline.decisions [reject:S3] Candy By Haier 0.8 Ton Heat And Cool DC Inverter Split Air Conditioner White CSU 10HF | image is linked to a different page
+2026-10-10 00:46:19,375 INFO    pipeline.decisions [reject:S3] Candy By Haier 0.8 Ton Heat And Cool DC Inverter Split Air Conditioner White CSU 10HF | image is linked to a different page
+2026-10-10 00:46:19,799 INFO    pipeline.decisions [reject:S3] Candy By Haier 0.8 Ton Heat And Cool DC Inverter Split Air Conditioner White CSU 10HF | image is linked to a different page
+2026-10-10 00:46:19,970 INFO    pipeline.decisions [reject:S3] Candy By Haier 0.8 Ton Heat And Cool DC Inverter Split Air Conditioner White CSU 10HF | image is linked to a different page
+2026-10-10 00:46:20,034 INFO    pipeline.decisions [reject:S3] Candy By Haier 0.8 Ton Heat And Cool DC Inverter Split Air Conditioner White CSU 10HF | image is linked to a different page
+2026-10-10 00:46:20,223 INFO    pipeline.decisions [reject:S3] Candy By Haier 0.8 Ton Heat And Cool DC Inverter Split Air Conditioner White CSU 10HF | image is linked to a different page
+2026-10-10 00:46:20,552 INFO    pipeline.decisions [reject:S3] Candy By Haier 0.8 Ton Heat And Cool DC Inverter Split Air Conditioner White CSU 10HF | image is linked to a different page
+2026-10-10 00:46:20,898 INFO    pipeline.decisions [reject:S3] Candy By Haier 0.8 Ton Heat And Cool DC Inverter Split Air Conditioner White CSU 10HF | image is linked to a different page
+2026-10-10 00:46:20,899 INFO    pipeline           [row 27] fetching https://lahorelectronics.com/product/csu-10hf/
+2026-10-10 00:46:24,088 INFO    pipeline           [row 15] fetching https://jalalelectronics.com/products/midea-1-0-ton-inverter-ac-ceiling-cassette-12hrfn1-qrd0w?_pos=1&_psq=12HRFN1&_psid=54c23c1ac&_ss=e
+2026-10-10 00:46:24,752 INFO    pipeline.decisions [reject:S10] E-Comfort Pro KEC-1267S | re-served copy of accepted image #1 (dHash 4 bits apart, correlation 0.9959)
+2026-10-10 00:46:25,048 INFO    pipeline.decisions [reject:S3] E-Comfort Pro KEC-1267S | image is linked to a different page
+2026-10-10 00:46:25,064 INFO    pipeline           [row 1] fetching https://electrociti.pk/products/kenwood-eeco-ultra-kee-1265s?_pos=2&_psq=KEC+1267S&_psid=597b4a08e&_ss=e
+2026-10-10 00:46:33,134 INFO    pipeline.decisions [reject:S15] Orient Megatron Titanium 12X Olive Black 1 Ton Inverter AC–T3 Tropical Wind Puff Heat & Cool 4D Air Throw | fallback candidate rejected - no model key found on the page
+2026-10-10 00:46:33,166 INFO    pipeline           [row 13] fetching https://shandaarbuy.pk/products/haier-1-5-ton-hsu-19hfab-grey-t3-series-split-ac?_pos=3&_psq=AC%E2%80%93T3&_psid=d3ac544ae&_ss=e
+2026-10-10 00:46:34,758 INFO    pipeline           [row 4] fetching https://electrociti.pk/products/ecostar-1-5-ton-inv-ac-es-18em02-ws?_pos=1&_psq=ES+18EM02WS&_psid=18aec1257&_ss=e
+2026-10-10 00:46:35,832 INFO    pipeline.decisions [reject:S1] CS-UE18XKF-9, Split Air Conditioner - Panasonic | page strength 0 - no model key found on the page
+2026-10-10 00:46:35,834 INFO    pipeline           [row 24] fetching https://www.surmawala.pk/products/panasonic-1-5-ton-inverter-ac-cs-ue18wkf-9?_pos=1&_psq=CS+UE18XKF+9&_psid=3d677ce79&_ss=e
+2026-10-10 00:46:39,392 INFO    pipeline           [accept] Haier Split AC Inverter 1.5 Ton Solar Hybrid-IV (OW)-T3 | sheet | registry:haier
+2026-10-10 00:46:41,962 INFO    pipeline           [row 23] fetching https://friendshome.pk/products/zojirushi-themal-carafe-model-bhs-19sb?_pos=1&_psq=19C&_psid=bbdd744f2&_ss=e
+2026-10-10 00:46:49,614 INFO    pipeline.decisions [reject:S8] Haier Split AC Inverter 1.5 Ton Solar Hybrid-IV (OW)-T3 | too small 56x60 (need short>=180, long>=350)
+2026-10-10 00:46:59,206 INFO    pipeline.decisions [reject:S8] Haier Split AC Inverter 1.5 Ton Solar Hybrid-IV (OW)-T3 | too small 52x60 (need short>=180, long>=350)
+2026-10-10 00:46:59,992 INFO    pipeline           [row 1] fetching https://electrociti.pk/products/kenwood-esmart-platinum-kes-1261s?_pos=3&_psq=KEC+1267S&_psid=597b4a08e&_ss=e
+2026-10-10 00:47:02,671 INFO    pipeline           [row 15] fetching https://jalalelectronics.com/products/midea-split-ac-inverter-1-0ton-msez2b-12hrfn1-white-xtreme-plus-t3-r410-hea?_pos=2&_psq=12HRFN1&_psid=54c23c1ac&_ss=e
+2026-10-10 00:47:03,630 INFO    pipeline           [row 4] fetching https://www.alfatah.com.pk/product/ecostar-1-5-ton-wall-mounted-inverter-air-conditioner-es-18em02ws-sa-plus/
+2026-10-10 00:47:04,535 INFO    pipeline.decisions [reject:S15.fetch] EcoStar ES-18EM02WS Emperor Series 1.5 Ton DC Inverter Split AC | page https://www.alfatah.com.pk/product/ecostar-1-5-ton-wall-mounted-inverter-air-conditioner-es-18em02ws-sa-plus/ returned HTTP 403
+2026-10-10 00:47:04,968 INFO    pipeline           [stages] EcoStar ES-18EM02WS Emperor Series 1.5 Ton DC Inverter Split AC | 1 recognition: keys=['ES-18EM02WS'] brand=EcoStar -> 2 sheet pages: 3 tried, 0 rejected, 1 image(s) -> 3 fallback search: 2 candidate page(s) -> 4 images: 1 accepted, 1 rejected -> 5 compose: 1 final set(s) on both templates -> 6 upload: 2 digimall / 2 alfamall URL(s) -> 7 status: partial
+2026-10-10 00:47:05,001 INFO    pipeline           [row 29] start | HAIER HSU-20HFT -T3+ (OW) 1.5Ton Heat & Cool DC Inverter Air Conditioner Off White | 2 sheet url(s)
+2026-10-10 00:47:05,016 INFO    pipeline           [row 29] fallback search across retailer sources
+2026-10-10 00:47:08,109 INFO    pipeline.sources   [search] www.haier.com: sitemap 1102 url(s), 4 match the model
+2026-10-10 00:47:08,269 INFO    pipeline.decisions [reject:S8] Haier Split AC Inverter 1.5 Ton Solar Hybrid-IV (OW)-T3 | too small 56x60 (need short>=180, long>=350)
+2026-10-10 00:47:12,035 INFO    pipeline           [row 29] fetching https://www.haier.com/pk/air-conditioners/hsu-20hj023wdc-g--t3.shtml
+2026-10-10 00:47:17,630 INFO    pipeline           [row 25] fetching https://www.hcsupermart.com/product/ecostar-novo-max-t3-ac-price/
+2026-10-10 00:47:18,267 INFO    pipeline.decisions [reject:S8] Haier Split AC Inverter 1.5 Ton Solar Hybrid-IV (OW)-T3 | too small 56x60 (need short>=180, long>=350)
+2026-10-10 00:47:20,714 INFO    pipeline           [row 23] fetching https://jalalelectronics.com/products/haier-deep-freezer-hdf-545dd-19cuft-full-freezer?_pos=1&_psq=19C&_psid=32d1b8471&_ss=e
+2026-10-10 00:47:26,727 INFO    pipeline.decisions [reject:S8] Haier Split AC Inverter 1.5 Ton Solar Hybrid-IV (OW)-T3 | too small 60x60 (need short>=180, long>=350)
+2026-10-10 00:47:28,970 INFO    pipeline           [row 18] fetching https://friendshome.pk/products/orient-1-0-ton-ultron-hyper-ecomfort-dc-inverter-ac-model-12x-hyper-sw?_pos=1&_psq=12X&_psid=b48b2dc5b&_ss=e
+2026-10-10 00:47:34,129 INFO    pipeline           [row 22] fetching https://www.surmawala.pk/products/crown-appliances-30-gallon-12x16-gas-geyser?_pos=2&_psq=12X&_psid=0253b721f&_ss=e
+2026-10-10 00:47:35,558 INFO    pipeline.decisions [reject:S8] Haier Split AC Inverter 1.5 Ton Solar Hybrid-IV (OW)-T3 | too small 60x60 (need short>=180, long>=350)
+2026-10-10 00:47:37,129 INFO    pipeline.decisions [reject:S1] EcoStar Duke Series ES‑18DU02 1.5 Ton Black Split AC | page strength 0 - page shows another colourway (title: black) - a different colour is a different product
+2026-10-10 00:47:37,131 INFO    pipeline           [row 26] fetching https://alizainabelectronics.com/products/ecostar-es-18du02-duke-series-1-5-ton-inverter-ac
+2026-10-10 00:47:37,141 INFO    pipeline           [accept] Candy By Haier 0.8 Ton Heat And Cool DC Inverter Split Air Conditioner White CSU 10HF | sheet | gallery_container
+2026-10-10 00:47:38,717 INFO    pipeline           [stages] E-Comfort Pro KEC-1267S | 1 recognition: keys=['KEC-1267S'] brand=Kenwood -> 2 sheet pages: 3 tried, 0 rejected, 1 image(s) -> 3 fallback search: 6 candidate page(s) -> 4 images: 1 accepted, 16 rejected -> 5 compose: 1 final set(s) on both templates -> 6 upload: 2 digimall / 2 alfamall URL(s) -> 7 status: partial
+2026-10-10 00:47:38,779 INFO    pipeline           [row 30] start | Frost 18W Classic White | Orient Electronics Pakistan | 3 sheet url(s)
+2026-10-10 00:47:38,780 INFO    pipeline           [row 30] fetching https://www.orient.com.pk/products/frost-18w-classic-white.html
+2026-10-10 00:47:40,773 INFO    pipeline.decisions [reject:S10] Haier Split AC Inverter 1.5 Ton Solar Hybrid-IV (OW)-T3 | re-served copy of accepted image #1 (dHash 0 bits apart, correlation 1.0000)
+2026-10-10 00:47:41,849 INFO    pipeline           [row 15] fetching https://jalalelectronics.com/products/midea-split-ac-inverter-1-0ton-msez2b-12hrfn1-grey-xtreme-plus-t3-r410-h-c?_pos=3&_psq=12HRFN1&_psid=54c23c1ac&_ss=e
+2026-10-10 00:47:50,440 INFO    pipeline.decisions [reject:S15] CS-UE18XKF-9, Split Air Conditioner - Panasonic | fallback candidate rejected - no model key found on the page
+2026-10-10 00:47:50,442 INFO    pipeline           [row 24] fetching https://friendshome.pk/products/panasonic-1-5-ton-inverter-ac-model-cs-18xkf-9?_pos=1&_psq=CS-UE18XKF-9&_psid=de3d17e46&_ss=e
+2026-10-10 00:47:57,199 INFO    pipeline.decisions [reject:S15] Orient Megatron Titanium 12X Olive Black 1 Ton Inverter AC–T3 Tropical Wind Puff Heat & Cool 4D Air Throw | fallback candidate rejected - no model key found on the page
+2026-10-10 00:47:57,246 INFO    pipeline           [row 13] fetching https://www.surmawala.pk/products/crown-appliances-20-gallon-12x16-electric-plus-gas-geyser?_pos=1&_psq=12X&_psid=0253b721f&_ss=e
+2026-10-10 00:47:57,637 INFO    pipeline.decisions [reject:S3] Frost 18W Classic White | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:47:57,709 INFO    pipeline.decisions [reject:S3] Frost 18W Classic White | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:47:57,932 INFO    pipeline.decisions [reject:S3] Frost 18W Classic White | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:47:58,073 INFO    pipeline.decisions [reject:S3] Frost 18W Classic White | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:47:58,228 INFO    pipeline.decisions [reject:S3] Frost 18W Classic White | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:47:58,275 INFO    pipeline.decisions [reject:S3] Frost 18W Classic White | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:47:58,524 INFO    pipeline.decisions [reject:S3] Frost 18W Classic White | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:47:58,601 INFO    pipeline           [row 30] fetching https://www.orient.com.pk/air-conditioners.html
+2026-10-10 00:47:59,102 INFO    pipeline           [accept] Candy By Haier 0.8 Ton Heat And Cool DC Inverter Split Air Conditioner White CSU 10HF | sheet | gallery_container
+2026-10-10 00:47:59,271 INFO    pipeline           [stages] Pulse 19C Ultra White T3 | Orient Electronics Pakistan | 1 recognition: keys=['19C'] brand=Orient -> 2 sheet pages: 3 tried, 0 rejected, 1 image(s) -> 3 fallback search: 6 candidate page(s) -> 4 images: 1 accepted, 9 rejected -> 5 compose: 1 final set(s) on both templates -> 6 upload: 2 digimall / 2 alfamall URL(s) -> 7 status: partial
+2026-10-10 00:47:59,273 INFO    pipeline           [row 31] start | Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | 2 sheet url(s)
+2026-10-10 00:47:59,274 INFO    pipeline           [row 31] fetching https://www.orient.com.pk/air-conditioners.html
+2026-10-10 00:47:59,582 INFO    pipeline           [accept] Haier Split AC Inverter 1.5 Ton Solar Hybrid-IV (OW)-T3 | sheet | registry:haier
+2026-10-10 00:48:03,351 INFO    pipeline           [accept] HAIER HSU-20HFT -T3+ (OW) 1.5Ton Heat & Cool DC Inverter Air Conditioner Off White | fallback:sitemap:www.haier.com | registry:haier
+2026-10-10 00:48:03,521 INFO    pipeline           [row 18] fetching https://electrociti.pk/products/orient-12x-emax-ultron-air-conditioner-1-0-ton?_pos=1&_psq=12X&_psid=6b7aceaaf&_ss=e
+2026-10-10 00:48:12,408 INFO    pipeline.decisions [reject:S8] HAIER HSU-20HFT -T3+ (OW) 1.5Ton Heat & Cool DC Inverter Air Conditioner Off White | too small 60x60 (need short>=180, long>=350)
+2026-10-10 00:48:12,892 INFO    pipeline           [row 25] fetching https://www.surmawala.pk/products/ecostar-2-0-ton-inverter-split-ac-es-24pr02wt3-heat-cool-t3-wifi-ready?_pos=1&_psq=ES+24AR02W+T3&_psid=f25fa7bae&_ss=e
+2026-10-10 00:48:14,566 INFO    pipeline           [row 15] fetching https://shandaarbuy.pk/products/midea-12hrfn1-qrdow-1-ton-ceiling-dc-inverter-cassette?_pos=1&_psq=12HRFN1&_psid=bf67557ee&_ss=e
+2026-10-10 00:48:16,465 INFO    pipeline           [accept] Haier Split AC Inverter 1.5 Ton Solar Hybrid-IV (OW)-T3 | sheet | registry:haier
+2026-10-10 00:48:17,435 INFO    pipeline           [stages] Haier Split AC Inverter 1.5 Ton Solar Hybrid-IV (OW)-T3 | 1 recognition: keys=[] brand=Haier -> 2 sheet pages: 1 tried, 0 rejected, 3 image(s) -> 3 fallback search: skipped (row already solved or disabled) -> 4 images: 3 accepted, 7 rejected -> 5 compose: 3 final set(s) on both templates -> 6 upload: 4 digimall / 4 alfamall URL(s) -> 7 status: ok
+2026-10-10 00:48:17,465 INFO    pipeline           [row 32] start | Platinium 12X Matt White T3+ | Orient Electronics Pakistan | 3 sheet url(s)
+2026-10-10 00:48:17,481 INFO    pipeline           [row 32] fetching https://www.orient.com.pk/products/platinium-12x-matt-white-t3-plus.html
+2026-10-10 00:48:20,367 INFO    pipeline.decisions [reject:S8] HAIER HSU-20HFT -T3+ (OW) 1.5Ton Heat & Cool DC Inverter Air Conditioner Off White | too small 60x60 (need short>=180, long>=350)
+2026-10-10 00:48:22,209 INFO    pipeline           [accept] Candy By Haier 0.8 Ton Heat And Cool DC Inverter Split Air Conditioner White CSU 10HF | sheet | gallery_container
+2026-10-10 00:48:23,141 INFO    pipeline           [stages] Candy By Haier 0.8 Ton Heat And Cool DC Inverter Split Air Conditioner White CSU 10HF | 1 recognition: keys=['10HF'] brand=Candy -> 2 sheet pages: 2 tried, 0 rejected, 3 image(s) -> 3 fallback search: 6 candidate page(s) -> 4 images: 3 accepted, 10 rejected -> 5 compose: 3 final set(s) on both templates -> 6 upload: 4 digimall / 4 alfamall URL(s) -> 7 status: ok
+2026-10-10 00:48:23,172 INFO    pipeline           [row 33] start | Platinium 18X Matt White T3+ | Orient Electronics Pakistan | 3 sheet url(s)
+2026-10-10 00:48:23,173 INFO    pipeline           [row 33] fetching https://www.orient.com.pk/products/platinium-18x-matt-white-t3-plus.html
+2026-10-10 00:48:26,359 INFO    pipeline           [stages] QG 12X Aura White T3+ | Orient Electronics Pakistan | 1 recognition: keys=['12X'] brand=Orient -> 2 sheet pages: 3 tried, 0 rejected, 1 image(s) -> 3 fallback search: 6 candidate page(s) -> 4 images: 1 accepted, 7 rejected -> 5 compose: 1 final set(s) on both templates -> 6 upload: 2 digimall / 2 alfamall URL(s) -> 7 status: partial
+2026-10-10 00:48:30,131 INFO    pipeline.decisions [reject:S8] HAIER HSU-20HFT -T3+ (OW) 1.5Ton Heat & Cool DC Inverter Air Conditioner Off White | too small 60x60 (need short>=180, long>=350)
+2026-10-10 00:48:31,497 INFO    pipeline           [row 31] fetching https://www.aysonline.pk/orient-megatron-infinity-18x-ecomfort-dc-inverter-ac-1.5-ton-t3-compressor/
+2026-10-10 00:48:32,976 INFO    pipeline           [row 22] fetching https://www.surmawala.pk/products/crown-appliances-20-gallon-12x16-gas-geyser?_pos=3&_psq=12X&_psid=0253b721f&_ss=e
+2026-10-10 00:48:36,757 INFO    pipeline.decisions [reject:S1] Frost 18W Classic White | Orient Electronics Pakistan | page strength 0 - no model key found on the page
+2026-10-10 00:48:36,759 INFO    pipeline           [row 30] fetching https://www.jajielectronics.com/product/orient-cooltron-frost-18w
+2026-10-10 00:48:37,703 INFO    pipeline           [accept] Platinium 12X Matt White T3+ | Orient Electronics Pakistan | sheet | json_ld
+2026-10-10 00:48:37,935 INFO    pipeline.decisions [reject:S3] Platinium 12X Matt White T3+ | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:48:38,014 INFO    pipeline.decisions [reject:S3] Platinium 12X Matt White T3+ | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:48:38,329 INFO    pipeline.decisions [reject:S3] Platinium 12X Matt White T3+ | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:48:38,660 INFO    pipeline.decisions [reject:S8] HAIER HSU-20HFT -T3+ (OW) 1.5Ton Heat & Cool DC Inverter Air Conditioner Off White | too small 60x60 (need short>=180, long>=350)
+2026-10-10 00:48:38,754 INFO    pipeline.decisions [reject:S3] Platinium 12X Matt White T3+ | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:48:38,830 INFO    pipeline           [accept] CS-UE18XKF-9, Split Air Conditioner - Panasonic | fallback:json-search:friendshome.pk | json_ld
+2026-10-10 00:48:38,941 INFO    pipeline.decisions [reject:S3] Platinium 12X Matt White T3+ | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:48:39,002 INFO    pipeline.decisions [reject:S3] Platinium 12X Matt White T3+ | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:48:39,080 INFO    pipeline.decisions [reject:S3] Platinium 12X Matt White T3+ | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:48:39,096 INFO    pipeline           [row 32] fetching https://www.orient.com.pk/ac-aux-atlas.html
+2026-10-10 00:48:48,080 INFO    pipeline.decisions [reject:S8] HAIER HSU-20HFT -T3+ (OW) 1.5Ton Heat & Cool DC Inverter Air Conditioner Off White | too small 60x60 (need short>=180, long>=350)
+2026-10-10 00:48:50,991 INFO    pipeline           [accept] Platinium 18X Matt White T3+ | Orient Electronics Pakistan | sheet | json_ld
+2026-10-10 00:48:51,245 INFO    pipeline.decisions [reject:S3] Platinium 18X Matt White T3+ | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:48:51,458 INFO    pipeline.decisions [reject:S3] Platinium 18X Matt White T3+ | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:48:51,482 INFO    pipeline.decisions [reject:S3] Platinium 18X Matt White T3+ | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:48:51,602 INFO    pipeline.decisions [reject:S3] Platinium 18X Matt White T3+ | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:48:51,818 INFO    pipeline.decisions [reject:S3] Platinium 18X Matt White T3+ | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:48:51,943 INFO    pipeline.decisions [reject:S3] Platinium 18X Matt White T3+ | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:48:52,069 INFO    pipeline.decisions [reject:S3] Platinium 18X Matt White T3+ | Orient Electronics Pakistan | image is linked to a different page
+2026-10-10 00:48:52,117 INFO    pipeline           [row 33] fetching https://www.orient.com.pk/ac-aux-atlas.html
+2026-10-10 00:48:56,917 INFO    pipeline.decisions [reject:S10] HAIER HSU-20HFT -T3+ (OW) 1.5Ton Heat & Cool DC Inverter Air Conditioner Off White | re-served copy of accepted image #1 (dHash 0 bits apart, correlation 1.0000)
+2026-10-10 00:48:57,065 INFO    pipeline           [row 30] fallback search across retailer sources
+2026-10-10 00:48:57,067 INFO    pipeline           [row 30] fetching https://www.jajielectronics.com/product/orient-cooltron-frost-18w
+2026-10-10 00:48:57,187 INFO    pipeline           [row 32] fetching https://www.aysonline.pk/orient-platinum-12x-matt-white-1-ton-ac-t3-inverter-auto-clean-voice-command/
+2026-10-10 00:49:02,037 INFO    pipeline           [row 13] fetching https://www.surmawala.pk/products/crown-appliances-30-gallon-12x16-gas-geyser?_pos=2&_psq=12X&_psid=0253b721f&_ss=e
+2026-10-10 00:49:02,107 INFO    pipeline           [accept] CS-UE18XKF-9, Split Air Conditioner - Panasonic | fallback:json-search:friendshome.pk | gallery_container
+2026-10-10 00:49:02,341 INFO    pipeline           [row 33] fetching https://bismillahelectronics.pk/products/orient-ac-1-5-ton-inverter-platinum-18x-matt-white-t3
+2026-10-10 00:49:02,494 INFO    pipeline.decisions [reject:S16] EcoStar Duke Series ES‑18DU02 1.5 Ton Black Split AC | product area is bright (mean 0.94, dark coverage 0%) - conflicts with target 'black' (family black)
+2026-10-10 00:49:02,496 INFO    pipeline           [row 26] fetching https://www.surmawala.pk/products/ecostar-duke-series-1-5-ton-inverter-black-split-ac-heat-cool-model-es-18du01bc?_pos=1&_psq=ES%E2%80%9118DU02&_psid=e1ae211ea&_ss=e
+2026-10-10 00:49:02,947 INFO    pipeline.decisions [reject:S12] Frost 18W Classic White | Orient Electronics Pakistan | no gallery and no model-bearing image URL on this page
+2026-10-10 00:49:02,949 INFO    pipeline           [stages] Frost 18W Classic White | Orient Electronics Pakistan | 1 recognition: keys=[] brand=Orient -> 2 sheet pages: 3 tried, 1 rejected, 0 image(s) -> 3 fallback search: 0 candidate page(s) -> 4 images: 0 accepted, 8 rejected
+2026-10-10 00:49:09,077 INFO    pipeline           [accept] HAIER HSU-20HFT -T3+ (OW) 1.5Ton Heat & Cool DC Inverter Air Conditioner Off White | fallback:sitemap:www.haier.com | registry:haier
+2026-10-10 00:49:17,110 INFO    pipeline.decisions [reject:S16] HAIER HSU-20HFT -T3+ (OW) 1.5Ton Heat & Cool DC Inverter Air Conditioner Off White | product area is dominated by a dark body (coverage 46%, mean 0.19) - conflicts with target 'white' (family white)
+2026-10-10 00:49:19,694 INFO    pipeline.decisions [reject:S15] EcoStar ES-24AR02W-T3 2 Ton T3 Inverter AC - Prince Series | fallback candidate rejected - no model key found on the page (page shows es24pr02wt3)
+2026-10-10 00:49:19,697 INFO    pipeline           [row 25] fetching https://electrociti.pk/products/ecostar-es-24pr02wt3-white-2-0-ton-inverter-split-ac?_pos=1&_psq=ES+24AR02W+T3&_psid=f97e30caa&_ss=e
+2026-10-10 00:49:21,884 INFO    pipeline           [accept] CS-UE18XKF-9, Split Air Conditioner - Panasonic | fallback:json-search:friendshome.pk | gallery_container
+2026-10-10 00:49:22,760 INFO    pipeline           [stages] CS-UE18XKF-9, Split Air Conditioner - Panasonic | 1 recognition: keys=['CS-UE18XKF-9'] brand=XKF -> 2 sheet pages: 3 tried, 2 rejected, 3 image(s) -> 3 fallback search: 5 candidate page(s) -> 4 images: 3 accepted, 10 rejected -> 5 compose: 3 final set(s) on both templates -> 6 upload: 4 digimall / 4 alfamall URL(s) -> 7 status: ok
+2026-10-10 00:49:31,691 INFO    pipeline           [accept] Midea 12HRFN1 QC6 1 Ton GO EASY T3 Inverter AC | fallback:json-search:shandaarbuy.pk | json_ld
+2026-10-10 00:49:31,784 INFO    pipeline.decisions [reject:S3] Midea 12HRFN1 QC6 1 Ton GO EASY T3 Inverter AC | image is linked to a different page
+2026-10-10 00:49:32,157 INFO    pipeline           [stages] Midea 12HRFN1 QC6 1 Ton GO EASY T3 Inverter AC | 1 recognition: keys=['12HRFN1', 'QC6'] brand=Midea -> 2 sheet pages: 3 tried, 2 rejected, 0 image(s) -> 3 fallback search: 6 candidate page(s) -> 3b tolerated spelling used: https://shandaarbuy.pk/products/midea-12hrfn1-qrdow-1-ton-ceiling-dc-inverter-cassette?_pos=1&_psq=12HRFN1&_psid=bf67557ee&_ss=e -> 4 images: 1 accepted, 5 rejected -> 5 compose: 1 final set(s) on both templates -> 6 upload: 2 digimall / 2 alfamall URL(s) -> 7 status: partial
+2026-10-10 00:49:34,325 INFO    pipeline           [accept] HAIER HSU-20HFT -T3+ (OW) 1.5Ton Heat & Cool DC Inverter Air Conditioner Off White | fallback:sitemap:www.haier.com | registry:haier
+2026-10-10 00:49:35,087 INFO    pipeline           [stages] HAIER HSU-20HFT -T3+ (OW) 1.5Ton Heat & Cool DC Inverter Air Conditioner Off White | 1 recognition: keys=['HSU-20HFT'] brand=Haier -> 2 sheet pages: 0 tried, 0 rejected, 3 image(s) -> 3 fallback search: 6 candidate page(s) -> 4 images: 3 accepted, 7 rejected -> 5 compose: 3 final set(s) on both templates -> 6 upload: 4 digimall / 4 alfamall URL(s) -> 7 status: partial
+2026-10-10 00:49:36,176 INFO    pipeline           [row 22] fetching https://friendshome.pk/products/orient-1-0-ton-ultron-hyper-ecomfort-dc-inverter-ac-model-12x-hyper-sw?_pos=1&_psq=12X&_psid=b48b2dc5b&_ss=e
+2026-10-10 00:49:47,187 INFO    pipeline.decisions [reject:S7] Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | border ring is not a clean background
+2026-10-10 00:49:47,217 INFO    pipeline           [accept] Platinium 18X Matt White T3+ | Orient Electronics Pakistan | sheet | json_ld
+2026-10-10 00:49:47,311 INFO    pipeline.decisions [reject:S5] Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | bad keyword in image URL
+2026-10-10 00:49:47,329 INFO    pipeline           [row 31] fallback search across retailer sources
+2026-10-10 00:49:47,471 INFO    pipeline.sources   [search] www.orient.com.pk: sitemap 272 url(s), 0 match the model
+2026-10-10 00:49:47,630 INFO    pipeline           [stages] Platinium 18X Matt White T3+ | Orient Electronics Pakistan | 1 recognition: keys=['18X'] brand=Orient -> 2 sheet pages: 3 tried, 0 rejected, 2 image(s) -> 3 fallback search: skipped (row already solved or disabled) -> 4 images: 2 accepted, 7 rejected -> 5 compose: 2 final set(s) on both templates -> 6 upload: 3 digimall / 3 alfamall URL(s) -> 7 status: ok
+2026-10-10 00:49:51,331 INFO    pipeline           [row 32] fallback search across retailer sources
+2026-10-10 00:49:51,338 INFO    pipeline.sources   [search] www.orient.com.pk: sitemap 272 url(s), 1 match the model
+2026-10-10 00:49:52,571 INFO    pipeline           [row 31] fetching https://www.surmawala.pk/products/panasonic-18xkf-9-1-5-ton-inverter-air-conditioner-2024?_pos=1&_psq=18X&_psid=8c7d0b31f&_ss=e
+2026-10-10 00:49:56,264 INFO    pipeline           [row 13] fetching https://www.surmawala.pk/products/crown-appliances-20-gallon-12x16-gas-geyser?_pos=3&_psq=12X&_psid=0253b721f&_ss=e
+2026-10-10 00:49:57,962 INFO    pipeline           [row 22] fetching https://electrociti.pk/products/orient-12x-emax-ultron-air-conditioner-1-0-ton?_pos=1&_psq=12X&_psid=6b7aceaaf&_ss=e
+2026-10-10 00:49:57,965 INFO    pipeline           [row 32] fetching https://www.surmawala.pk/products/crown-appliances-20-gallon-12x16-electric-plus-gas-geyser?_pos=1&_psq=12X&_psid=0253b721f&_ss=e
+2026-10-10 00:50:02,989 INFO    pipeline           [accept] EcoStar ES-24AR02W-T3 2 Ton T3 Inverter AC - Prince Series | fallback:json-search:electrociti.pk | gallery_container
+2026-10-10 00:50:03,082 INFO    pipeline.decisions [reject:S3] EcoStar ES-24AR02W-T3 2 Ton T3 Inverter AC - Prince Series | image is linked to a different page
+2026-10-10 00:50:03,113 INFO    pipeline           [row 25] fetching https://electrociti.pk/products/ecostar-es-24ar02wt3-white-2-0-ton-inverter-split-ac?_pos=2&_psq=ES+24AR02W+T3&_psid=f97e30caa&_ss=e
+2026-10-10 00:50:04,236 INFO    pipeline.decisions [reject:S15] EcoStar Duke Series ES‑18DU02 1.5 Ton Black Split AC | fallback candidate rejected - no model key found on the page (page shows es18du01bc)
+2026-10-10 00:50:04,237 INFO    pipeline           [row 26] fetching https://jalalelectronics.com/products/ecostar-split-ac-inverter-1-5-ton-es-18du01bc-black-heat-cool?_pos=1&_psq=ES%E2%80%9118DU02&_psid=854a13536&_ss=e
+2026-10-10 00:50:17,139 INFO    pipeline           [row 22] fetching https://electrociti.pk/products/ewm-1200-sw-washing-machine?_pos=2&_psq=12X&_psid=6b7aceaaf&_ss=e
+2026-10-10 00:50:22,345 INFO    pipeline           [row 25] fetching https://electrociti.pk/products/ecostar-es-24ar01wt3-white-2-0-ton-inverter-split-ac?_pos=3&_psq=ES+24AR02W+T3&_psid=f97e30caa&_ss=e
+2026-10-10 00:50:26,932 INFO    pipeline.decisions [reject:S15] EcoStar Duke Series ES‑18DU02 1.5 Ton Black Split AC | fallback candidate rejected - no model key found on the page (page shows es18du01bc)
+2026-10-10 00:50:26,933 INFO    pipeline           [row 26] fetching https://jalalelectronics.com/products/ecostar-split-ac-inverter-1-ton-es-12du01bc-black-heat-cool?_pos=2&_psq=ES%E2%80%9118DU02&_psid=854a13536&_ss=e
+2026-10-10 00:50:28,363 INFO    pipeline           [row 22] fetching https://hadielectronics.com.pk/product/orient-infinity-18x-1-5-ton-inverter-split-ac-heat-cool-t3/
+2026-10-10 00:50:31,388 INFO    pipeline           [row 32] fetching https://www.surmawala.pk/products/crown-appliances-30-gallon-12x16-gas-geyser?_pos=2&_psq=12X&_psid=0253b721f&_ss=e
+2026-10-10 00:50:34,336 INFO    pipeline           [row 31] fetching https://friendshome.pk/products/orient-1-5-ton-aux-inverter-ac-model-fb-18x-imprint-white?_pos=1&_psq=18X&_psid=46e9ef1eb&_ss=e
+2026-10-10 00:50:37,513 INFO    pipeline           [stages] EcoStar ES-24AR02W-T3 2 Ton T3 Inverter AC - Prince Series | 1 recognition: keys=['ES-24AR02W-T3'] brand=EcoStar -> 2 sheet pages: 3 tried, 0 rejected, 2 image(s) -> 3 fallback search: 4 candidate page(s) -> 4 images: 2 accepted, 3 rejected -> 5 compose: 2 final set(s) on both templates -> 6 upload: 3 digimall / 3 alfamall URL(s) -> 7 status: partial
+2026-10-10 00:50:40,133 INFO    pipeline           [stages] Orient Megatron Titanium 12X Olive Black 1 Ton Inverter AC–T3 Tropical Wind Puff Heat & Cool 4D Air Throw | 1 recognition: keys=['12X', 'AC–T3'] brand=Orient -> 2 sheet pages: 3 tried, 0 rejected, 1 image(s) -> 3 fallback search: 6 candidate page(s) -> 4 images: 1 accepted, 13 rejected -> 5 compose: 1 final set(s) on both templates -> 6 upload: 2 digimall / 2 alfamall URL(s) -> 7 status: partial
+2026-10-10 00:50:51,013 INFO    pipeline           [row 31] fetching https://friendshome.pk/products/orient-1-5-ton-ultron-ecomfort-dc-inverter-ac-model-18x-etech-imprint-white?_pos=2&_psq=18X&_psid=46e9ef1eb&_ss=e
+2026-10-10 00:50:51,200 INFO    pipeline.decisions [reject:S15] EcoStar Duke Series ES‑18DU02 1.5 Ton Black Split AC | fallback candidate rejected - no model key found on the page (page shows es12du01bc)
+2026-10-10 00:50:51,201 INFO    pipeline           [row 26] fetching https://electrociti.pk/products/ecostar-es-18du-prm-gray-black-1-5-ton-inverter-split-ac?_pos=1&_psq=ES%E2%80%9118DU02&_psid=e82c09d5d&_ss=e
+2026-10-10 00:50:59,316 INFO    pipeline           [row 32] fetching https://www.surmawala.pk/products/crown-appliances-20-gallon-12x16-gas-geyser?_pos=3&_psq=12X&_psid=0253b721f&_ss=e
+2026-10-10 00:51:00,950 INFO    pipeline           [row 31] fetching https://friendshome.pk/products/orient-1-5-ton-ultron-hyper-ecomfort-dc-inverter-ac-model-18x-hyper-sw?_pos=3&_psq=18X&_psid=46e9ef1eb&_ss=e
+2026-10-10 00:51:11,730 INFO    pipeline           [row 31] fetching https://jalalelectronics.com/products/orient-split-ac-inverter-1-5ton-18x-mega-t3-ampere-lock-heat-cool?_pos=1&_psq=18X&_psid=76e3ac6ff&_ss=e
+2026-10-10 00:51:11,732 INFO    pipeline           [accept] EcoStar Duke Series ES‑18DU02 1.5 Ton Black Split AC | fallback:json-search:electrociti.pk | gallery_container
+2026-10-10 00:51:11,735 INFO    pipeline.decisions [reject:S3] EcoStar Duke Series ES‑18DU02 1.5 Ton Black Split AC | image is linked to a different page
+2026-10-10 00:51:11,736 INFO    pipeline           [row 26] fetching https://electrociti.pk/products/ecostar-es-18du-prm-white-1-5-ton-inverter-split-ac?_pos=2&_psq=ES%E2%80%9118DU02&_psid=e82c09d5d&_ss=e
+2026-10-10 00:51:13,842 INFO    pipeline           [accept] Orient Megatron Infinity 12X eComfort DC Inverter AC - 1 Ton | sheet | gallery_container
+2026-10-10 00:51:13,936 INFO    pipeline.decisions [reject:S3] Orient Megatron Infinity 12X eComfort DC Inverter AC - 1 Ton | image is linked to a different page
+2026-10-10 00:51:14,029 INFO    pipeline.decisions [reject:S3] Orient Megatron Infinity 12X eComfort DC Inverter AC - 1 Ton | image is linked to a different page
+2026-10-10 00:51:14,123 INFO    pipeline.decisions [reject:S3] Orient Megatron Infinity 12X eComfort DC Inverter AC - 1 Ton | image is linked to a different page
+2026-10-10 00:51:14,541 INFO    pipeline           [stages] Orient Megatron Infinity 12X eComfort DC Inverter AC - 1 Ton | 1 recognition: keys=['12X'] brand=Orient -> 2 sheet pages: 2 tried, 0 rejected, 0 image(s) -> 3 fallback search: 6 candidate page(s) -> 3b tolerated spelling used: https://hadielectronics.com.pk/product/orient-infinity-18x-1-5-ton-inverter-split-ac-heat-cool-t3/ -> 4 images: 1 accepted, 5 rejected -> 5 compose: 1 final set(s) on both templates -> 6 upload: 2 digimall / 2 alfamall URL(s) -> 7 status: partial
+2026-10-10 00:51:15,879 INFO    pipeline           [row 32] fetching https://friendshome.pk/products/orient-1-0-ton-ultron-hyper-ecomfort-dc-inverter-ac-model-12x-hyper-sw?_pos=1&_psq=12X&_psid=b48b2dc5b&_ss=e
+2026-10-10 00:51:20,308 INFO    pipeline           [row 31] fetching https://jalalelectronics.com/products/panasonic-split-ac-inverter-1-5ton-ue-18xkf9-heat-cool-t3-compressor?_pos=2&_psq=18X&_psid=76e3ac6ff&_ss=e
+2026-10-10 00:51:21,810 INFO    pipeline           [row 32] fetching https://electrociti.pk/products/orient-12x-emax-ultron-air-conditioner-1-0-ton?_pos=1&_psq=12X&_psid=6b7aceaaf&_ss=e
+2026-10-10 00:51:23,007 INFO    pipeline.decisions [reject:S16] EcoStar Duke Series ES‑18DU02 1.5 Ton Black Split AC | product area is bright (mean 0.93, dark coverage 2%) - conflicts with target 'black' (family black)
+2026-10-10 00:51:23,009 INFO    pipeline.decisions [reject:S3] EcoStar Duke Series ES‑18DU02 1.5 Ton Black Split AC | image is linked to a different page
+2026-10-10 00:51:23,010 INFO    pipeline           [row 26] fetching https://electrociti.pk/products/ecostar-es-18du-white-1-5-ton-inverter-split-ac?_pos=3&_psq=ES%E2%80%9118DU02&_psid=e82c09d5d&_ss=e
+2026-10-10 00:51:24,937 INFO    pipeline           [row 31] fetching https://www.orient.com.pk/air-conditioners.html
+2026-10-10 00:51:25,623 INFO    pipeline           [stages] Platinium 12X Matt White T3+ | Orient Electronics Pakistan | 1 recognition: keys=['12X'] brand=Orient -> 2 sheet pages: 3 tried, 0 rejected, 1 image(s) -> 3 fallback search: 6 candidate page(s) -> 4 images: 1 accepted, 7 rejected -> 5 compose: 1 final set(s) on both templates -> 6 upload: 2 digimall / 2 alfamall URL(s) -> 7 status: partial
+2026-10-10 00:51:34,535 INFO    pipeline.decisions [reject:S3] Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | image is linked to a different page
+2026-10-10 00:51:34,536 INFO    pipeline.decisions [reject:S3] Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | image is linked to a different page
+2026-10-10 00:51:34,537 INFO    pipeline.decisions [reject:S3] Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | image is linked to a different page
+2026-10-10 00:51:34,537 INFO    pipeline.decisions [reject:S3] Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | image is linked to a different page
+2026-10-10 00:51:34,538 INFO    pipeline.decisions [reject:S3] Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | image is linked to a different page
+2026-10-10 00:51:34,539 INFO    pipeline.decisions [reject:S3] Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | image is linked to a different page
+2026-10-10 00:51:34,540 INFO    pipeline.decisions [reject:S3] Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | image is linked to a different page
+2026-10-10 00:51:34,541 INFO    pipeline.decisions [reject:S3] Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | image is linked to a different page
+2026-10-10 00:51:34,543 INFO    pipeline.decisions [reject:S3] Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | image is linked to a different page
+2026-10-10 00:51:34,544 INFO    pipeline.decisions [reject:S3] Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | image is linked to a different page
+2026-10-10 00:51:34,545 INFO    pipeline.decisions [reject:S3] Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | image is linked to a different page
+2026-10-10 00:51:34,546 INFO    pipeline.decisions [reject:S3] Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | image is linked to a different page
+2026-10-10 00:51:34,547 INFO    pipeline.decisions [reject:S3] Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | image is linked to a different page
+2026-10-10 00:51:34,548 INFO    pipeline.decisions [reject:S3] Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | image is linked to a different page
+2026-10-10 00:51:34,550 INFO    pipeline.decisions [reject:S3] Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | image is linked to a different page
+2026-10-10 00:51:34,551 INFO    pipeline.decisions [reject:S3] Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | image is linked to a different page
+2026-10-10 00:51:34,552 INFO    pipeline.decisions [reject:S3] Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | image is linked to a different page
+2026-10-10 00:51:34,553 INFO    pipeline.decisions [reject:S3] Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | image is linked to a different page
+2026-10-10 00:51:34,555 INFO    pipeline.decisions [reject:S3] Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | image is linked to a different page
+2026-10-10 00:51:34,556 INFO    pipeline.decisions [reject:S3] Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | image is linked to a different page
+2026-10-10 00:51:34,556 INFO    pipeline           [row 31] fetching https://www.surmawala.pk/products/panasonic-18xkf-9-1-5-ton-inverter-air-conditioner-2024?_pos=1&_psq=18X&_psid=8c7d0b31f&_ss=e
+2026-10-10 00:51:36,983 INFO    pipeline           [accept] EcoStar Duke Series ES‑18DU02 1.5 Ton Black Split AC | fallback:json-search:electrociti.pk | gallery_container
+2026-10-10 00:51:37,544 INFO    pipeline           [stages] EcoStar Duke Series ES‑18DU02 1.5 Ton Black Split AC | 1 recognition: keys=['ES‑18DU02'] brand=EcoStar -> 2 sheet pages: 3 tried, 1 rejected, 3 image(s) -> 3 fallback search: 6 candidate page(s) -> 4 images: 3 accepted, 14 rejected -> 5 compose: 3 final set(s) on both templates -> 6 upload: 4 digimall / 4 alfamall URL(s) -> 7 status: partial
+2026-10-10 00:51:51,946 INFO    pipeline           [accept] Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | fallback:json-search:www.surmawala.pk | shopify_json
+2026-10-10 00:51:54,050 INFO    pipeline           [accept] Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | fallback:json-search:www.surmawala.pk | shopify_json
+2026-10-10 00:51:56,331 INFO    pipeline           [accept] Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | fallback:json-search:www.surmawala.pk | shopify_json
+2026-10-10 00:51:56,333 INFO    pipeline           [stages] Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton | 1 recognition: keys=['18X'] brand=Orient -> 2 sheet pages: 2 tried, 0 rejected, 0 image(s) -> 3 fallback search: 6 candidate page(s) -> 3b tolerated spelling used: https://www.orient.com.pk/air-conditioners.html -> 3b tolerated spelling used: https://www.surmawala.pk/products/panasonic-18xkf-9-1-5-ton-inverter-air-conditioner-2024?_pos=1&_psq=18X&_psid=8c7d0b31f&_ss=e -> 4 images: 3 accepted, 22 rejected -> 5 compose: 3 final set(s) on both templates -> 6 upload: 4 digimall / 4 alfamall URL(s) -> 7 status: partial
