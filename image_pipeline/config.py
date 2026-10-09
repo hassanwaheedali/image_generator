@@ -236,20 +236,27 @@ class PipelineConfig:
             "www.haier.com/pk": "sitemap",
             "haiermall.pk": "none",           # sitemap.xml is an HTML page there
             "www.dawlance.com.pk": "sitemap",
-            "www.tcl.com/pk": "sitemap",      # JS gallery is fine now: state_json reads
-                                              # the embedded pageData; a missing or HTML
-                                              # sitemap.xml simply yields 0 candidates
-            "shandaarbuy.pk": "shopify",      # owner-added 2026-10-08: carries TCL C8L
-                                              # pages when tcl.com's own sitemap yields 0
+            "www.tcl.com/pk": "sitemap",      
+            "www.orient.com.pk": "sitemap",
+            "shandaarbuy.pk": "shopify",      
             "eshop.pel.com.pk": "shopify",
             "homage.com.pk": "woo",
             "www.kenwoodpakistan.com": "woo",
             "www.surmawala.pk": "shopify",
             "modernelectronics.pk": "shopify",
+            "friendshome.pk": "shopify",
+            "jalalelectronics.com": "shopify",
+            "electrociti.pk": "shopify",
             "www.alfatah.com.pk": "woo",
             "www.almumtaz.com.pk": "woo",
             "hadielectronics.com.pk": "woo",
-            "www.subhanelectronics.pk": "woo",
+            "pkelectronics.pk": "woo",
+            "subhanelectronics.pk": "woo",
+            "sohailelectronics.com": "woo",
+            "cityelectronics.com.pk": "woo",
+            "yasirelectronics.com": "woo",
+            "umarelectronics.pk": "woo",
+            "pakref.com": "woo",
         }
     )
     #: brand -> its own sources, tried before any retail shop.
@@ -261,18 +268,28 @@ class PipelineConfig:
             "pel": ("https://eshop.pel.com.pk",),
             "homage": ("https://homage.com.pk",),
             "kenwood": ("https://www.kenwoodpakistan.com",),
+            "orient": ("https://www.orient.com.pk",),
         }
     )
     retail_shopify_sources: tuple[str, ...] = (
-        "https://shandaarbuy.pk",          # owner 2026-10-08: has TCL C8L stock pages
+        "https://shandaarbuy.pk",
         "https://www.surmawala.pk",
         "https://modernelectronics.pk",
+        "https://friendshome.pk",
+        "https://jalalelectronics.com",
+        "https://electrociti.pk",
     )
     retail_woo_sources: tuple[str, ...] = (
         "https://www.alfatah.com.pk",
         "https://www.almumtaz.com.pk",
         "https://hadielectronics.com.pk",
+        "https://pkelectronics.pk",
         "https://www.subhanelectronics.pk",
+        "https://sohailelectronics.com",
+        "https://cityelectronics.com.pk",
+        "https://yasirelectronics.com",
+        "https://umarelectronics.pk",
+        "https://pakref.com",
     )
     #: Structured product JSON (Shopify ``/products/<handle>.json``, WooCommerce Store API):
     #: the HTML gallery is sometimes lazy-loaded or holds a single picture, while the JSON
