@@ -404,6 +404,21 @@ class PipelineConfig:
     dedup_hamming_threshold: int = 6
     dedup_hamming_soft_threshold: int = 14
     dedup_corr_threshold: float = 0.995
+    #: The hard hamming path also needs a near-perfect grey-patch correlation: two
+    #: catalogue angles of the same appliance hash close together, but only a
+    #: re-served copy correlates ~1.0 (live 2026-10-09: a correct second angle was
+    #: rejected as "near-duplicate").
+    dedup_hard_corr_threshold: float = 0.985
+
+    # ----- monochrome logo / emblem gate (S14) ------------------------------
+    #: Official galleries mix marketing badges (the Haier "AI + leaf" emblem on a
+    #: grey disc, live 2026-10-09) into the product image list.  A flat achromatic
+    #: graphic on a non-white ground is a logo, not a product photo.
+    logo_gate_enabled: bool = True
+    logo_achromatic_min_fraction: float = 0.97
+    logo_background_max_value: float = 0.90
+    logo_ink_min_fraction: float = 0.06
+    logo_ink_max_value: float = 0.60
 
     # ----- visual color verification (S16) --------------------------------
     #: Owner decision 2026-10-08: the pixel-colour gate is a *rare-condition* tool,

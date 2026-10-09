@@ -24,20 +24,41 @@ class ImageFingerprint:
     gray: np.ndarray
 
 
+def _product_patch(rgb: Image.Image, size: int = 32) -> np.ndarray:
+    """Normalised grey patch of the *product region* only.
+
+    A full-frame patch is dominated by the white studio backdrop, so two different
+    angles of the same appliance correlate ~0.998 and read as re-served copies.
+    Cropping to the non-background bbox puts every pixel of the budget on the
+    product itself: re-served copies still correlate ~1.0, a moved display / open
+    flap / other angle drops to ~0.98 (measured 2026-10-09).
+    """
+    array = np.asarray(rgb, dtype=int)
+    mask = np.abs(array - array[0, 0]).sum(axis=-1) > 48
+    ys, xs = np.nonzero(mask)
+    if len(xs) >= 10:
+        box = (
+            max(int(xs.min()) - 4, 0),
+            max(int(ys.min()) - 4, 0),
+            min(int(xs.max()) + 5, array.shape[1]),
+            min(int(ys.max()) + 5, array.shape[0]),
+        )
+        rgb = rgb.crop(box)
+    patch = np.asarray(rgb.convert("L").resize((size, size), Image.Resampling.BILINEAR), dtype=float)
+    patch -= patch.mean()
+    norm = float(np.linalg.norm(patch))
+    return patch / norm if norm > 0 else patch
+
+
 def compute_fingerprint(image: Image.Image) -> ImageFingerprint:
-    """dHash of the 9x8 grey thumbnail + a 32x32 normalised grey patch."""
+    """dHash of the 9x8 grey thumbnail + a 32x32 product-region grey patch."""
     rgb = to_rgb(image)
     small = np.asarray(rgb.convert("L").resize((9, 8), Image.Resampling.LANCZOS), dtype=int)
     bits = (small[:, 1:] > small[:, :-1]).flatten()
     value = 0
     for bit in bits:
         value = (value << 1) | int(bit)
-    patch = np.asarray(rgb.convert("L").resize((32, 32), Image.Resampling.BILINEAR), dtype=float)
-    patch -= patch.mean()
-    norm = float(np.linalg.norm(patch))
-    if norm > 0:
-        patch /= norm
-    return ImageFingerprint(dhash=value, gray=patch)
+    return ImageFingerprint(dhash=value, gray=_product_patch(rgb))
 
 
 def hamming_distance(left: int, right: int) -> int:
@@ -58,13 +79,22 @@ def is_visual_duplicate(
     hard_threshold: int,
     soft_threshold: int,
     corr_threshold: float,
+    hard_corr_threshold: float = 0.985,
 ) -> bool:
-    """Same angle twice (resize/re-encode) => duplicate; a different angle is not."""
+    """Same angle twice (resize/re-encode) => duplicate; a different angle is not.
+
+    The dHash of two catalogue angles of the same appliance can sit inside the hard
+    hamming radius (both are a wide body band on white), so the hard path also
+    demands a near-perfect grey-patch correlation - re-served copies correlate
+    ~1.0, a genuinely different angle measures far below (live 2026-10-09: the
+    row's correct second angle was rejected as a "duplicate" of the first).
+    """
     for candidate in existing:
         distance = hamming_distance(fingerprint.dhash, candidate.dhash)
-        if distance <= hard_threshold:
+        correlation = _correlation(fingerprint.gray, candidate.gray)
+        if distance <= hard_threshold and correlation >= hard_corr_threshold:
             return True
-        if distance <= soft_threshold and _correlation(fingerprint.gray, candidate.gray) >= corr_threshold:
+        if distance <= soft_threshold and correlation >= corr_threshold:
             return True
     return False
 
@@ -72,10 +102,18 @@ def is_visual_duplicate(
 class ProductDedup:
     """Per-product fingerprint list.  Never global, never shared (S10)."""
 
-    def __init__(self, *, hard_threshold: int, soft_threshold: int, corr_threshold: float) -> None:
+    def __init__(
+        self,
+        *,
+        hard_threshold: int,
+        soft_threshold: int,
+        corr_threshold: float,
+        hard_corr_threshold: float = 0.985,
+    ) -> None:
         self._hard = hard_threshold
         self._soft = soft_threshold
         self._corr = corr_threshold
+        self._hard_corr = hard_corr_threshold
         self._entries: list[tuple[str, ImageFingerprint]] = []
         self._accepted_color_families: list[str] = []
 
@@ -108,6 +146,7 @@ class ProductDedup:
             hard_threshold=self._hard,
             soft_threshold=self._soft,
             corr_threshold=self._corr,
+            hard_corr_threshold=self._hard_corr,
         )
 
     def add(self, image: Image.Image, url: str) -> bool:
@@ -119,6 +158,7 @@ class ProductDedup:
             hard_threshold=self._hard,
             soft_threshold=self._soft,
             corr_threshold=self._corr,
+            hard_corr_threshold=self._hard_corr,
         ):
             return False
         self._entries.append((url, fingerprint))

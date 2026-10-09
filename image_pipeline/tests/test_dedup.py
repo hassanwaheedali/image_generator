@@ -79,3 +79,39 @@ def test_intra_gallery_color_consistency() -> None:
     ok, reason = dedup.check_color_consistency(img_purple)
     assert not ok
     assert "purple" in reason.lower() and "red" in reason.lower()
+
+
+def _ac_angle(display_x: int = 690, flap: bool = False) -> Image.Image:
+    """A champagne split-AC studio render; the knobs mimic two catalogue angles."""
+    from PIL import ImageDraw
+
+    img = Image.new("RGB", (900, 900), (250, 250, 250))
+    draw = ImageDraw.Draw(img)
+    draw.rounded_rectangle((60, 300, 840, 560), radius=40, fill=(203, 180, 140))
+    draw.rounded_rectangle((60, 500, 840, 600), radius=30, fill=(150, 110, 90))
+    draw.rectangle((display_x, 380, display_x + 90, 420), fill=(240, 235, 225))
+    if flap:
+        for x in range(100, 800, 60):
+            draw.line((x, 320, x + 30, 340), fill=(170, 150, 115), width=4)
+    return img
+
+
+def test_two_close_catalog_angles_are_both_kept() -> None:
+    """Live 2026-10-09: the row's correct second angle was rejected as a
+    "near-duplicate" because the full-frame hash is dominated by the white
+    backdrop.  The product-region fingerprint must keep both angles."""
+    dedup = new_dedup()
+    assert dedup.add(_ac_angle(), "https://cdn.haier.com/a/front.jpg") is True
+    assert dedup.add(_ac_angle(display_x=640, flap=True), "https://cdn.haier.com/a/vent.jpg") is True
+
+
+def test_a_re_served_copy_of_the_same_angle_still_duplicates() -> None:
+    import io
+
+    original = _ac_angle()
+    buf = io.BytesIO()
+    original.resize((630, 630)).save(buf, "JPEG", quality=80)
+    served = Image.open(io.BytesIO(buf.getvalue())).resize((900, 900))
+    dedup = new_dedup()
+    assert dedup.add(original, "https://cdn.haier.com/a/front.jpg") is True
+    assert dedup.add(served, "https://cdn.haier.com/a/front-630.jpg") is False

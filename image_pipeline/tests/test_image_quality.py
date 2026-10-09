@@ -1014,3 +1014,31 @@ def test_a_blurred_below_floor_payload_stays_rejected_with_sharpness_checked() -
             blur_sharpness_floor=0.02,
         )
     assert "blurry" in exc.value.detail
+
+
+def _grey_emblem() -> Image.Image:
+    """The Haier 'AI + leaf' badge shape: monochrome ink on a grey disc."""
+    from PIL import ImageDraw
+
+    emblem = Image.new("RGB", (900, 900), (217, 217, 217))
+    draw = ImageDraw.Draw(emblem)
+    draw.ellipse((20, 20, 880, 880), outline=(85, 85, 85), width=22)
+    draw.regular_polygon((430, 380, 190), 6, outline=(85, 85, 85), width=26)
+    draw.ellipse((430, 430, 800, 800), outline=(85, 85, 85), width=26)
+    draw.line((470, 760, 760, 470), fill=(85, 85, 85), width=26)
+    return emblem
+
+
+def test_a_monochrome_emblem_is_rejected_by_s14() -> None:
+    """Live 2026-10-09: the registry gallery's AI emblem sailed through S7 (its
+    ring *is* calm, its corners neutral).  S14 names the logo: achromatic, grey
+    ground, dark ink."""
+    config = PipelineConfig(output_dir=Path("/tmp/s14"), dry_run=True)
+    assert run_quality_gates(_grey_emblem(), config)[0] == "S14"
+
+
+def test_product_photos_still_pass_s14() -> None:
+    config = PipelineConfig(output_dir=Path("/tmp/s14"), dry_run=True)
+    for colour in ("#c9a227", "#e8e8e8", "#101010", "#2f5fa8"):
+        rule, _ = run_quality_gates(clean_product_image(900, 900, colour), config)
+        assert rule == "ok", colour

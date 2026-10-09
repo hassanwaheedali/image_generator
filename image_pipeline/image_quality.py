@@ -330,6 +330,43 @@ def neutral_corner_count(
 
 
 # --------------------------------------------------------------------------- #
+# S14 - monochrome logo / emblem gate
+# --------------------------------------------------------------------------- #
+def is_monochrome_emblem(image: Image.Image, config: PipelineConfig) -> bool:
+    """Safeguard S14: a flat monochrome badge on a non-white ground is a logo.
+
+    Live 2026-10-09: Haier's registry gallery mixed the brand's "AI + leaf" emblem -
+    dark-grey strokes and a ring on a light-grey disc - into the product images, and
+    it sailed through S7 because its border ring *is* one calm colour and its four
+    corners are neutral.  Three signals together name it: the picture is entirely
+    achromatic (no chroma anywhere, unlike any appliance photo), its ground is not
+    the white studio backdrop (corner value below the white level), and it carries
+    a real share of dark ink strokes.  A white/grey/black appliance on a white
+    backdrop always keeps the white ground, so product shots never trip it.
+    """
+    if not config.logo_gate_enabled:
+        return False
+    thumb = image.convert("RGB").resize((128, 128), Image.Resampling.BOX)
+    arr = np.asarray(thumb, dtype=np.float32) / 255.0
+    maximum = arr.max(axis=-1)
+    delta = maximum - arr.min(axis=-1)
+    if float((delta < 0.08).mean()) < config.logo_achromatic_min_fraction:
+        return False
+    # The ground is what every corner shows; a single white corner already proves a
+    # studio backdrop (a promo strip may darken two corners, an emblem darkens none).
+    corner = max(
+        float(maximum[:16, :16].mean()),
+        float(maximum[:16, -16:].mean()),
+        float(maximum[-16:, :16].mean()),
+        float(maximum[-16:, -16:].mean()),
+    )
+    if corner >= config.logo_background_max_value:
+        return False
+    ink = float((maximum < config.logo_ink_max_value).mean())
+    return ink >= config.logo_ink_min_fraction
+
+
+# --------------------------------------------------------------------------- #
 # S9
 # --------------------------------------------------------------------------- #
 _DETECTOR_TLS = threading.local()
@@ -660,6 +697,8 @@ def run_quality_gates(
         return ("S6", f"aspect {ratio:.2f} > {config.max_aspect_ratio}")
     if is_qr_or_barcode(image):
         return "S9", "QR/barcode detected"
+    if is_monochrome_emblem(image, config):
+        return "S14", "monochrome logo/emblem on a grey ground - not a product photo"
     ring_clean = border_is_clean(
         image,
         ring_ratio=config.border_ring_ratio,

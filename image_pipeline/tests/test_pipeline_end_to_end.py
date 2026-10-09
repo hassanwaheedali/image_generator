@@ -2045,3 +2045,34 @@ def test_official_below_floor_picture_publishes_before_retailer_search(tmp_path:
     official_at = next(i for i, entry in enumerate(log) if entry["url"] == small_url)
     retail_at = next(i for i, entry in enumerate(log) if "retail.pk" in entry["url"])
     assert official_at < retail_at                # official kept before retailer touched
+
+
+def test_an_ai_emblem_in_the_gallery_is_rejected_not_published(tmp_path: Path) -> None:
+    """Live 2026-10-09: Haier's registry mixed the brand AI emblem into the product
+    gallery and it was *kept*.  S14 must reject the badge and still publish the
+    real product photos."""
+    from PIL import ImageDraw
+
+    emblem_url = "https://image.haier.com/pk/air-conditioners/ai-emblem.png"
+    emblem = Image.new("RGB", (900, 900), (217, 217, 217))
+    draw = ImageDraw.Draw(emblem)
+    draw.ellipse((20, 20, 880, 880), outline=(85, 85, 85), width=22)
+    draw.regular_polygon((430, 380, 190), 6, outline=(85, 85, 85), width=26)
+    draw.ellipse((430, 430, 800, 800), outline=(85, 85, 85), width=26)
+    page = load_fixture("product_ok").replace(IMG1, emblem_url)
+    images = gallery_images()
+    images[emblem_url] = png_bytes(emblem)
+    config = live_config(tmp_path)
+    deps, _, _, _ = build_deps(tmp_path, {HAIER_PAGE: page}, images)
+    result, accepted = process_product(
+        task(0, "Haier HSU-12HFPAA Inverter AC", (HAIER_PAGE,)), deps, config
+    )
+    log = [
+        json.loads(line)
+        for line in (tmp_path / "out" / "decisions.jsonl").read_text().splitlines()
+    ]
+    s14 = [entry for entry in log if entry["rule_id"] == "S14"]
+    assert [entry["url"] for entry in s14] == [emblem_url]
+    assert all(entry["decision"] == "reject" for entry in s14)
+    assert all(entry["url"] != emblem_url for entry in log if entry["decision"] == "keep")
+    assert result.status is Status.OK

@@ -409,6 +409,7 @@ def process_product(
         hard_threshold=config.dedup_hamming_threshold,
         soft_threshold=config.dedup_hamming_soft_threshold,
         corr_threshold=config.dedup_corr_threshold,
+        hard_corr_threshold=config.dedup_hard_corr_threshold,
     )
 
     accepted: list[AcceptedImage] = []
