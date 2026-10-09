@@ -271,3 +271,11 @@ def test_official_haier_page_tries_a_size_ladder_retailers_do_not() -> None:
     # upper-cased extension on the same ladder
     upper = "https://image.haier.com/pk/tvs/W020260512624867701503_480.PNG"
     assert upscale_candidates(upper, True)[0] == upper.replace("_480.PNG", ".PNG")
+
+
+def test_remote_and_accessory_urls_are_badged() -> None:
+    from url_filters import has_bad_keyword
+
+    assert has_bad_keyword("https://cdn.lg.com/p/lg-ac-remote-control.jpg")
+    assert has_bad_keyword("https://cdn.lg.com/p/accessories/dual-cool.png")
+    assert not has_bad_keyword("https://cdn.lg.com/p/lg-dual-cool-inverter-i24cgh.jpg")

@@ -20,7 +20,7 @@ BAD_URL_KEYWORDS: frozenset[str] = frozenset(
         "pinterest", "share", "sharer", "avatar", "placeholder", "pixel",
         "spacer", "qr", "qrcode", "barcode", "warranty", "guarantee", "seal",
         "certified", "energy-guide", "star-rating", "special-price", "topimg",
-        "newpro",
+        "newpro", "remote", "accessory", "accessories",
     }
 )
 
@@ -199,6 +199,11 @@ def url_path_tokens(url: str) -> tuple[str, ...]:
     """Path segments split into alphanumeric tokens (lowercased)."""
     path = urlsplit(url).path
     return tuple(token for token in _TOKEN_SPLIT_RE.split(path.lower()) if token)
+
+
+def url_filename(url: str) -> str:
+    """Last path segment of a URL (no query string)."""
+    return urlsplit(url).path.rsplit("/", 1)[-1]
 
 
 def has_bad_keyword(url: str, extra_keywords: Iterable[str] = ()) -> bool:

@@ -79,7 +79,19 @@ def isolate_main_product(
         degraded = True
         if fallback is None:
             return rgb, True
-        box = _pad_box(fallback, config.padding_px, rgb.size)
+        # The near-white body edges sit *inside* the tolerance, so pad far more
+        # generously than for a chromatic product - cropping to the dark parts
+        # alone shaves the product's own edges (vent slivers, cut side panels).
+        generous = config.padding_px + max(8, min(rgb.width, rgb.height) // 25)
+        box = _pad_box(fallback, generous, rgb.size)
+        box_w = box[2] - box[0]
+        box_h = box[3] - box[1]
+        area_ratio = (box_w * box_h) / float(rgb.width * rgb.height)
+        if area_ratio < config.white_fallback_min_area_ratio:
+            # Only a sliver of dark pixels (vents, logo, a remote's screen): the
+            # product itself is invisible to the mask.  Publish the full frame -
+            # its background is already the white the template wants.
+            return rgb, True
         crop = rgb.crop(box)
         if crop.width < 2 or crop.height < 2:
             return rgb, True
@@ -173,12 +185,20 @@ def to_square_canvas(
     background: tuple[int, int, int] = (255, 255, 255),
     *,
     fill_ratio: float = 0.92,
+    max_upscale: float = 0.0,
 ) -> Image.Image:
-    """Scale to fit inside a square canvas, pad with the background colour, centre."""
+    """Scale to fit inside a square canvas, pad with the background colour, centre.
+
+    ``max_upscale`` (when > 0) caps how far a small image may be blown up: a
+    120px remote control scaled to fill a 1200px canvas is 10x mush, better
+    small and sharp in the middle of the canvas than giant and unreadable.
+    """
     rgb = to_rgb(image)
     if rgb.width <= 0 or rgb.height <= 0:
         return Image.new("RGB", (side, side), background)
     scale = min(side / rgb.width, side / rgb.height) * fill_ratio
+    if max_upscale > 0:
+        scale = min(scale, max_upscale)
     scale = max(scale, 1e-6)
     target = (max(1, round(rgb.width * scale)), max(1, round(rgb.height * scale)))
     resized = rgb.resize(target, Image.Resampling.LANCZOS)

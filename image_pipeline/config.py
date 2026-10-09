@@ -395,7 +395,7 @@ class PipelineConfig:
     #: on LED TVs the screen shows arbitrary content, so a picture-based colour check
     #: can never be trusted there.  Flip on manually for a run that really needs it
     #: (e.g. a colourway-mixing brand page); display products stay exempt regardless.
-    color_gate_enabled: bool = False
+    color_gate_enabled: bool = True
 
     # ----- last-resort salvage --------------------------------------------
     #: Owner decision 2026-10-08 ("jab kuch na bachey toh kam quality wali hi le lon"):
@@ -421,6 +421,14 @@ class PipelineConfig:
     isolation_neighbor_distance_px: float = 35.0
     degenerate_crop_ratio: float = 0.03
     white_fallback_tolerance: int = 10
+    #: White-on-white fallback crops must cover at least this share of the frame;
+    #: below it only dark slivers (vents, a remote's screen) were detected and the
+    #: full frame is published instead of a tight crop around nothing.
+    white_fallback_min_area_ratio: float = 0.20
+    #: Ceiling on blow-up inside ``to_square_canvas``: small sources (remote
+    #: controls, thumbnails that slipped through) stay small and sharp on the
+    #: canvas instead of becoming 10x mush.  0 disables the cap.
+    max_upscale: float = 2.0
     unsharp_radius: float = 0.75
     unsharp_percent: int = 30
     unsharp_threshold: int = 4
@@ -645,6 +653,10 @@ class PipelineConfig:
             raise ConfigError("isolation_neighbor_distance_px must be >= 0")
         if not 0 <= self.white_fallback_tolerance <= 64:
             raise ConfigError("white_fallback_tolerance must be in [0, 64]")
+        if not 0.0 < self.white_fallback_min_area_ratio <= 1.0:
+            raise ConfigError("white_fallback_min_area_ratio must be in (0, 1]")
+        if self.max_upscale < 0:
+            raise ConfigError("max_upscale must be >= 0 (0 disables the cap)")
         if self.unsharp_radius <= 0 or not 0 < self.unsharp_percent <= 500:
             raise ConfigError("unsharp_radius > 0 and 0 < unsharp_percent <= 500")
         if self.unsharp_threshold < 0:

@@ -104,6 +104,7 @@ from url_filters import (
     is_fetchable_product_url,
     prioritize_source_urls,
     upscale_candidates,
+    url_filename,
 )
 from variant_terms import identity_alpha_tail
 
@@ -310,6 +311,24 @@ def ensure_banner_url(config: PipelineConfig, deps: PipelineDeps, role: str) -> 
 # --------------------------------------------------------------------------- #
 # one product
 # --------------------------------------------------------------------------- #
+def relax_s2_when_description_only(
+    candidates: list[ImageCandidate],
+) -> list[ImageCandidate]:
+    """Drop the S2 flag when a page has *nothing but* description-region images.
+
+    Woo/shopify builds often render the whole gallery inside the description
+    article; rejecting every image leaves the product empty while the owner can
+    see five correct photos on screen (ES-24AR02W on surmawala).  A page that
+    also has a normal gallery keeps S2 at full strength.
+    """
+    if candidates and all("S2" in candidate.dom_flags for candidate in candidates):
+        return [
+            replace(c, dom_flags=tuple(f for f in c.dom_flags if f != "S2"))
+            for c in candidates
+        ]
+    return candidates
+
+
 def _decide_candidate(
     candidate: ImageCandidate,
     keys: ModelKeys,
@@ -323,6 +342,11 @@ def _decide_candidate(
         return "S5", "URL does not have an image file extension"
     if has_bad_keyword(candidate.url):
         return "S5", "bad keyword in image URL"
+    # Whole-token matching cannot see a logo inside a decorated file name
+    # ("cropped-logooooooo.png" - a site branding image that passed S7 because
+    # the logo itself sits on a clean white background).  Substring, not token.
+    if "logo" in url_filename(candidate.url).lower():
+        return "S5", "image filename contains 'logo' (site branding)"
     if url_belongs_to_other_model(candidate.url, keys):
         return "S4", "image URL belongs to another model"
     if "S2" in candidate.dom_flags:
@@ -1303,6 +1327,7 @@ def _consume_candidates(
     leaving the rest of the product's own photos unexamined.
     """
     budget.grant(page_url, _page_download_allowance(candidates, config))
+    candidates = relax_s2_when_description_only(candidates)
     for candidate in candidates:
         # Stop at the customer *target* (3 by default), not the hard maximum (10):
         # downloading 9-11 images per page when 3 publish was the single biggest
@@ -1535,6 +1560,7 @@ def _compose_and_save(
         isolated,
         config.canonical_side,
         fill_ratio=config.product_fill_ratio,
+        max_upscale=config.max_upscale,
     )
     square = sharpen(
         square,
