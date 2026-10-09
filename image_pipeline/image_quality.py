@@ -46,6 +46,14 @@ class ImageValidationError(Exception):
 # --------------------------------------------------------------------------- #
 # S13 - bytes must really be an image
 # --------------------------------------------------------------------------- #
+def _looks_like_raster(content: bytes) -> bool:
+    """Magic-byte sniff for servers that mislabel rasters (``webp``, ``binary``)."""
+    head = content[:16]
+    if head[:4] == b"RIFF" and content[8:12] == b"WEBP":
+        return True
+    return head.startswith((b"\x89PNG\r\n\x1a\n", b"\xff\xd8", b"GIF8", b"BM"))
+
+
 def validate_image_bytes(
     content: bytes,
     content_type: str = "",
@@ -69,7 +77,7 @@ def validate_image_bytes(
     declared = content_type.split(";")[0].strip().lower()
     if declared in _FORBIDDEN_CONTENT_TYPES:
         raise ImageValidationError("S13", f"content-type {declared} is not a raster image")
-    if declared and not declared.startswith("image/"):
+    if declared and not declared.startswith("image/") and not _looks_like_raster(content):
         raise ImageValidationError("S13", f"content-type {declared} is not an image")
     if content.lstrip()[:5].lower().startswith(b"<svg") or b"<svg" in content[:200].lower():
         raise ImageValidationError("S13", "SVG payload")
@@ -812,8 +820,70 @@ def verify_image_color(
     if not target_family:
         return True, ""
 
+    # Achromatic targets (black/white/grey rows) are judged by the product area
+    # itself, not the hue family table: the foreground mask throws the near-white
+    # body away as "background", so a white/gold unit on a black row slipped
+    # through the old chroma-only rule (EcoStar Duke).  Two signals, both
+    # measured over the central region: (1) brightness conflict - a bright unit
+    # on a black row, a dark unit on a white row; (2) chromatic dominance - the
+    # product area is *mostly* a saturated colour (a green fridge on a white
+    # row).  A small accent (blue control panel on a white dispenser) covers
+    # too little of the centre to fire either rule.
+    if target_family in ("black", "white", "grey"):
+        thumb = image.convert("RGB").resize((64, 64), Image.Resampling.BOX)
+        arr = np.asarray(thumb, dtype=np.float32) / 255.0
+        central = arr[7:57, 7:57]
+        if central.size == 0:
+            return True, ""
+        c_max = central.max(axis=-1)
+        c_delta = c_max - central.min(axis=-1)
+        central_mean = float(c_max.mean())
+        bg = (c_max > 0.90) & (c_delta < 0.08)
+        product = ~bg
+        product_frac = float(np.mean(product))
+        product_mean = float(c_max[product].mean()) if product.any() else 1.0
+        dark_frac = float(np.mean(c_max < 0.45))
+        chromatic_coverage = float(np.mean((c_delta > 0.10) & product))
+        if target_family == "black" and central_mean > 0.75 and dark_frac < 0.08:
+            # No dark body anywhere in the product area - a white/bright unit on a
+            # black row.  The dark_frac guard keeps a *correct* small black unit
+            # (few dark pixels, lots of white background) from being rejected.
+            return False, (
+                f"product area is bright (mean {central_mean:.2f}, "
+                f"dark coverage {dark_frac:.0%}) - "
+                f"conflicts with target '{target_color_word}' (family black)"
+            )
+        if target_family == "white":
+            if central_mean < 0.45:
+                return False, (
+                    f"product area is dark (mean {central_mean:.2f}) - "
+                    f"conflicts with target '{target_color_word}' (family white)"
+                )
+            if product_frac >= 0.30 and product_mean < 0.30:
+                # A large, near-black body dominates the frame (slim wide unit on a
+                # white row survives the plain mean test because white background
+                # outnumbers it).
+                return False, (
+                    f"product area is dominated by a dark body "
+                    f"(coverage {product_frac:.0%}, mean {product_mean:.2f}) - "
+                    f"conflicts with target '{target_color_word}' (family white)"
+                )
+        if chromatic_coverage >= 0.45:
+            return False, (
+                f"product area is a saturated colour "
+                f"({chromatic_coverage:.0%} chromatic) - "
+                f"conflicts with target '{target_color_word}' (family {target_family})"
+            )
+        return True, ""
+
     profile = extract_foreground_color_profile(image)
     if not profile.is_chromatic:
+        return True, ""
+
+    # A small chromatic accent must not condemn the whole image (a gold handle on
+    # a maroon fridge): a family conflict needs the foreground to be *mostly*
+    # that colour.
+    if profile.chromatic_ratio < 0.45:
         return True, ""
 
     # Conflicting chromatic pairings between distinct coloured appliance variants

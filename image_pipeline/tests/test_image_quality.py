@@ -838,3 +838,122 @@ def test_sharpness_score_separates_crisp_from_blurred() -> None:
     assert sharpness_score(crisp) > 0.02
     assert sharpness_score(pale) > 0.02                 # low contrast but sharp
     assert sharpness_score(blurred) < 0.01
+
+
+# --------------------------------------------------------------------------- #
+# white-on-white isolation guards (owner 2026-10-08: sliver crop, remote zoom)
+# --------------------------------------------------------------------------- #
+def test_white_on_white_sliver_publishes_full_frame(config: PipelineConfig) -> None:
+    """A white unit on white bg leaves only dark vent slivers - crop nothing."""
+    from compositing import isolate_main_product
+
+    canvas = Image.new("RGB", (400, 400), (255, 255, 255))
+    ImageDraw.Draw(canvas).rectangle((50, 196, 350, 204), fill=(60, 60, 60))
+    out, degraded = isolate_main_product(canvas, config)
+    assert out.size == (400, 400)          # full frame, not a vent sliver
+    assert degraded is True
+
+
+def test_white_on_white_body_is_cropped_with_generous_padding(
+    config: PipelineConfig,
+) -> None:
+    """A real near-white body still isolates, padded so its edges survive."""
+    from compositing import isolate_main_product
+
+    canvas = Image.new("RGB", (400, 400), (255, 255, 255))
+    ImageDraw.Draw(canvas).rectangle((80, 100, 320, 300), fill=(238, 238, 238))
+    out, degraded = isolate_main_product(canvas, config)
+    assert out.size != (400, 400)
+    assert out.width >= 240 + 40           # body plus generous padding each side
+    assert degraded is True
+
+
+def test_upscale_cap_keeps_small_sources_small() -> None:
+    """A 60px remote must not be blown to 10x mush across the canvas."""
+    from compositing import to_square_canvas
+
+    tiny = Image.new("RGB", (60, 40), (30, 30, 30))
+    canvas = to_square_canvas(tiny, 1000, max_upscale=2.0)
+    assert canvas.getpixel((5, 5)) == (255, 255, 255)     # canvas padding survives
+    assert canvas.getpixel((500, 500)) != (255, 255, 255)  # product still centred
+
+
+# --------------------------------------------------------------------------- #
+# S16 achromatic colourway rules (owner 2026-10-08: white unit on a black row)
+# --------------------------------------------------------------------------- #
+def test_black_target_rejects_a_bright_unit() -> None:
+    from image_quality import verify_image_color
+
+    shot = Image.new("RGB", (600, 600), (255, 255, 255))
+    ImageDraw.Draw(shot).rectangle((110, 150, 490, 450), fill=(245, 235, 205))
+    ok, reason = verify_image_color(shot, "black")
+    assert ok is False
+    assert "bright" in reason
+
+
+def test_white_target_rejects_a_dark_unit() -> None:
+    from image_quality import verify_image_color
+
+    shot = Image.new("RGB", (600, 600), (255, 255, 255))
+    ImageDraw.Draw(shot).rectangle((50, 50, 550, 550), fill=(15, 15, 18))
+    ok, reason = verify_image_color(shot, "white")
+    assert ok is False
+    assert "dark" in reason
+
+
+def test_white_target_tolerates_a_small_blue_accent() -> None:
+    """The WD-1051 dispenser: white body, blue control panel - not a conflict."""
+    from image_quality import verify_image_color
+
+    shot = Image.new("RGB", (600, 600), (255, 255, 255))
+    draw = ImageDraw.Draw(shot)
+    draw.rectangle((150, 120, 450, 520), fill=(250, 250, 250))
+    draw.rectangle((280, 160, 360, 200), fill=(40, 80, 200))
+    ok, _ = verify_image_color(shot, "white")
+    assert ok is True
+
+
+# --------------------------------------------------------------------------- #
+# S13 magic-byte sniffing (owner 2026-10-08: tossdown serves "webp" content-type)
+# --------------------------------------------------------------------------- #
+def test_mislabeled_webp_content_type_still_accepted() -> None:
+    buffer = io.BytesIO()
+    Image.new("RGB", (300, 300), (200, 30, 30)).save(buffer, format="WEBP", quality=90)
+    image = validate_image_bytes(
+        buffer.getvalue(), "webp", max_bytes=5_000_000, max_pixels=30_000_000
+    )
+    assert image.size == (300, 300)
+
+
+def test_non_raster_content_type_without_magic_bytes_rejected() -> None:
+    with pytest.raises(ImageValidationError) as info:
+        validate_image_bytes(
+            b"<html>not a picture</html>",
+            "text/html",
+            max_bytes=5_000_000,
+            max_pixels=30_000_000,
+        )
+    assert info.value.rule_id == "S13"
+
+
+def test_black_row_keeps_a_small_correct_black_unit() -> None:
+    """Audit 2026-10-09: a small black product on a big white canvas must survive."""
+    from image_quality import verify_image_color
+
+    shot = Image.new("RGB", (1000, 1000), (255, 255, 255))
+    ImageDraw.Draw(shot).rectangle((350, 320, 650, 680), fill=(20, 20, 22))
+    ok, reason = verify_image_color(shot, "black")
+    assert ok is True, reason
+
+
+def test_white_row_rejects_a_wide_dark_unit() -> None:
+    """Audit 2026-10-09: a slim wide black AC on a white row - mean alone misses it."""
+    from image_quality import verify_image_color
+
+    shot = Image.new("RGB", (1000, 1000), (255, 255, 255))
+    d = ImageDraw.Draw(shot)
+    d.rectangle((75, 360, 925, 640), fill=(22, 22, 24))
+    d.rectangle((95, 585, 905, 610), fill=(40, 40, 42))
+    ok, reason = verify_image_color(shot, "white")
+    assert ok is False
+    assert "dark" in reason

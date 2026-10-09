@@ -1795,9 +1795,10 @@ def test_page_downloads_stop_at_the_target_not_the_maximum(tmp_path: Path) -> No
     assert len(image_fetcher.requested) == config.target_images_per_product
 
 
-def test_color_gate_is_off_by_default(tmp_path: Path) -> None:
-    """Owner decision: the S16 pixel-colour gate is opt-in, not on by default."""
-    assert live_config(tmp_path).color_gate_enabled is False
+def test_color_gate_is_on_by_default(tmp_path: Path) -> None:
+    """Owner decision 2026-10-08: a wrong colourway got published (white unit on a
+    black row), so S16 now guards acceptance by default and is opt-*out*."""
+    assert live_config(tmp_path).color_gate_enabled is True
 
 
 # --------------------------------------------------------------------------- #
@@ -1948,3 +1949,49 @@ def test_haier_thumb_upgrades_to_the_crisp_original_rung(tmp_path: Path) -> None
     # URL (_480) stays as provenance in source_url
     assert accepted[0].source_url == soft
     assert result.status is Status.PARTIAL
+
+
+# --------------------------------------------------------------------------- #
+# owner 2026-10-08: branding file names and description-only galleries
+# --------------------------------------------------------------------------- #
+def test_decorated_logo_filename_is_rejected_at_s5() -> None:
+    """``cropped-logooooooo.png`` - whole-token matching cannot see the logo."""
+    from models import ModelKeys
+    from pipeline import _decide_candidate
+
+    keys = ModelKeys(cleaned_title="Orient Hyper 18X", tokens=("18X",), title_key="orient")
+    candidate = ImageCandidate(
+        url="https://bijlibazar.pk/wp-content/uploads/2024/10/cropped-logooooooo.png",
+        page_url="https://bijlibazar.pk/product/orient-hyper-18x/",
+        source="state_json",
+        order=0,
+        matches_model=True,
+    )
+    decision = _decide_candidate(candidate, keys, set())
+    assert decision is not None
+    assert decision[0] == "S5"
+    assert "logo" in decision[1]
+
+
+def test_description_only_page_relaxes_s2() -> None:
+    from pipeline import relax_s2_when_description_only
+
+    flagged = [
+        ImageCandidate(url=f"https://surmawala.pk/uploads/es-24ar02w-{i}.jpg",
+                       page_url="https://surmawala.pk/product/es-24ar02w/",
+                       source="gallery_container", order=i, matches_model=True,
+                       dom_flags=("S2",))
+        for i in range(5)
+    ]
+    relaxed = relax_s2_when_description_only(flagged)
+    assert all(c.dom_flags == () for c in relaxed)
+
+    mixed = [
+        ImageCandidate(url="https://x.pk/a.jpg", page_url="https://x.pk/p/",
+                       source="gallery_container", order=0, matches_model=True,
+                       dom_flags=("S2",)),
+        ImageCandidate(url="https://x.pk/b.jpg", page_url="https://x.pk/p/",
+                       source="gallery_container", order=1, matches_model=True),
+    ]
+    kept = relax_s2_when_description_only(mixed)
+    assert kept[0].dom_flags == ("S2",)      # page has a real gallery: S2 stays strict
