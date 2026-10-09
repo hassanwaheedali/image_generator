@@ -218,6 +218,51 @@ def test_white_on_white_isolation_does_not_crash(config: PipelineConfig) -> None
     assert degraded is True
 
 
+def _split_shell_image(width: int = 1200, height: int = 700) -> Image.Image:
+    """A white product whose lower body is fainter than ``isolation_bg_distance``.
+
+    This is the owner-run shape of 2026-10-10 (Candy/Orient/Panasonic): the top casing
+    is dark enough for the foreground mask, the soft shading below it is not, so the
+    mask - and the crop that follows it - stops at the product's waist.
+    """
+    image = Image.new("RGB", (width, height), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    left, right = int(width * 0.1), int(width * 0.9)
+    top = int(height * 0.25)
+    draw.rectangle((left, top, right, top + 90), fill=(190, 190, 190))      # mask sees this
+    draw.rectangle((left, top + 90, right, int(height * 0.75)), fill=(243, 243, 243))
+    return image                                                            # mask misses this
+
+
+def test_crop_closure_recovers_a_faint_lower_body(config: PipelineConfig) -> None:
+    """S18: a crop may not cut the product, even where the foreground mask goes blind."""
+    image = _split_shell_image()
+    without, _ = isolate_main_product(image, replace(config, isolation_crop_closure=False))
+    with_closure, degraded = isolate_main_product(image, config)
+    assert with_closure.height > without.height * 1.5      # the faint half came back
+    assert without.height < 200                            # the shape of the old failure
+    ink = np.asarray(with_closure.convert("RGB"), dtype=int)
+    assert (ink == 243).any()                              # the recovered rows are inside
+    assert degraded is False
+
+
+def test_crop_closure_ignores_a_detached_mark(config: PipelineConfig) -> None:
+    """S18 only follows ink connected to the crop border; a lone corner logo stays out."""
+    marked = _split_shell_image()
+    ImageDraw.Draw(marked).rectangle((20, 20, 60, 40), fill=(10, 10, 10))
+    plain, _ = isolate_main_product(_split_shell_image(), config)
+    with_mark, _ = isolate_main_product(marked, config)
+    assert with_mark.size == plain.size
+
+
+def test_crop_closure_leaves_a_complete_crop_untouched(config: PipelineConfig) -> None:
+    """Nothing a clean crop already contains is rearranged by the closure."""
+    image = clean_product_image(900, 400)
+    without, _ = isolate_main_product(image, replace(config, isolation_crop_closure=False))
+    with_closure, _ = isolate_main_product(image, config)
+    assert without.size == with_closure.size
+
+
 def test_square_canvas_and_sharpen(config: PipelineConfig) -> None:
     square = to_square_canvas(clean_product_image(900, 400), config.canonical_side,
                               fill_ratio=config.product_fill_ratio)

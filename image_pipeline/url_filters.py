@@ -520,11 +520,48 @@ def upscale_candidates(url: str, official: bool = False) -> tuple[str, ...]:
                 rewritten = re.sub(pattern, rf"_{size}\1", path)
                 if rewritten != path:
                     _add_candidate(out, parts, rewritten, query, url)
+            for sibling in _haier_extension_siblings(pattern, path):
+                _add_candidate(out, parts, sibling, query, url)
             continue
         rewritten = re.sub(pattern, replacement, path)
         if rewritten != path:
             _add_candidate(out, parts, rewritten, query, url)
     out.append(url)
+    return tuple(out)
+
+
+#: Sibling extensions tried after a sized thumbnail's whole same-extension ladder
+#: failed.  Evidence: ``output/decisions.jsonl`` of the 2026-10-09 run, row
+#: ``Haier HSU-13HFCP/023WDC(W)-Triple Inverter-Haier Pakistan`` - five gallery
+#: thumbs died at S8 ``too small 60x60`` after ``.jpg``/``_1680``/``_1000``/
+#: ``_800``/``_480`` all missed, while two ``.png`` assets from the *same* folder
+#: were accepted.  Haier keeps some gallery art PNG-only (and the page markup
+#: labels those files ``.jpg``), so the ladder is allowed to change extension -
+#: never forced: the URL the page gave is still the last candidate.
+_SIBLING_EXTS: tuple[str, ...] = (".png", ".jpg")
+_SIBLING_SIZE_RUNGS: tuple[int | None, ...] = (None, 480)
+
+
+def _haier_extension_siblings(pattern: str, path: str) -> tuple[str, ...]:
+    """Same asset, sibling extension: ``X_60.jpg`` -> ``X.png`` and ``X_480.png``.
+
+    Pure function of the path; only ever called for official Haier pages, and
+    only with rungs that are not the extension the page already asked for.
+    """
+    out: list[str] = []
+    for size in _SIBLING_SIZE_RUNGS:
+        replacement = r"\1" if size is None else rf"_{size}\1"
+        rung = re.sub(pattern, replacement, path)
+        if rung == path:
+            continue                          # not a sized thumbnail: nothing to swap
+        stem, dot, ext = rung.rpartition(".")
+        if not dot:
+            continue
+        for alt in _SIBLING_EXTS:
+            if alt.lower() == f".{ext.lower()}":
+                continue                      # same extension as the page's own URL
+            if f"{stem}{alt}" not in out:
+                out.append(f"{stem}{alt}")
     return tuple(out)
 
 

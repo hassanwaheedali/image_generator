@@ -84,3 +84,28 @@ images → before/after sheet → measurement → evidence tag → owner approva
 * `CHANGELOG.md` + `docs/PROJECT_MAP.md` rule-registry updates, ruff + `mypy --strict` clean, complexity not increased.
 * An explicit list of what could not be verified from this sandbox (live fetch, owner-side visual pass).
 * Note for Option 2: which components are reusable unchanged and what small seam each needs.
+
+## 5 · EXECUTION LOG (measured, per gate)
+
+**2026-10-10 · S18 Crop Closure — product clipping in isolation. SHIPPED, needs one live re-run to confirm on the shop template.**
+
+Evidence trail, in order:
+1. Owner complaint: "the AC got cut. The product must not be touched, only the background."
+2. First measurement (bbox of raw vs bbox of isolated) was **discarded**: aspect "shifts"
+   it reported were soft-shadow removal, not clipping. Wrong metric, wrong conclusion.
+3. Second measurement, the one that means something: run the shipped `isolate_main_product`
+   on all 72 accepted raws and ask whether the crop's own border cuts ink (scan 6 levels
+   below pure white; the scan is calibrated - the ink box is flat from 2 to 24 levels on
+   these images, so JPEG noise cannot fake it). Result: **41 of 72 crops cut ink.**
+4. Cause: the crop box comes from `_single_body_box(silhouette)`, and the silhouette is
+   built with `isolation_bg_distance = 32`. A white shell fades 250 -> 243 -> 235, so its
+   lower body is invisible to that mask and the box ends at the waist. Lowering 32 was
+   rejected - it feeds the fraction test, the composite guard and dedup too.
+5. Fix: grow-only closure. Label the loose ink, pull in only the bodies touching the crop
+   border, never trim, `isolation_crop_closure = False` restores the old behaviour exactly.
+6. Verified on the owner's own images: +270 % / +203 % / +347 % / +55 % / +46 % height on
+   the five worst crops, the other 67 unchanged, `pytest -q` green, `ruff check` clean,
+   `mypy --strict` clean, sheet `docs/riper/evidence/crop-closure-before-after.png`.
+7. Open, deliberately not hidden: **13 products where the ink already touches the source's
+   own frame edge.** For those the site's file is the cut one; no crop can repair it. That
+   is a *candidate choice* problem (prefer an uncut source), not an isolation problem.

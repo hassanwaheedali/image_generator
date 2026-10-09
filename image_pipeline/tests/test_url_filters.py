@@ -273,6 +273,34 @@ def test_official_haier_page_tries_a_size_ladder_retailers_do_not() -> None:
     assert upscale_candidates(upper, True)[0] == upper.replace("_480.PNG", ".PNG")
 
 
+def test_official_haier_ladder_ends_with_sibling_extensions() -> None:
+    """Owner run 2026-10-09 (``output/decisions.jsonl``, HSU-13HFCP): five gallery
+    thumbs died at S8 ``too small 60x60`` because every ``.jpg`` rung 404'd, while
+    two ``.png`` files from the same folder were accepted.  An official page
+    therefore finishes the ladder with PNG/JPG siblings of the same asset; the
+    retailer path and the page's own URL stay exactly as they were."""
+    url = "https://image.haier.com/pk/air-conditioners/W020230419477907443672_60.jpg"
+    base = url.replace("_60.jpg", "")
+    official = upscale_candidates(url, True)
+    assert official[:5] == (
+        f"{base}.jpg",
+        f"{base}_1680.jpg",
+        f"{base}_1000.jpg",
+        f"{base}_800.jpg",
+        f"{base}_480.jpg",
+    )
+    assert official[5:7] == (f"{base}.png", f"{base}_480.png")   # siblings, after the ladder
+    assert official[-1] == url                                    # page's own URL still last
+    assert len(official) == len(set(official))                    # no duplicate rungs
+    # a .png thumbnail swaps to .jpg instead, and retailers see no new requests
+    png = "https://image.haier.com/pk/tvs/W020260512624867701503_60.png"
+    assert upscale_candidates(png, True)[5:7] == (
+        "https://image.haier.com/pk/tvs/W020260512624867701503.jpg",
+        "https://image.haier.com/pk/tvs/W020260512624867701503_480.jpg",
+    )
+    assert upscale_candidates(url) == (f"{base}_1000.jpg", url)
+
+
 def test_remote_and_accessory_urls_are_badged() -> None:
     from url_filters import has_bad_keyword
 

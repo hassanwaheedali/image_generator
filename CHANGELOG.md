@@ -8,6 +8,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **S18 - a crop may not cut the product.** The isolation box followed the strict
+  foreground mask, and a white shell on a white background fades out *inside* that
+  mask, so the box stopped at the product's waist. Measured on the owner run of
+  2026-10-10 (`output/decisions.jsonl` + its 72 accepted images): **41 of 72 crops
+  cut ink** - `Candy By Haier 0.8 Ton #01` kept 1342x195 of a 1342x695 unit (only the
+  blue vent strip), `EcoStar Emperor #01` kept 1066x87 (only the louvers),
+  `eComfort Pro KEC-1267S #01` 427x107. The box is now *closed*: ink connected to the
+  crop border is pulled in, a mark standing away from the product never widens it, and
+  nothing is ever trimmed. Grow-only, and switched off by
+  `isolation_crop_closure = False`. Verified on the owner's own images (height
+  +270 %, +203 %, +347 %, +55 %, +46 % on the five worst; the other 67 crops byte-size
+  identical) and eyeballed in `docs/riper/evidence/crop-closure-before-after.png`. **Untested
+  against a live re-run** - the composed result on the shop template still needs the
+  owner's eyes.
+- **Haier sized thumbnails may now be re-fetched as PNG.** `image.haier.com` serves
+  `W020230419477905891117_60.jpg`; the size ladder tried `.jpg` rungs only, so five
+  gallery images died at S8 `too small 60x60` in the same row whose two `.png` assets
+  were accepted. An official page now ends the ladder with the asset's `.png` /
+  `_480.png` sibling. *Tried, never forced* - the page's own URL stays the last
+  candidate, so a wrong guess costs one request and no decision. **Constructed, not
+  verified**: the sandbox cannot reach `image.haier.com`, so whether that sibling
+  exists is only answerable from the owner's machine.
 - **A row with no model code no longer crashes the run.** `_tolerated_spelling_reason`
   indexed `keys.identities[0]` for rows that own neither a model token nor a glued
   identity, so `Frost 18W Classic White | Orient Electronics Pakistan` came back as
