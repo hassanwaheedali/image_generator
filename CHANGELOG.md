@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **S18 crop closure now measures ink against the studio background, and only runs on a
+  near-white one.** Doubt-reviewing my own fix found a regression it would have caused:
+  "ink" was every pixel a few levels from *pure white*, so on a dark or gradient
+  background the whole frame is one connected body touching the crop border and the crop
+  grew to the entire picture (measured on a synthetic 900x600 before the fix: 413x213 ->
+  900x600) - which publishes a coloured background into a white template. The closure
+  exists for the white-on-white blindness only, so that is now its only territory.
+  Re-measured on the owner's 72 accepted images after the restriction: 34 crops grown,
+  38 identical, **0 shrunk** - the guard is grow-only by construction.
+- **The JSON-LD page-identity exception cannot be talked past.** First version required
+  one shared word between the node's identity text and the title - worthless, because the
+  identity text *includes* the node's `url`, which is the page slug the check just
+  trusted (measured: a "Megatron Titanium 12X" tile with the Frost URL copied in sailed
+  through). Now only `name`/`brand` are compared, and `url`/`sku` are excluded from
+  vouching for identity - the `sku`-copied-the-slug lie is blocked too, the honest node
+  and the real Orient capture still pass, and rows that own a model code are untouched.
 - **A row whose title has no model code can now use the page's own declared image.**
   `json_ld` accepted only a node whose name/sku/model matched a model key - and a title
   like `Frost 18W Classic White | Orient Electronics Pakistan` owns no key to match, so

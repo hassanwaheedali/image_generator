@@ -158,3 +158,18 @@ labelled degraded rather than counted as an independent review).
 - What I got wrong in the earlier report to the owner: I wrote "a wrong guess costs one
   request and no decision". The cost is potentially a wrong published image. Corrected
   here so the paper trail does not carry a false reassurance.
+
+**2026-10-10 · doubt cycle #2: every fix shipped in this pass, adversarially re-examined.**
+Degraded self-review again (no cross-model CLI in this sandbox), and every finding was
+settled by measurement on the owner's real images/log rather than by argument.
+
+| fix | what the review attacked | measured result | action |
+|---|---|---|---|
+| F1 tolerated-spelling crash | does the note hide a real failure? | the run's Frost row now logs a reason instead of `IndexError`; nothing else reads that string | confirmed safe |
+| F2 white-on-white before silhouette | does the order let a bad crop through? | yes - and that gap is what cut products; closed by S18 | fixed via S18 |
+| F7 shape-IoU dedup (0.90 + hamming<=6) | can it drop a legitimate second angle? | on 56 pairs of this run only the 2 owner-confirmed repeats collide; the "both close angles kept" fixture stays green | kept, watch-list: two full-bleed *posters* of one series normalise to similar shapes - revisit when S19 rejects layouts |
+| F8 one fingerprint per candidate | does the gate compare one image and store another? | `compute_fingerprint(image)`, `duplicate_reason(image, ...)` and `add(image, ..., fingerprint=...)` all take the same object; the re-check inside `add` is now dead work (harmless) | confirmed safe |
+| S18 crop closure | ink measured from pure white on dark backgrounds | 413x213 -> 900x600 on a synthetic dark frame = would ship a coloured background | fixed: background-relative ink, near-white only |
+| Haier sibling-extension rung | can a guessed URL replace the page's own file? | yes - probe uses `[0]`, download takes the first answer | contained: `url_rewrite_cross_extension_enabled = False` |
+| JSON-LD page identity | can a related tile claim this page and steal its image? | the first guard was circular (word check read the node's `url`); 3 of 4 lies passed | fixed: name/brand only; `url`/`sku` excluded from vouching |
+| open (pre-existing, not mine) | probe measures only the *guessed* URL | a small guess kills the candidate; the page's own URL is never probed | needs its own gate; proposed next |

@@ -104,6 +104,45 @@ def _page_slug(value: str) -> str:
     return re.sub(r"\.(?:html?|php|aspx?|shtml)$", "", tail, flags=re.IGNORECASE).casefold()
 
 
+#: Fields whose words name the *product a human would recognise*.  ``url`` and ``sku``
+#: are deliberately absent: they are what the page-identity check reads, and a field used
+#: to prove the node belongs to this page cannot also vouch for its identity - a tile
+#: lying its way in simply copies ``sku: "frost-18w-classic-white"`` from the page slug.
+_NAME_FIELDS = ("name", "brand")
+
+
+def _node_words(node: dict[str, Any]) -> set[str]:
+    """Lowercase words the node uses for *itself*, from its name fields only."""
+    parts: list[str] = []
+    for field in _NAME_FIELDS:
+        value = node.get(field)
+        if isinstance(value, str):
+            parts.append(value)
+        elif isinstance(value, dict):
+            name = value.get("name")
+            if isinstance(name, str):
+                parts.append(name)
+    return set(re.findall(r"[a-z]{3,}", " ".join(parts).casefold()))
+
+
+def _shares_a_word(node: dict[str, Any], context: ExtractionContext) -> bool:
+    """True when the node's own name repeats at least one word of the row's title.
+
+    A shop template that copies the current page's URL into every product block - which
+    real catalogs do, for canonical/SEO reasons - would otherwise let a *related*
+    product's photo in under the page-identity exception.  One shared word keeps the
+    honest case (node "Frost 18W Classic White" vs the same title) and blocks the lie
+    (node "Megatron Titanium 12X Olive Black" on the Frost page) - measured on both
+    shapes in tests/test_gallery_extractors.py, and the comparison must not read the
+    node's own ``url``: that string *is* the page slug.
+    """
+    words = _node_words(node)
+    title_words = set(context.keys.name_words) or set(
+        re.findall(r"[a-z]{3,}", context.keys.cleaned_title.casefold())
+    )
+    return bool(words & title_words)
+
+
 def _declares_page(node: dict[str, Any], page_url: str) -> bool:
     """True when the product node names *this* page as its own product page.
 
@@ -146,7 +185,7 @@ def extract(context: ExtractionContext) -> list[ImageCandidate]:
             if not identity:
                 continue
             if not find_matching_keys(identity, context.keys) and not (
-                model_free and _declares_page(node, context.page_url)
+                model_free and _declares_page(node, context.page_url) and _shares_a_word(node, context)
             ):
                 continue
             for url in _image_urls(node):

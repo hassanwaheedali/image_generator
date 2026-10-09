@@ -258,3 +258,31 @@ def test_model_bearing_rows_keep_the_strict_gate() -> None:
     context = _context(_LDPAGE, _two_product_page(), "Orient Megatron FW-9999X Titanium", "orient")
     assert context.keys.tokens  # the row owns a model code, so the exception must not apply
     assert [c.url for c in json_ld_extract(context)] == []
+
+
+def test_page_identity_lie_is_blocked_even_with_the_page_slug_as_sku() -> None:
+    """The word guard must not read the fields the identity check already trusts.
+
+    A tile that copies ``url`` (or ``sku``) from the page it is sitting on is the shape
+    real SEO templates produce; the name is what says which product the node is.
+    """
+    def run(name: str, sku: str, url: str, image: str) -> list[str]:
+        html = (
+            '<html><head><script type="application/ld+json">'
+            f'{{"@context":"https://schema.org","@type":"Product","name":"{name}",'
+            f'"sku":"{sku}","url":"{url}","image":"{image}"}}'
+            "</script></head><body></body></html>"
+        )
+        context = _context(_LDPAGE, html, "Frost 18W Classic White | Orient Electronics Pakistan", "orient")
+        return [candidate.url for candidate in json_ld_extract(context)]
+
+    slug = "frost-18w-classic-white"
+    assert run("Outdoor Unit Only", slug, "https://other.example/p", "https://cdn/ac/other.png") == []
+    assert run("Megatron Titanium 12X", "zzz", _LDPAGE, "https://cdn/ac/megatron.png") == []
+    assert run("Frost 18W Classic White", "zzz", _LDPAGE, "https://cdn/og/frost.jpg") == [
+        "https://cdn/og/frost.jpg"
+    ]
+    # a node whose only shared word with the title is the brand is still this product
+    assert run("Split AC 18000 BTU by Orient", "zzz", _LDPAGE, "https://cdn/og/ok.jpg") == [
+        "https://cdn/og/ok.jpg"
+    ]

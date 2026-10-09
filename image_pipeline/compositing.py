@@ -258,7 +258,9 @@ def _ink_closed_box(
     same frame is measured against *pure white* with a loose scan, its connected bodies
     are labelled, and only bodies that actually touch the crop border are pulled in.
     A mark standing away from the product - a corner logo, a price label - is a
-    separate body and never widens the crop.
+    separate body and never widens the crop.  Only runs on a near-white studio
+    background, which is the situation the mask goes blind in; anywhere else the mask
+    already sees the product and growing the box would only swallow the frame.
     """
     try:
         from scipy import ndimage
@@ -266,9 +268,18 @@ def _ink_closed_box(
         return box
     array = np.asarray(rgb, dtype=float)
     height, width = array.shape[:2]
-    ink = np.asarray(
-        (255.0 - array).max(axis=2) > config.isolation_ink_scan_distance, dtype=bool
-    )
+    # The closure exists for ONE problem: a near-white body fading into a near-white
+    # studio background, where the strict mask goes blind. Measuring "ink" against pure
+    # white looked harmless and was not - on a dark or gradient background every pixel is
+    # ink, one connected component touches the crop border, and the crop grew to the whole
+    # frame (measured on a synthetic 900x600: 413x213 -> 900x600), which would have
+    # published a coloured background into a white template. So the guard is restricted to
+    # the case it was built for: near-white studio background.
+    background = detect_background_color(rgb, patch_ratio=config.corner_patch_ratio)
+    if min(background) < 255 - config.white_fallback_tolerance:
+        return box
+    offset = np.array(background, dtype=float)
+    ink = np.asarray(np.abs(array - offset).max(axis=2) > config.isolation_ink_scan_distance, dtype=bool)
     if not ink.any():
         return box
     labels, count = ndimage.label(ink, structure=np.ones((3, 3), dtype=bool))

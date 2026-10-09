@@ -255,6 +255,22 @@ def test_crop_closure_ignores_a_detached_mark(config: PipelineConfig) -> None:
     assert with_mark.size == plain.size
 
 
+def test_crop_closure_stays_out_of_non_white_backgrounds(config: PipelineConfig) -> None:
+    """S18 measures ink against the studio background, and only runs on a near-white one.
+
+    Measured on a dark frame before the restriction: the whole background is ink, it is
+    one connected body touching the crop border, and the crop grew from 413x213 to the
+    full 900x600 - which would have published a coloured background into a white
+    template.  The closure exists for white-on-white blindness only.
+    """
+    for background in ((8, 8, 8), (70, 90, 140)):
+        image = Image.new("RGB", (900, 600), background)
+        ImageDraw.Draw(image).rounded_rectangle((250, 200, 650, 400), radius=18, fill=(250, 250, 250))
+        without, _ = isolate_main_product(image, replace(config, isolation_crop_closure=False))
+        with_closure, _ = isolate_main_product(image, config)
+        assert without.size == with_closure.size
+
+
 def test_crop_closure_leaves_a_complete_crop_untouched(config: PipelineConfig) -> None:
     """Nothing a clean crop already contains is rearranged by the closure."""
     image = clean_product_image(900, 400)
