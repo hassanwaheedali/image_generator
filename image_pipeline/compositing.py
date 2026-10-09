@@ -56,6 +56,147 @@ def white_fallback_bbox(
     return (int(cols[0]), int(rows[0]), int(cols[-1]) + 1, int(rows[-1]) + 1)
 
 
+def _foreground_mask(rgb: Image.Image, config: PipelineConfig) -> np.ndarray:
+    """Pixels far enough from the studio background colour to be called foreground."""
+    array = np.asarray(rgb, dtype=float)
+    background = np.array(detect_background_color(rgb, patch_ratio=config.corner_patch_ratio), dtype=float)
+    return np.asarray(np.abs(array - background).max(axis=2) > config.isolation_bg_distance, dtype=bool)
+
+
+def _product_silhouette(mask: np.ndarray, config: PipelineConfig) -> np.ndarray:
+    """The mask made solid: hairline gaps bridged, enclosed background filled.
+
+    Two failures of the raw difference mask were what cut products apart.  A white
+    shell on a white background differs from the background by only a few levels, so
+    the body is *hollow* - its outline breaks wherever the shading is soft, and the
+    component that survives is a strip.  A frame that holds several objects (an
+    "in-box items" diagram, a promo banner with a logo) has several components and
+    unioning their boxes crops to whichever ones happened to be close together.
+    Closing then filling turns a hollow body into one solid region, which is what a
+    product actually is.
+    """
+    try:
+        from scipy import ndimage
+    except Exception:                                       # pragma: no cover - optional dep
+        return mask
+    radius = max(1, round(min(mask.shape) * config.isolation_merge_radius_ratio))
+    structure = np.ones((2 * radius + 1, 2 * radius + 1), dtype=bool)
+    return np.asarray(ndimage.binary_fill_holes(ndimage.binary_closing(mask, structure=structure)), dtype=bool)
+
+
+def _solid_bodies(mask: np.ndarray, config: PipelineConfig) -> tuple[list[tuple[int, int, int, int]], list[float]]:
+    """Boxes and areas of the silhouette's connected bodies, largest first."""
+    try:
+        from scipy import ndimage
+    except Exception:                                       # pragma: no cover - optional dep
+        return [], []
+    labels, count = ndimage.label(mask)
+    if count == 0:
+        return [], []
+    slices = ndimage.find_objects(labels)
+    sizes = ndimage.sum(mask, labels, index=range(1, count + 1))
+    boxes: list[tuple[int, int, int, int]] = []
+    areas: list[float] = []
+    for rank in np.argsort(sizes)[::-1]:
+        index = int(rank)
+        area = float(sizes[index])
+        if area <= 0:
+            continue
+        box = _slice_to_box(slices[index])
+        if box is not None:
+            boxes.append(box)
+            areas.append(area)
+    return boxes, areas
+
+
+def _is_composite_frame(boxes: list[tuple[int, int, int, int]], areas: list[float], config: PipelineConfig) -> bool:
+    """True when the frame holds several separate objects, so cropping is meaningless.
+
+    An "in-box items" diagram, a spec sheet with a logo, or a promo banner is not one
+    product on a background: the largest body is a fraction of the whole, and the next
+    body is comparable to it.  Cropping such a frame to the largest component throws the
+    rest of the picture away and publishes a fragment (live 2026-10-09: the Inspire Pro
+    row's "In-box items" diagram was cropped to its single line-art indoor unit, and the
+    LG remote shot was cropped to a grey blob).  The safe answer is the full frame.
+    """
+    if len(boxes) < 2 or not areas:
+        return False
+    largest = areas[0]
+    if largest <= 0:
+        return False
+    # A layout, not a product with a badge: several bodies that are each a fair share of
+    # the largest one and sit far from it (a diagram's cells, a logo beside a photo).
+    comparable = [
+        (box, area)
+        for box, area in zip(boxes[1:], areas[1:], strict=True)
+        if area >= largest * config.isolation_multi_body_ratio
+    ]
+    if len(comparable) < 2:
+        return False
+    main_width = boxes[0][2] - boxes[0][0]
+    return any(
+        _box_distance(box, boxes[0]) > min(main_width, box[2] - box[0]) * 0.5 for box, _area in comparable
+    )
+
+
+def _white_on_white_crop(rgb: Image.Image, config: PipelineConfig) -> tuple[Image.Image, bool]:
+    """Crop a product the difference mask cannot see, or publish the frame untouched.
+
+    Both halves of the decision matter.  Near-white bodies *are* real - their edges only
+    sit a few levels from the background - so the box is padded generously, or the crop
+    shaves the product's own side panels.  But when the only pixels that differ from white
+    are dark parts of a *layout* (vents along one edge, a logo, an "in-box items" diagram),
+    the honest answer is the whole frame: the background is already the white the template
+    wants, and a crop of a fragment is strictly worse than the uncut picture.
+    """
+    fallback = white_fallback_bbox(rgb, config.white_fallback_tolerance)
+    if fallback is None:
+        return rgb, True
+    # The near-white body edges sit *inside* the tolerance, so pad far more generously
+    # than for a chromatic product - cropping to the dark parts alone shaves the
+    # product's own edges (vent slivers, cut side panels).
+    generous = config.padding_px + max(8, min(rgb.width, rgb.height) // 25)
+    box = _pad_box(fallback, generous, rgb.size)
+    area_ratio = ((box[2] - box[0]) * (box[3] - box[1])) / float(rgb.width * rgb.height)
+    if area_ratio < config.white_fallback_min_area_ratio:
+        # Only a sliver of dark pixels (vents, logo, a remote's screen): the product
+        # itself is invisible to the mask.  Publish the full frame.
+        return rgb, True
+    boxes, areas = _solid_bodies(_product_silhouette(_fallback_mask(rgb, config), config), config)
+    if boxes and _is_composite_frame(boxes, areas, config):
+        return rgb, True
+    crop = rgb.crop(box)
+    if crop.width < 2 or crop.height < 2:
+        return rgb, True
+    return crop, True
+
+
+def _fallback_mask(rgb: Image.Image, config: PipelineConfig) -> np.ndarray:
+    """Pixels differing from pure white by more than the fallback tolerance."""
+    array = np.asarray(rgb, dtype=int)
+    return np.asarray((255 - array).max(axis=2) > config.white_fallback_tolerance, dtype=bool)
+
+
+def _single_body_box(mask: np.ndarray, config: PipelineConfig) -> tuple[int, int, int, int] | None:
+    """Bbox of the product body: the largest silhouette plus its attached companions."""
+    boxes, areas = _solid_bodies(mask, config)
+    if not boxes:
+        return None
+    largest = areas[0]
+    kept = [boxes[0]]
+    for index in range(1, len(boxes)):
+        if areas[index] < largest * config.isolation_min_component_ratio:
+            continue
+        if _box_distance(boxes[index], boxes[0]) <= config.isolation_neighbor_distance_px:
+            kept.append(boxes[index])
+    return (
+        min(box[0] for box in kept),
+        min(box[1] for box in kept),
+        max(box[2] for box in kept),
+        max(box[3] for box in kept),
+    )
+
+
 def isolate_main_product(
     image: Image.Image, config: PipelineConfig
 ) -> tuple[Image.Image, bool]:
@@ -66,52 +207,39 @@ def isolate_main_product(
     Never raises and never returns an empty image.
     """
     rgb = to_rgb(image)
-    array = np.asarray(rgb, dtype=float)
-    background = np.array(detect_background_color(rgb, patch_ratio=config.corner_patch_ratio), dtype=float)
-    distance = np.abs(array - background).max(axis=2)
-    mask = distance > config.isolation_bg_distance
-
-    degraded = False
+    mask = _foreground_mask(rgb, config)
     fraction = float(mask.mean()) if mask.size else 0.0
-    if fraction < config.isolation_min_foreground_fraction:
-        # White product on a white background: fall back to "anything not pure white".
-        fallback = white_fallback_bbox(rgb, config.white_fallback_tolerance)
-        degraded = True
-        if fallback is None:
-            return rgb, True
-        # The near-white body edges sit *inside* the tolerance, so pad far more
-        # generously than for a chromatic product - cropping to the dark parts
-        # alone shaves the product's own edges (vent slivers, cut side panels).
-        generous = config.padding_px + max(8, min(rgb.width, rgb.height) // 25)
-        box = _pad_box(fallback, generous, rgb.size)
-        box_w = box[2] - box[0]
-        box_h = box[3] - box[1]
-        area_ratio = (box_w * box_h) / float(rgb.width * rgb.height)
-        if area_ratio < config.white_fallback_min_area_ratio:
-            # Only a sliver of dark pixels (vents, logo, a remote's screen): the
-            # product itself is invisible to the mask.  Publish the full frame -
-            # its background is already the white the template wants.
-            return rgb, True
-        crop = rgb.crop(box)
-        if crop.width < 2 or crop.height < 2:
-            return rgb, True
-        return crop, True
 
-    boxes = _component_boxes(mask, config)
+    # A body too faint for the difference mask is measured against pure white instead,
+    # and that path owns its own guards - it has to run before the silhouette work, whose
+    # mask here holds nothing but a few dark parts.
+    if fraction < config.isolation_min_foreground_fraction:
+        return _white_on_white_crop(rgb, config)
+
+    # Work on the *silhouette*, not on raw difference components: a body whose shading is
+    # softer than the threshold is hollow, and a hollow body is where products got cut.
+    silhouette = _product_silhouette(mask, config)
+    boxes, areas = _solid_bodies(silhouette, config)
     if not boxes:
         return rgb, True
-    left = min(box[0] for box in boxes)
-    top = min(box[1] for box in boxes)
-    right = max(box[2] for box in boxes)
-    bottom = max(box[3] for box in boxes)
-    box = _pad_box((left, top, right, bottom), config.padding_px, rgb.size)
+
+    # Several comparable, spread-out objects = a diagram or a banner, not a product on a
+    # background.  Cropping it publishes one fragment of it, which is worse than the
+    # whole picture, so the frame goes through as it is.
+    if _is_composite_frame(boxes, areas, config):
+        return rgb, True
+
+    body = _single_body_box(silhouette, config)
+    if body is None:
+        return rgb, True
+    box = _pad_box(body, config.padding_px, rgb.size)
     area_ratio = ((box[2] - box[0]) * (box[3] - box[1])) / float(rgb.width * rgb.height)
     if area_ratio < config.degenerate_crop_ratio:
         return rgb, True
     crop = rgb.crop(box)
     if crop.width < 2 or crop.height < 2:
         return rgb, True
-    return crop, degraded
+    return crop, False
 
 
 def _pad_box(
@@ -125,41 +253,6 @@ def _pad_box(
         min(width, right + padding),
         min(height, bottom + padding),
     )
-
-
-def _component_boxes(mask: np.ndarray, config: PipelineConfig) -> list[tuple[int, int, int, int]]:
-    """Largest foreground component plus its nearby smaller companions."""
-    try:
-        from scipy import ndimage
-    except Exception:                              # pragma: no cover - optional dep
-        rows = np.where(mask.any(axis=1))[0]
-        cols = np.where(mask.any(axis=0))[0]
-        if rows.size == 0 or cols.size == 0:
-            return []
-        return [(int(cols[0]), int(rows[0]), int(cols[-1]) + 1, int(rows[-1]) + 1)]
-
-    labels, count = ndimage.label(mask)
-    if count == 0:
-        return []
-    slices = ndimage.find_objects(labels)
-    sizes = ndimage.sum(mask, labels, index=range(1, count + 1))
-    order = np.argsort(sizes)[::-1]
-    largest_index = int(order[0]) + 1
-    largest_size = float(sizes[order[0]])
-    largest_box = _slice_to_box(slices[largest_index - 1])
-    if largest_box is None:
-        return []
-    kept = [largest_box]
-    for rank in order[1:]:
-        index = int(rank) + 1
-        if float(sizes[rank]) < largest_size * config.isolation_min_component_ratio:
-            continue
-        box = _slice_to_box(slices[index - 1])
-        if box is None:
-            continue
-        if _box_distance(box, largest_box) <= config.isolation_neighbor_distance_px:
-            kept.append(box)
-    return kept
 
 
 def _slice_to_box(slice_tuple: tuple[slice, slice] | None) -> tuple[int, int, int, int] | None:

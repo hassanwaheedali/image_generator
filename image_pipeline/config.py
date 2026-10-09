@@ -466,6 +466,14 @@ class PipelineConfig:
     isolation_min_foreground_fraction: float = 0.03
     isolation_min_component_ratio: float = 0.02
     isolation_neighbor_distance_px: float = 35.0
+    #: Radius that bridges a product's own soft outline before the body is measured, as a
+    #: share of the image's short side.  A white shell on a white background is *hollow*
+    #: to a difference mask (its shading is below the threshold), and a hollow body splits
+    #: into strips - which is how an AC lost its top and kept its vents.
+    isolation_merge_radius_ratio: float = 0.012
+    #: A second body this close in area to the largest one means the frame is a layout
+    #: (an "in-box items" diagram, a banner with a logo), not one product: crop nothing.
+    isolation_multi_body_ratio: float = 0.30
     degenerate_crop_ratio: float = 0.03
     white_fallback_tolerance: int = 10
     #: White-on-white fallback crops must cover at least this share of the frame;
@@ -698,6 +706,10 @@ class PipelineConfig:
                 raise ConfigError(f"{name} must be in (0, 1]")
         if self.isolation_neighbor_distance_px < 0:
             raise ConfigError("isolation_neighbor_distance_px must be >= 0")
+        if not 0.0 < self.isolation_merge_radius_ratio <= 0.25:
+            raise ConfigError("isolation_merge_radius_ratio must be in (0, 0.25]")
+        if not 0.0 < self.isolation_multi_body_ratio <= 1.0:
+            raise ConfigError("isolation_multi_body_ratio must be in (0, 1]")
         if not 0 <= self.white_fallback_tolerance <= 64:
             raise ConfigError("white_fallback_tolerance must be in [0, 64]")
         if not 0.0 < self.white_fallback_min_area_ratio <= 1.0:

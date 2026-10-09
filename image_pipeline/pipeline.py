@@ -1272,7 +1272,16 @@ def _tolerated_spelling_reason(page_name: str, keys: ModelKeys) -> str:
         return tail_difference
     shows = near_miss_codes(page_name, keys)
     page_code = shows[0].upper() if shows else "the model without its trailing letter"
-    sheet_code = keys.tokens[0] if keys.tokens else keys.identities[0].upper()
+    #: A row with neither a model token nor a glued identity (a pure keyword row such as
+    #: ``Frost 18W Classic White``) has no code to name.  Indexing ``identities[0]`` there
+    #: raised ``tuple index out of range`` and turned the row into a crash instead of a
+    #: verdict (live 2026-10-09: the whole Frost row died in the note that explains it).
+    if keys.tokens:
+        sheet_code = keys.tokens[0]
+    elif keys.identities:
+        sheet_code = keys.identities[0].upper()
+    else:
+        return f"page shows {page_code}, sheet model is the product name itself"
     return f"page shows {page_code}, sheet model is {sheet_code}"
 
 
