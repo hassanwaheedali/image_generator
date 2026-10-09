@@ -132,3 +132,29 @@ Evidence trail, in order:
 5. Measurement: same capture, all five sources - 7 candidates -> 8, first = `frost-18w-classic-white.jpg`.
 6. Lesson recorded so it is not repeated: "the page has no images" is a claim about *the
    extractor's* reach, not about the page. Check `og:image` / `ld+json` before saying it.
+
+**2026-10-10 · doubt cycle on the Haier sibling-extension rung. Result: my claim was only half true; shipped contained.**
+
+Stop condition met after 1 cycle (no reviewer CLI in this sandbox - `gemini`/`codex`
+absent - so Step 3 ran as the skill's degraded self-questioning fallback, and it is
+labelled degraded rather than counted as an independent review).
+
+- CLAIM examined: "adding a `.png` rung is harmless because a rewrite is only *tried*".
+- Finding 1 (real, mine): "only tried" is **not** "only considered". `pipeline.py` probes
+  `upscale_candidates(url, official)[0]` and downloads the tuple in order, so the first
+  rung that answers **replaces** the page's own URL. A guess that resolves to any
+  large-enough file becomes the published picture, and no code compares it to the
+  thumbnail the page named. The blast radius is exactly the failure the repo exists to
+  prevent: right product page, wrong image on the shop.
+- Finding 2 (why the old rung survives): the stripped-`.jpg` rung is *proven* by the run
+  itself - the page listed `…91117.jpg` too, and dedup logged `reject:S10 near-duplicate
+  of an already accepted angle`. Same photo, confirmed by evidence, not by faith.
+- Finding 3 (pre-existing, not caused by me, left open on purpose): that probe has no
+  fallback - if a *guessed* URL measures small while the page's own URL was fine, the
+  candidate dies at S8 without the page's URL ever being probed. Needs its own gate.
+- Containment shipped: `url_rewrite_cross_extension_enabled = False` by default; the
+  ladder only grows when the owner turns it on after a live probe, or after Finding 3 is
+  fixed and the substitution is identity-checked.
+- What I got wrong in the earlier report to the owner: I wrote "a wrong guess costs one
+  request and no decision". The cost is potentially a wrong published image. Corrected
+  here so the paper trail does not carry a false reassurance.

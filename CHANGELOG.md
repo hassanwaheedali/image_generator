@@ -36,14 +36,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   identical) and eyeballed in `docs/riper/evidence/crop-closure-before-after.png`. **Untested
   against a live re-run** - the composed result on the shop template still needs the
   owner's eyes.
-- **Haier sized thumbnails may now be re-fetched as PNG.** `image.haier.com` serves
-  `W020230419477905891117_60.jpg`; the size ladder tried `.jpg` rungs only, so five
-  gallery images died at S8 `too small 60x60` in the same row whose two `.png` assets
-  were accepted. An official page now ends the ladder with the asset's `.png` /
-  `_480.png` sibling. *Tried, never forced* - the page's own URL stays the last
-  candidate, so a wrong guess costs one request and no decision. **Constructed, not
-  verified**: the sandbox cannot reach `image.haier.com`, so whether that sibling
-  exists is only answerable from the owner's machine.
+- **Haier sized thumbnails can now be re-fetched as PNG - switch shipped OFF.** The old
+  run's log shows `image.haier.com` serving `W020230419477905891117_60.jpg` (60 px) with
+  the same asset full-size at the extension-less URL, and five gallery images dying at S8
+  `too small 60x60` while two `.png` assets in the same folder were accepted. The size
+  ladder therefore grew an optional sibling-extension rung. **A doubt review of this
+  change (2026-10-10) found the risk in my own reasoning**: `upscale_candidates` output is
+  consumed as "first candidate that answers wins" (`pipeline.py` probes `[0]`, then
+  downloads `attempts` in order), so *any* rung that happens to resolve replaces the file
+  the page named - with no check that it is the same picture. The stripped-`.jpg` rung is
+  safe on evidence (the run's own S10 line proves the page listed that exact file, i.e. it
+  is the same photo), but the `.png` rung has no such proof. So `url_rewrite_cross_extension_enabled`
+  defaults to `False`: the code ships, nothing changes until a live probe on haier.com
+  confirms the sibling exists. **Untested against the live CDN - this sandbox cannot reach it.**
 - **A row with no model code no longer crashes the run.** `_tolerated_spelling_reason`
   indexed `keys.identities[0]` for rows that own neither a model token nor a glued
   identity, so `Frost 18W Classic White | Orient Electronics Pakistan` came back as

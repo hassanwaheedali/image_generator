@@ -336,6 +336,13 @@ class PipelineConfig:
     image_full_download_max_per_page: int = 6
     image_full_download_max_per_row: int = 18
     url_rewrite_enabled: bool = True              # largest-size rewrite before fetch
+    #: Cross-extension rewrites (Haier ``X_60.jpg`` -> ``X.png``). OFF until the owner
+    #: confirms on haier.com that the sibling really exists: a rewrite is only ever
+    #: *tried*, and the download step takes the first candidate that answers, so a
+    #: guessed URL that happens to resolve to some other file could outrank the URL the
+    #: page itself named. Same-family substitution is the one failure this repo must
+    #: never ship, so the rung stays dark until it is proven by a live probe.
+    url_rewrite_cross_extension_enabled: bool = False
 
     # ----- page / image fetching ------------------------------------------
     connect_timeout_s: float = 5.0

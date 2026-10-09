@@ -492,8 +492,16 @@ UPSCALE_REWRITE_RULES: tuple[tuple[str, str, str], ...] = (
 )
 
 
-def upscale_candidates(url: str, official: bool = False) -> tuple[str, ...]:
+def upscale_candidates(
+    url: str, official: bool = False, sibling_ext: bool = False
+) -> tuple[str, ...]:
     """URL variants to try, largest first, ending with the URL exactly as given.
+
+    ``sibling_ext`` unlocks the cross-extension rungs (``X_60.jpg`` -> ``X.png``).
+    They are off by default: nothing here proves that a guessed URL serves *the same
+    picture*, and the download below takes the first guess that answers. A guessed
+    file must never outrank a file the page itself named, so the rung stays dark
+    until a live probe shows Haier's sibling extension exists (doubt review 2026-10-10).
 
     ``official`` (the page sits on the brand's own domain) unlocks the Haier size ladder:
     Haier's CDN often lacks ``_1000`` but ships ``_800``/``_480``, so an official page tries
@@ -520,8 +528,9 @@ def upscale_candidates(url: str, official: bool = False) -> tuple[str, ...]:
                 rewritten = re.sub(pattern, rf"_{size}\1", path)
                 if rewritten != path:
                     _add_candidate(out, parts, rewritten, query, url)
-            for sibling in _haier_extension_siblings(pattern, path):
-                _add_candidate(out, parts, sibling, query, url)
+            if sibling_ext:
+                for sibling in _haier_extension_siblings(pattern, path):
+                    _add_candidate(out, parts, sibling, query, url)
             continue
         rewritten = re.sub(pattern, replacement, path)
         if rewritten != path:
