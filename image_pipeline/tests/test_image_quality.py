@@ -934,3 +934,26 @@ def test_non_raster_content_type_without_magic_bytes_rejected() -> None:
             max_pixels=30_000_000,
         )
     assert info.value.rule_id == "S13"
+
+
+def test_black_row_keeps_a_small_correct_black_unit() -> None:
+    """Audit 2026-10-09: a small black product on a big white canvas must survive."""
+    from image_quality import verify_image_color
+
+    shot = Image.new("RGB", (1000, 1000), (255, 255, 255))
+    ImageDraw.Draw(shot).rectangle((350, 320, 650, 680), fill=(20, 20, 22))
+    ok, reason = verify_image_color(shot, "black")
+    assert ok is True, reason
+
+
+def test_white_row_rejects_a_wide_dark_unit() -> None:
+    """Audit 2026-10-09: a slim wide black AC on a white row - mean alone misses it."""
+    from image_quality import verify_image_color
+
+    shot = Image.new("RGB", (1000, 1000), (255, 255, 255))
+    d = ImageDraw.Draw(shot)
+    d.rectangle((75, 360, 925, 640), fill=(22, 22, 24))
+    d.rectangle((95, 585, 905, 610), fill=(40, 40, 42))
+    ok, reason = verify_image_color(shot, "white")
+    assert ok is False
+    assert "dark" in reason

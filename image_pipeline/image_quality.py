@@ -839,17 +839,35 @@ def verify_image_color(
         c_delta = c_max - central.min(axis=-1)
         central_mean = float(c_max.mean())
         bg = (c_max > 0.90) & (c_delta < 0.08)
-        chromatic_coverage = float(np.mean((c_delta > 0.10) & ~bg))
-        if target_family == "black" and central_mean > 0.75:
+        product = ~bg
+        product_frac = float(np.mean(product))
+        product_mean = float(c_max[product].mean()) if product.any() else 1.0
+        dark_frac = float(np.mean(c_max < 0.45))
+        chromatic_coverage = float(np.mean((c_delta > 0.10) & product))
+        if target_family == "black" and central_mean > 0.75 and dark_frac < 0.08:
+            # No dark body anywhere in the product area - a white/bright unit on a
+            # black row.  The dark_frac guard keeps a *correct* small black unit
+            # (few dark pixels, lots of white background) from being rejected.
             return False, (
-                f"product area is bright (mean {central_mean:.2f}) - "
+                f"product area is bright (mean {central_mean:.2f}, "
+                f"dark coverage {dark_frac:.0%}) - "
                 f"conflicts with target '{target_color_word}' (family black)"
             )
-        if target_family == "white" and central_mean < 0.45:
-            return False, (
-                f"product area is dark (mean {central_mean:.2f}) - "
-                f"conflicts with target '{target_color_word}' (family white)"
-            )
+        if target_family == "white":
+            if central_mean < 0.45:
+                return False, (
+                    f"product area is dark (mean {central_mean:.2f}) - "
+                    f"conflicts with target '{target_color_word}' (family white)"
+                )
+            if product_frac >= 0.30 and product_mean < 0.30:
+                # A large, near-black body dominates the frame (slim wide unit on a
+                # white row survives the plain mean test because white background
+                # outnumbers it).
+                return False, (
+                    f"product area is dominated by a dark body "
+                    f"(coverage {product_frac:.0%}, mean {product_mean:.2f}) - "
+                    f"conflicts with target '{target_color_word}' (family white)"
+                )
         if chromatic_coverage >= 0.45:
             return False, (
                 f"product area is a saturated colour "
