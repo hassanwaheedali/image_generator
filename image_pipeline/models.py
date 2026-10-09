@@ -66,6 +66,10 @@ class ModelKeys:
     #: Positional "name" words - series lines and unknown colourways - with brand-agnostic
     #: noise (type words, colours, model codes) removed; used by the scored matcher.
     name_words: tuple[str, ...] = ()
+    #: Significant title words for rows that carry *no* model code (owner 2026-10-09:
+    #: "Dawlance Dual Pro 30 Inverter T3" is the model - keywords, not a token).  Empty
+    #: whenever the title has a model-like token; then S1 uses the keys as before.
+    keywords: tuple[str, ...] = ()
 
     @property
     def all_keys(self) -> tuple[str, ...]:

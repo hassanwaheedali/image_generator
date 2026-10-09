@@ -1810,28 +1810,29 @@ def _jpeg_bytes(image: Image.Image, quality: int = 15) -> bytes:
     return buf.getvalue()
 
 
-def test_below_floor_image_is_salvaged_as_last_resort(tmp_path: Path) -> None:
-    """Homage HRF-47662-GD case: the only correct photo misses the lossy byte
-    floor - it must publish (PARTIAL, flagged) instead of failing the row 0/0/0."""
+def test_below_floor_sharp_image_is_accepted_directly(tmp_path: Path) -> None:
+    """Owner 2026-10-09 supersedes the 10-08 salvage detour: the compression floors
+    judge *blur*, not bytes - "jahan blur hay wahin lagana hay".  A sharp payload
+    below the byte/bpp floor (the Homage golden hero, the golden Haier AC) is simply
+    accepted through the normal path instead of failing the row or waiting for 3c."""
     small_url = "https://cdn.haier.com/p/hsu-12hfpaa-hero-lowq.jpg"
     small = _jpeg_bytes(clean_product_image(700, 700, "#c9a227"))
     page = load_fixture("product_ok")
     for img in (IMG1, IMG2, IMG3):
         page = page.replace(img, small_url)
     config = live_config(tmp_path, min_lossy_image_bytes=len(small) + 2000)
-    deps, _, image_fetcher, _ = build_deps(tmp_path, {HAIER_PAGE: page}, {small_url: small})
+    deps, _, _, _ = build_deps(tmp_path, {HAIER_PAGE: page}, {small_url: small})
     result, images = process_product(
         task(0, "Haier HSU-12HFPAA Inverter AC", (HAIER_PAGE,)), deps, config
     )
-    assert len(images) == 1                              # one beat zero
+    assert len(images) == 1                              # three URLs, one payload (dedup)
     assert result.status is Status.PARTIAL               # still below min_required=2
-    assert "last-resort salvage" in (result.note or "")
     log = [
         json.loads(line)
         for line in (tmp_path / "out" / "decisions.jsonl").read_text().splitlines()
     ]
-    assert any(entry["rule_id"] == "S13.salvage" for entry in log)
-    assert any(entry["rule_id"] == "S13" for entry in log)   # the floor still rejects
+    assert not any(entry["rule_id"] == "S13" for entry in log)      # no floor reject
+    assert not any(entry["rule_id"] == "S13.salvage" for entry in log)
 
 
 def test_salvage_takes_the_correct_colour_not_the_wrong_sibling(tmp_path: Path) -> None:
@@ -1868,10 +1869,13 @@ def test_salvage_takes_the_correct_colour_not_the_wrong_sibling(tmp_path: Path) 
         json.loads(line)
         for line in (tmp_path / "out" / "decisions.jsonl").read_text().splitlines()
     ]
-    rejected = [entry for entry in log if entry["rule_id"] == "S16.salvage"]
-    salvaged = [entry for entry in log if entry["rule_id"] == "S13.salvage"]
-    assert [entry["url"] for entry in rejected] == [maroon_url]   # wrong colour skipped
-    assert [entry["url"] for entry in salvaged] == [gold_url]     # correct one published
+    # Since 2026-10-09 the sharp below-floor payloads are accepted directly, so the
+    # colour gate (S16) - not the salvage colour check - keeps the wrong sibling out.
+    rejected = [entry for entry in log if entry["rule_id"] == "S16" and entry["decision"] == "reject"]
+    kept = [entry["url"] for entry in log if entry["decision"] == "keep"]
+    assert any(entry["url"] == maroon_url for entry in rejected)  # wrong colour skipped
+    assert gold_url in kept                                       # correct one published
+    assert maroon_url not in kept
     assert len(images) == 1
     assert result.status is Status.PARTIAL
 
@@ -1891,8 +1895,11 @@ def test_salvage_can_be_disabled(tmp_path: Path) -> None:
     result, images = process_product(
         task(0, "Haier HSU-12HFPAA Inverter AC", (HAIER_PAGE,)), deps, config
     )
-    assert images == []
-    assert result.status is Status.FAILED
+    # The sharp below-floor picture is accepted directly since 2026-10-09, so even
+    # with salvage switched off the row no longer fails - acceptance never needed
+    # the salvage path.
+    assert len(images) == 1
+    assert result.status is Status.PARTIAL
 
 
 def test_blurry_below_floor_image_is_never_salvaged(tmp_path: Path) -> None:
@@ -1995,3 +2002,46 @@ def test_description_only_page_relaxes_s2() -> None:
     ]
     kept = relax_s2_when_description_only(mixed)
     assert kept[0].dom_flags == ("S2",)      # page has a real gallery: S2 stays strict
+
+
+def test_official_below_floor_picture_publishes_before_retailer_search(tmp_path: Path) -> None:
+    """Owner 2026-10-09: "brand official sey mil gaye toh le lo jaisa hay".  The brand
+    page only has a below-floor photo; since the compression floors now judge blur
+    (not bytes), the sharp official picture is accepted on the official visit itself -
+    kept in the log before any retailer page is even fetched."""
+    small_url = "https://cdn.haier.com/p/hsu-12hfpaa-hero-lowq.jpg"
+    small = _jpeg_bytes(clean_product_image(700, 700, "#c9a227"))
+    page = load_fixture("product_ok")
+    for img in (IMG1, IMG2, IMG3):
+        page = page.replace(img, small_url)
+    retail = "https://www.retail.pk/products/hsu-12hfpaa"
+    retail_page = (
+        "<html><head><title>Haier HSU-12HFPAA Inverter AC</title></head>"
+        "<body><div class=\"product-gallery\">"
+        "<img src=\"https://cdn.retail.pk/hsu-12hfpaa-1.jpg\"></div></body></html>"
+    )
+    config = live_config(tmp_path, min_lossy_image_bytes=len(small) + 2000)
+    deps, page_fetcher, _, _ = build_deps(
+        tmp_path,
+        {HAIER_PAGE: page, retail: retail_page},
+        {
+            small_url: small,
+            "https://cdn.retail.pk/hsu-12hfpaa-1.jpg": png_bytes(clean_product_image()),
+        },
+    )
+    deps.source_searcher = FakeSourceSearcher(
+        candidates=[PageCandidate(url=retail, origin="json-search:www.retail.pk", method="json-search")]
+    )
+    result, images = process_product(
+        task(0, "Haier HSU-12HFPAA Inverter AC", (HAIER_PAGE,)), deps, config
+    )
+    log = [
+        json.loads(line)
+        for line in (tmp_path / "out" / "decisions.jsonl").read_text().splitlines()
+    ]
+    kept = [entry["url"] for entry in log if entry["decision"] == "keep"]
+    assert small_url in kept                      # the official picture published
+    assert page_fetcher.requested.index(HAIER_PAGE) < page_fetcher.requested.index(retail)
+    official_at = next(i for i, entry in enumerate(log) if entry["url"] == small_url)
+    retail_at = next(i for i, entry in enumerate(log) if "retail.pk" in entry["url"])
+    assert official_at < retail_at                # official kept before retailer touched

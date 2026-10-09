@@ -957,3 +957,60 @@ def test_white_row_rejects_a_wide_dark_unit() -> None:
     ok, reason = verify_image_color(shot, "white")
     assert ok is False
     assert "dark" in reason
+
+
+def _studio_gradient_jpeg() -> bytes:
+    """A crisp studio shot that compresses below the bpp floor (smooth gradient)."""
+    arr = np.full((900, 900, 3), 250, np.uint8)
+    ys, xs = np.mgrid[0:900, 0:900]
+    body = (ys > 250) & (ys < 650) & (xs > 100) & (xs < 800)
+    grad = (180 + 60 * np.sin(xs / 90.0)).astype(np.uint8)
+    arr[body, 0] = grad[body]
+    arr[body, 1] = (grad * 0.9).astype(np.uint8)[body]
+    arr[body, 2] = (grad * 0.7).astype(np.uint8)[body]
+    buf = io.BytesIO()
+    Image.fromarray(arr).save(buf, "JPEG", quality=55)
+    return buf.getvalue()
+
+
+def test_a_sharp_below_floor_payload_passes_when_sharpness_is_checked() -> None:
+    """Owner 2026-10-09: the golden Haier hero (bpp 0.018) is crisp - compression
+    floors must only bite where the picture is actually blurred."""
+    data = _studio_gradient_jpeg()
+    with pytest.raises(ImageValidationError):
+        validate_image_bytes(
+            data,
+            "image/jpeg",
+            max_bytes=20_000_000,
+            max_pixels=50_000_000,
+            min_lossy_bytes=12000,
+            min_lossy_bytes_per_pixel=0.025,
+        )                                                               # old strictness
+    image = validate_image_bytes(
+        data,
+        "image/jpeg",
+        max_bytes=20_000_000,
+        max_pixels=50_000_000,
+        min_lossy_bytes=12000,
+        min_lossy_bytes_per_pixel=0.025,
+        blur_sharpness_floor=0.02,
+    )
+    assert image.size == (900, 900)
+
+
+def test_a_blurred_below_floor_payload_stays_rejected_with_sharpness_checked() -> None:
+    data = _studio_gradient_jpeg()
+    blurred = Image.open(io.BytesIO(data)).resize((90, 90)).resize((900, 900))
+    buf = io.BytesIO()
+    blurred.save(buf, "JPEG", quality=55)
+    with pytest.raises(ImageValidationError) as exc:
+        validate_image_bytes(
+            buf.getvalue(),
+            "image/jpeg",
+            max_bytes=20_000_000,
+            max_pixels=50_000_000,
+            min_lossy_bytes=12000,
+            min_lossy_bytes_per_pixel=0.025,
+            blur_sharpness_floor=0.02,
+        )
+    assert "blurry" in exc.value.detail

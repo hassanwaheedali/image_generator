@@ -598,3 +598,76 @@ def test_url_words_are_not_the_page_series_name() -> None:
     )
     score = score_match(keys, strong, "haier")
     assert not score.series_veto
+
+
+# --------------------------------------------------------------------------- #
+# series-tail truncation + family ranges (owner bugs 2026-10-09)
+# --------------------------------------------------------------------------- #
+GREE_T3_TITLE = "GREE Pular T3 1 TON Split AC - GS-12PITH17G-T3"
+
+
+def test_a_page_printing_the_model_without_its_series_tail_matches() -> None:
+    """Live 2026-10-09: the sheet prints ``GS-12PITH17G-T3`` and the shop page prints
+    ``GS-12PITH17G``.  The letter-drop truncation cannot help (the tail ``T3`` ends in
+    a digit), but dropping the whole separator-delimited segment is the same model -
+    exact, not tolerated."""
+    keys = build_model_keys(GREE_T3_TITLE)
+    verdict = match_product(
+        keys=keys,
+        brand="gree",
+        strong_text="GREE Pular T3 Series GS-12PITH17G 1 Ton Split AC",
+    )
+    assert verdict.matched and verdict.rule == "model_key" and not verdict.tolerated
+
+
+def test_a_range_page_listing_our_variant_among_siblings_matches() -> None:
+    """Live 2026-10-09: one page sells ``GS-12PITH15-16-17-18`` - our 17 is among the
+    variants, so its pictures are usable (owner: "ismey sab bech raha hay woh")."""
+    keys = build_model_keys(GREE_T3_TITLE)
+    verdict = match_product(
+        keys=keys,
+        brand="gree",
+        strong_text="GREE GS-12PITH15-16-17-18 - T3 White 1.0 Ton Inverter Split AC",
+    )
+    assert verdict.matched and not verdict.tolerated
+
+
+def test_a_sibling_family_page_is_rejected_even_when_our_code_appears_in_links() -> None:
+    """Live 2026-10-09: the last-resort chain kept a ``GS-12AITH24W`` page because the
+    row's code appeared in its related-item links.  The page's own name is a different
+    family - that page must never publish, not even as a flagged last resort."""
+    keys = build_model_keys(GREE_T3_TITLE)
+    verdict = match_product(
+        keys=keys,
+        brand="gree",
+        strong_text="GREE GS-12AITH24W-T3 White Silver 1.0 Ton Air Conditioner",
+        body_text="more models: GS-12PITH17G-T3",
+    )
+    assert not verdict.matched
+    assert verdict.rule == "different_model"
+
+
+def test_keyword_rows_match_pages_that_carry_the_name() -> None:
+    """Owner 2026-10-09: "istarah key product mey token nahi hota bas keywords hotey
+    hay".  The row carries no model code, so S1 matches by keywords instead."""
+    keys = build_model_keys("Dawlance Split AC Dual Pro T3 Inverter 30")
+    assert keys.keywords and not keys.tokens
+    verdict = match_product(
+        keys=keys,
+        brand="dawlance",
+        strong_text="Dawlance Split AC Dual Pro T3 Inverter 30",
+    )
+    assert verdict.matched and verdict.rule == "keyword" and not verdict.tolerated
+    # a sibling size lacks the required number and never matches
+    wrong = match_product(
+        keys=keys, brand="dawlance", strong_text="Dawlance Split AC Dual Pro T3 Inverter 24"
+    )
+    assert not wrong.matched
+
+
+def test_a_keyword_row_never_matches_a_conflicting_size() -> None:
+    keys = build_model_keys("Inspire Pro T3 Inverter 1 Ton")
+    verdict = match_product(
+        keys=keys, brand="dawlance", strong_text="Dawlance Inspire Pro T3 Inverter 1.5 Ton"
+    )
+    assert not verdict.matched

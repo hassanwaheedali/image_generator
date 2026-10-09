@@ -236,9 +236,9 @@ class PipelineConfig:
             "www.haier.com/pk": "sitemap",
             "haiermall.pk": "none",           # sitemap.xml is an HTML page there
             "www.dawlance.com.pk": "sitemap",
-            "www.tcl.com/pk": "sitemap",      
+            "www.tcl.com/pk": "sitemap",
             "www.orient.com.pk": "sitemap",
-            "shandaarbuy.pk": "shopify",      
+            "shandaarbuy.pk": "shopify",
             "eshop.pel.com.pk": "shopify",
             "homage.com.pk": "woo",
             "www.kenwoodpakistan.com": "woo",

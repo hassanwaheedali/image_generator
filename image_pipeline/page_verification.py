@@ -378,7 +378,7 @@ def verify_page(
     all, is strength 0 and yields nothing.
     """
     options = settings or MatchSettings()
-    if not keys:
+    if not keys.all_keys and not keys.keywords:
         return PageMatchResult(page_url, 0, (), "title carries no model key", "none")
 
     soup = strip_unwanted_regions(BeautifulSoup(html, "lxml"), page_url)
@@ -444,6 +444,8 @@ def verify_page(
         detail = f"brand+code match: {brand} + {'/'.join(decision.found)} in the body text"
     elif decision.rule == "body_model_key":
         detail = "model key found in body text only"
+    elif decision.rule in ("keyword", "body_keyword"):
+        detail = "keyword match - this product is sold by name, not by a model code"
     else:
         detail = f"model key found in the page name/URL ({'/'.join(decision.found)})"
 

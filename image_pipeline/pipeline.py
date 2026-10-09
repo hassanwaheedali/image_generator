@@ -387,7 +387,11 @@ def process_product(
         brand=display_brand(brand, task.title),
         source_url_hash=hash_source_urls(task.source_urls),
     )
-    if not keys.all_keys:
+    if not keys.all_keys and not keys.keywords:
+        # Owner 2026-10-09: some products carry no model code at all - "Dawlance
+        # Dual Pro 30 Inverter T3" *is* the identity.  Such rows continue with
+        # keyword matching (S1 rule "keyword"); only a title with neither a code
+        # nor usable keywords is unprocessable.
         deps.decisions.reject(
             title=task.title, url="", rule_id="4.1", detail="title has no model-like token"
         )
@@ -1424,6 +1428,7 @@ def _consume_candidates(
                 max_pixels=config.max_image_pixels,
                 min_lossy_bytes=config.min_lossy_image_bytes,
                 min_lossy_bytes_per_pixel=config.min_lossy_bytes_per_pixel,
+                blur_sharpness_floor=config.salvage_min_sharpness,
             )
         except ImageValidationError as exc:
             rejections[exc.rule_id] += 1

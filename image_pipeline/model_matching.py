@@ -395,6 +395,44 @@ def _name_words(title: str) -> tuple[str, ...]:
     return tuple(out)
 
 
+_KEYWORD_EXTRA_NOISE = frozenset(("air", "conditioners", "conditioner", "price", "pakistan"))
+
+
+def _keyword_tokens(title: str) -> tuple[str, ...]:
+    """The significant words of a title that carries *no* model code.
+
+    Owner 2026-10-09: rows like ``Dawlance Split AC Dual Pro T3 Inverter 30`` were
+    rejected at 4.1 although "Dawlance Dual Pro 30 Inverter T3" *is* the model -
+    some products are sold by keywords, not codes.  Kept: alphabetic words of >= 3
+    that are not category/marketing noise or a colour, alphanumeric tags (``t3``)
+    and numbers of >= 2 digits (``30``).  A lone digit (``1`` of "1 Ton") says too
+    little, because "1.5" normalizes to the same digit.
+    """
+    out: list[str] = []
+    for raw in re.findall(r"[A-Za-z0-9]+", title):
+        word = raw.lower()
+        if len(word) < 2 or word in out:
+            continue
+        if word.isdigit():
+            if len(word) >= 2:
+                out.append(word)
+            continue
+        if not word.isalpha():
+            if len(word) >= 2 and re.search(r"[a-z]", word) and re.search(r"\d", word):
+                out.append(word)          # alphanumeric tags like ``t3``
+            continue
+        if len(word) < 3:
+            continue
+        if word in _GENERIC_NAME_WORDS or word in _KEYWORD_EXTRA_NOISE:
+            continue
+        if word in TAIL_STOPWORDS or is_colour_word(word):
+            continue
+        out.append(word)
+    # a year or a bare size ("2024", "55") is not a product name: without at least
+    # one alphabetic name word the row still has no identity (stays a 4.1 reject).
+    return tuple(out) if any(word.isalpha() for word in out) else ()
+
+
 @lru_cache(maxsize=8192)
 def _build(
     title: str,
@@ -449,6 +487,7 @@ def _build(
         variant_facts=tuple(sorted(extract_variant_facts(title).items())),
         colour_word=primary_colour_word(title) or "",
         name_words=_name_words(title),
+        keywords=() if tokens else _keyword_tokens(title),
     )
 
 
@@ -534,6 +573,56 @@ def _slash_segment_hit(token: str, core: str, normalized: str) -> bool:
     return False
 
 
+def _segment_truncation_hit(token: str, core: str, normalized: str) -> bool:
+    """True when the token minus its trailing ``-suffix`` segment matches the page.
+
+    GREE sheets print ``GS-12PITH17G-T3`` while the product page prints the model
+    without the series tail (``GS-12PITH17G`` - live 2026-10-09).  The letter-drop
+    truncation cannot help because the tail ends in a digit (``T3``).  Dropping a
+    whole separator-delimited segment is safe where letter-dropping is not: the
+    remainder still has to be model-like (letters *and* digits), so ``9160-WB``
+    never degenerates to ``9160`` and ``PWM-1250`` never to ``PWM``.
+    """
+    segments = [part for part in re.split(r"[-_/ ]+", token) if part]
+    for drop in (1, 2):
+        if len(segments) <= drop:
+            continue
+        candidate = normalize_key("-".join(segments[:-drop]))
+        if len(candidate) < 5 or candidate == core:
+            continue
+        if not re.search(r"[a-z]", candidate) or not re.search(r"[0-9]", candidate):
+            continue
+        if _compiled(candidate).search(normalized):
+            return True
+    return False
+
+
+_FAM_VARIANT_RE = re.compile(r"^([a-z]*\d+[a-z]+)(\d+)")
+
+
+def _family_range_hit(core: str, normalized: str) -> bool:
+    """True when the page lists our variant inside a hyphen range of the same family.
+
+    Shops sell one page per range: ``GREE GS-12PITH15-16-17-18 T3`` carries the
+    ``GS-12PITH17G-T3`` row's model among four (owner 2026-10-09: "ismey sab bech
+    raha hay woh").  The family stem (``gs12pith``) must equal ours and our variant
+    number (``17``) must be one of the range's members - a ``GS-12AITH24W`` page has
+    a different stem and never hits this rule.
+    """
+    parsed = _FAM_VARIANT_RE.match(core)
+    if parsed is None or len(parsed.group(1)) < 5:
+        return False
+    family, variant = parsed.groups()
+    pattern = re.compile(
+        r"(?<![a-z0-9])"
+        + _SEP.join(re.escape(char) for char in family)
+        + r"(\d+(?:[\s\-_/.,]+\d+)+)(?![a-z0-9])"
+    )
+    return any(
+        variant in re.findall(r"\d+", run.group(1)) for run in pattern.finditer(normalized)
+    )
+
+
 @lru_cache(maxsize=16384)
 def find_matching_keys(
     text: str,
@@ -567,6 +656,12 @@ def find_matching_keys(
                 matched.append(token)
                 continue
         if include_identities and "/" in token and _slash_segment_hit(token, core, normalized):
+            matched.append(token)
+            continue
+        if include_identities and (
+            _segment_truncation_hit(token, core, normalized)
+            or _family_range_hit(core, normalized)
+        ):
             matched.append(token)
             continue
         if include_truncation:
@@ -953,7 +1048,26 @@ def _needs_key_tolerance(text: str, keys: ModelKeys, allow_key_truncation: bool)
     """
     if not allow_key_truncation:
         return False
+    if not keys.tokens:
+        return False                     # keyword rows match exactly or not at all
     return not find_matching_keys(text, keys, include_title_key=False, include_truncation=False)
+
+
+def _keyword_page_match(keys: ModelKeys, text: str) -> bool:
+    """The page carries the row's keywords - the model identity of a code-less row.
+
+    Every number/tag (``30``, ``t3``) must be there as a whole word, and at least
+    80% of the alphabetic keywords; a size/type fact the page contradicts (1 Ton
+    row on a 1.5 Ton page) is a different product and never matches.
+    """
+    words = set(normalize_text(text).split())
+    required = [key for key in keys.keywords if re.search(r"\d", key)]
+    alpha = [key for key in keys.keywords if key.isalpha()]
+    if any(key not in words for key in required):
+        return False
+    if alpha and sum(key in words for key in alpha) / len(alpha) < 0.8:
+        return False
+    return not variant_conflicts(keys.variant_dict(), extract_variant_facts(text))
 
 
 def _recognize(
@@ -972,7 +1086,15 @@ def _recognize(
     Stage A - the model key itself (title/URL/H1 fields, then body text).
     Stage B - brand + code, for sites that print the model without the brand letters.
     Nothing else: no scores, no thresholds, no weighting.
+
+    Code-less rows (owner 2026-10-09: "Dawlance Dual Pro 30 Inverter T3" *is* the
+    model) match by their keywords instead - required numbers whole, >= 80% of the
+    alphabetic words, no contradicted size fact.
     """
+    if not keys.tokens and keys.keywords:
+        for text, rule in ((strong_text, "keyword"), (body_text, "body_keyword")):
+            if text and _keyword_page_match(keys, text):
+                return ProductMatch(True, rule, keys.keywords)
     found = find_matching_keys(
         strong_text, keys, include_title_key=False, include_truncation=allow_key_truncation
     )
@@ -1030,6 +1152,41 @@ def _page_names_another_variant(keys: ModelKeys, strong_text: str) -> bool:
     rule, and a page with no related code has no opinion at all.
     """
     return suffix_agreement(keys.identities, build_model_keys(strong_text).identities) == "different"
+
+
+def _page_names_different_model(keys: ModelKeys, strong_text: str) -> bool:
+    """True when the page's own name prints a *sibling family* code.
+
+    Live 2026-10-09: the row is ``GS-12PITH17G-T3`` and the last-resort chain kept a
+    ``GS-12AITH24W`` page - our code only appeared in its related-item links, while
+    the page's own title names another GREE family.  A tolerated demotion is for
+    pages that *might* show our product; a page that positively names a different
+    family (same brand prefix ``gs12``, different stem letters) is another product
+    and must never publish (owner: "bilkul different model lelya").  Suffix-only
+    differences (``HRF-538 IFGA`` vs ``IFPA``) do not parse as families - they stay
+    with the tolerated rule, exactly as before.
+    """
+    page = build_model_keys(strong_text)
+    for page_identity in page.identities:
+        page_match = _FAM_VARIANT_RE.match(page_identity)
+        if page_match is None or len(page_match.group(1)) < 5:
+            continue
+        for identity in keys.identities:
+            own = _FAM_VARIANT_RE.match(identity)
+            if own is None or len(own.group(1)) < 5:
+                continue
+            family, page_family = own.group(1), page_match.group(1)
+            if family == page_family:
+                continue
+            prefix = 0
+            while (
+                prefix < min(len(family), len(page_family))
+                and family[prefix] == page_family[prefix]
+            ):
+                prefix += 1
+            if prefix >= 4 and family[prefix - 1].isdigit():
+                return True
+    return False
 
 
 @dataclass(frozen=True)
@@ -1188,6 +1345,8 @@ def match_product(
         # own labelled "Colour:" value counts too, so a variant page that declares
         # ``Red Blaze`` is not proof for the ``Maroon Blaze`` row.
         return ProductMatch(False, "colour_conflict", ())
+    if match.matched and _page_names_different_model(keys, strong_text):
+        return ProductMatch(False, "different_model", ())
     if not match.tolerated and _page_names_another_variant(keys, strong_text):
         return replace(match, tolerated=True)
     if not match.tolerated and score.series_veto:

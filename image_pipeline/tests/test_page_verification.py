@@ -338,3 +338,16 @@ def test_labelled_body_colour_separates_variant_pages() -> None:
     assert match_product(
         keys=rows["Red"], brand="pel", strong_text=pel, selected_colourway="Maroon Blaze"
     ).rule == "colour_conflict"
+
+
+def test_a_code_less_row_is_verified_by_its_keywords() -> None:
+    """Live 2026-10-09 rows like "Mega T3 Pro 1 Ton | Inverter Split AC | Air
+    Conditioners - Dawlance" were rejected at 4.1.  They now verify by keywords."""
+    keys = build_model_keys("Mega T3 Pro 1 Ton | Inverter Split AC | Air Conditioners - Dawlance")
+    assert not keys.all_keys and keys.keywords
+    page = (
+        "<html><head><title>Dawlance Mega T3 Pro 1 Ton Inverter Split AC</title></head>"
+        "<body>Dawlance Mega T3 Pro 1 Ton Inverter Split AC price</body></html>"
+    )
+    result = verify_page("https://dawlance.com.pk/mega-t3-pro-1-ton", page, keys, brand="dawlance")
+    assert result.accepted and result.match_rule == "keyword"

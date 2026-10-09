@@ -62,11 +62,16 @@ def validate_image_bytes(
     max_pixels: int,
     min_lossy_bytes: int = 0,
     min_lossy_bytes_per_pixel: float = 0.0,
+    blur_sharpness_floor: float = 0.0,
 ) -> Image.Image:
     """Safeguard S13: size, content type, real decode, bomb guard, EXIF rotation.
 
     For lossy formats (JPEG, WebP), also validates minimum payload size and byte
-    density (bytes per pixel) to reject heavily-compressed, blurry thumbnails.
+    density (bytes per pixel) to reject heavily-compressed, blurry thumbnails - but
+    only when the picture is *actually* blurry: a smooth studio gradient compresses
+    extremely well, so a below-floor payload that still scores at or above
+    ``blur_sharpness_floor`` on :func:`sharpness_score` passes (owner 2026-10-09:
+    "jahan blur hay wahin lagana hay" - the golden Haier hero at bpp 0.018 is crisp).
     """
     if not content:
         raise ImageValidationError("S13", "empty body")
@@ -93,23 +98,29 @@ def validate_image_bytes(
                 )
             if probe.format == "GIF" and getattr(probe, "n_frames", 1) > 1:
                 raise ImageValidationError("S13", "animated GIF")
+            lossy_detail = ""
             if probe.format in ("JPEG", "WEBP"):
                 if min_lossy_bytes > 0 and len(content) < min_lossy_bytes:
-                    raise ImageValidationError(
-                        "S13",
-                        f"lossy payload {len(content)} bytes below minimum {min_lossy_bytes}",
-                        salvageable=True,
+                    lossy_detail = (
+                        f"lossy payload {len(content)} bytes below minimum {min_lossy_bytes}"
                     )
-                if min_lossy_bytes_per_pixel > 0.0 and width > 0 and height > 0:
+                elif min_lossy_bytes_per_pixel > 0.0 and width > 0 and height > 0:
                     bpp = len(content) / float(width * height)
                     if bpp < min_lossy_bytes_per_pixel:
-                        raise ImageValidationError(
-                            "S13",
-                            f"over-compressed blurry image (bpp={bpp:.4f} < {min_lossy_bytes_per_pixel:.4f})",
-                            salvageable=True,
+                        lossy_detail = (
+                            f"over-compressed blurry image "
+                            f"(bpp={bpp:.4f} < {min_lossy_bytes_per_pixel:.4f})"
                         )
             probe.load()
             image = ImageOps.exif_transpose(probe)
+            if (
+                lossy_detail
+                and blur_sharpness_floor > 0.0
+                and sharpness_score(image) >= blur_sharpness_floor
+            ):
+                return image
+            if lossy_detail:
+                raise ImageValidationError("S13", lossy_detail, salvageable=True)
     except ImageValidationError:
         raise
     except Image.DecompressionBombError as exc:
