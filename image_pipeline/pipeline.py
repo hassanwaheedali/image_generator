@@ -1472,8 +1472,12 @@ def _consume_candidates(
                 detail=f"trimmed a {pixels}px {kind} layout seam before the S7 ring test",
             )
 
-        # Only a curated gallery on the brand's own verified page gets the S7 acceptance.
-        official_gallery = official_page and candidate.source in CURATED_GALLERY_SOURCES
+        # Brand-owned pages get the calmer studio bar on every gallery source, not
+        # just the curated ones (owner 2026-10-09: "picture verification should not
+        # be too strict only in brand sites because they are official" - the grey
+        # Kenwood studio shot died on the retail corner bar).  The acceptance still
+        # demands neutral corners, and S1 already proved the model on the page.
+        official_gallery = official_page
         rule_id, detail = run_quality_gates(image, config, official_gallery=official_gallery)
         if rule_id == "S7" and official_gallery and official_gallery_pass(image, config):
             deps.decisions.keep(

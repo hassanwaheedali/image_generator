@@ -2076,3 +2076,35 @@ def test_an_ai_emblem_in_the_gallery_is_rejected_not_published(tmp_path: Path) -
     assert all(entry["decision"] == "reject" for entry in s14)
     assert all(entry["url"] != emblem_url for entry in log if entry["decision"] == "keep")
     assert result.status is Status.OK
+
+
+def test_an_official_grey_ground_shot_passes_without_a_curated_gallery(tmp_path: Path) -> None:
+    """Owner 2026-10-09 (Kenwood eComfortPro.png): the brand's own studio shot has a
+    light-grey ground that the retail corner bar (0.86) rejected.  On a verified
+    official host the calmer bar applies to every gallery source - S1 already
+    proved the model - so the picture publishes from a plain body img."""
+    shot_url = "https://www.kenwoodpakistan.pk/cdn/shop/files/kec-1267s-front.png"
+    from PIL import ImageDraw
+
+    shot = Image.new("RGB", (500, 280), (217, 217, 217))
+    draw = ImageDraw.Draw(shot)
+    draw.rounded_rectangle((30, 40, 470, 200), radius=12, fill=(250, 250, 250))
+    draw.rectangle((60, 210, 440, 235), fill=(90, 90, 90))
+    draw.rectangle((215, 150, 285, 162), fill=(60, 60, 60))
+    page_url = "https://www.kenwoodpakistan.pk/products/kec-1267s-comfort-pro"
+    page = (
+        "<html><head><title>Kenwood eComfort Pro KEC-1267S</title></head>"
+        f"<body><p>Kenwood eComfort Pro KEC-1267S</p><img src=\"{shot_url}\"></body></html>"
+    )
+    config = live_config(tmp_path)
+    deps, _, _, _ = build_deps(tmp_path, {page_url: page}, {shot_url: png_bytes(shot)})
+    result, images = process_product(
+        task(0, "Kenwood eComfort Pro KEC-1267S", (page_url,)), deps, config
+    )
+    log = [
+        json.loads(line)
+        for line in (tmp_path / "out" / "decisions.jsonl").read_text().splitlines()
+    ]
+    assert not [e for e in log if e["url"] == shot_url and e["decision"] == "reject"]
+    assert len(images) == 1
+    assert result.status is Status.PARTIAL
