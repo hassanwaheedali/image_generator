@@ -51,7 +51,7 @@ from csv_io import (
     timestamp_now,
 )
 from decisions import DecisionLog
-from dedup import ProductDedup
+from dedup import ImageFingerprint, ProductDedup, compute_fingerprint
 from fetch import FetchError, PermanentAPIError
 from gallery_extractors import ExtractionContext, extract_candidates, shopify_json, woo_json
 from image_quality import (
@@ -410,6 +410,7 @@ def process_product(
         soft_threshold=config.dedup_hamming_soft_threshold,
         corr_threshold=config.dedup_corr_threshold,
         hard_corr_threshold=config.dedup_hard_corr_threshold,
+        shape_iou_min=config.dedup_shape_iou_min,
     )
 
     accepted: list[AcceptedImage] = []
@@ -1518,15 +1519,25 @@ def _consume_candidates(
                     title=task.title, url=used_url, rule_id="S16", detail=color_detail
                 )
                 continue
-        if dedup.is_duplicate(image):
+        # One fingerprint per candidate, reused by the gate and by the bookkeeping after
+        # compose - the same 32x32 resample of the same 1200px image, once instead of twice.
+        fingerprint = compute_fingerprint(image)
+        duplicate = dedup.duplicate_reason(image, fingerprint=fingerprint)
+        if duplicate:
             rejections["S10"] += 1
             deps.decisions.reject(
-                title=task.title,
-                url=used_url,
-                rule_id="S10",
-                detail="near-duplicate of an already accepted angle",
+                title=task.title, url=used_url, rule_id="S10", detail=duplicate
             )
             continue
+
+        # Ambiguity is recorded, not silently published or silently dropped: a pair that
+        # looks like a repeat but cannot be proven one goes to the log for a human glance
+        # (see dedup.duplicate_reason for why the thresholds cannot be tightened).
+        review_note = dedup.review_shape_match(image, fingerprint=fingerprint)
+        if review_note:
+            deps.decisions.keep(
+                title=task.title, url=used_url, rule_id="S10.review", detail=review_note
+            )
 
         seen_keys.add(dedup_key(candidate.url))
         _compose_and_save(
@@ -1539,6 +1550,7 @@ def _consume_candidates(
             deps=deps,
             dedup=dedup,
             accepted=accepted,
+            fingerprint=fingerprint,
         )
 
 
@@ -1572,6 +1584,7 @@ def _compose_and_save(
     deps: PipelineDeps,
     dedup: ProductDedup,
     accepted: list[AcceptedImage],
+    fingerprint: ImageFingerprint | None = None,
 ) -> None:
     """Stage 5: isolate, 1:1 centre, light unsharp, both templates, save locally."""
     isolated, degraded = isolate_main_product(image, config)
@@ -1623,7 +1636,7 @@ def _compose_and_save(
             alfa_path=alfa_path,
         )
     )
-    dedup.add(image, candidate.url)
+    dedup.add(image, candidate.url, fingerprint=fingerprint)
     deps.decisions.keep(
         title=task.title,
         url=candidate.url,

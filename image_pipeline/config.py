@@ -419,6 +419,11 @@ class PipelineConfig:
     #: re-served copy correlates ~1.0 (live 2026-10-09: a correct second angle was
     #: rejected as "near-duplicate").
     dedup_hard_corr_threshold: float = 0.985
+    #: Inside the hard hamming radius, how much of the product silhouette two images must
+    #: share to be called the same angle.  Calibrated on the owner's 33-product run
+    #: (2026-10-09): re-served copies measure IoU 0.985, the best genuinely different pair
+    #: 0.754 - so 0.90 sits in the gap rather than in the middle of a guess.
+    dedup_shape_iou_min: float = 0.90
 
     # ----- monochrome logo / emblem gate (S14) ------------------------------
     #: Official galleries mix marketing badges (the Haier "AI + leaf" emblem on a
@@ -689,6 +694,8 @@ class PipelineConfig:
             )
         if not 0.0 < self.dedup_corr_threshold <= 1.0:
             raise ConfigError("dedup_corr_threshold must be in (0, 1]")
+        if not 0.0 < self.dedup_shape_iou_min <= 1.0:
+            raise ConfigError("dedup_shape_iou_min must be in (0, 1]")
 
     def _validate_compositing(self) -> None:
         if self.canonical_side < 64:

@@ -13,15 +13,18 @@ from dataclasses import dataclass
 import numpy as np
 from PIL import Image
 
-from image_quality import to_rgb
+from image_quality import body_shape, shape_overlap, to_rgb
 
 
 @dataclass(frozen=True)
 class ImageFingerprint:
-    """dHash (64 bits) plus a small normalised grey thumbnail for correlation."""
+    """dHash (64 bits), a normalised grey thumbnail, and the product's body silhouette."""
 
     dhash: int
     gray: np.ndarray
+    #: Largest solid body normalised to its own box (see ``image_quality.body_shape``),
+    #: or ``None`` when there is no measurable body / no scipy.
+    shape: np.ndarray | None = None
 
 
 def _product_patch(rgb: Image.Image, size: int = 32) -> np.ndarray:
@@ -58,7 +61,7 @@ def compute_fingerprint(image: Image.Image) -> ImageFingerprint:
     value = 0
     for bit in bits:
         value = (value << 1) | int(bit)
-    return ImageFingerprint(dhash=value, gray=_product_patch(rgb))
+    return ImageFingerprint(dhash=value, gray=_product_patch(rgb), shape=body_shape(rgb))
 
 
 def hamming_distance(left: int, right: int) -> int:
@@ -72,6 +75,55 @@ def _correlation(left: np.ndarray, right: np.ndarray) -> float:
     return float(np.clip(np.sum(left * right), -1.0, 1.0))
 
 
+def duplicate_reason(
+    fingerprint: ImageFingerprint,
+    existing: Sequence[ImageFingerprint],
+    *,
+    hard_threshold: int,
+    soft_threshold: int,
+    corr_threshold: float,
+    shape_iou_min: float = 0.90,
+    hard_corr_threshold: float = 0.985,
+) -> str:
+    """Why this image repeats an already accepted angle, or ``""`` when it does not.
+
+    The decision is unchanged from the shipped rule - what this function adds is the
+    *sentence*, because "near-duplicate" in ``decisions.jsonl`` told a reviewer nothing
+    about which signal fired or how close the pair was.
+
+    Why the rule cannot simply be tightened, measured on the owner's 33-product run
+    (2026-10-09): the pairs he calls duplicates and the pair his own test guards are not
+    separable by any of these signals.
+
+    | pair                                  | dHash | silhouette IoU | body correlation |
+    |---------------------------------------|-------|----------------|------------------|
+    | Ecostar 01~02 (he says: duplicate)    |     3 |          0.985 |            0.802 |
+    | Gree Pular 01~02 (he says: duplicate) |     4 |          0.985 |            0.555 |
+    | open-louver flap vs flat (must keep)  |     2 |          1.000 |            0.965 |
+
+    The protected pair is *closer* on every measure than both real duplicates, so any
+    threshold loose enough to catch them also deletes a legitimate second angle - which
+    is the bug the correlation demand was added to stop.  Tightening dedup is therefore
+    NOT the fix for a repeated download: see ``review_shape_match``, which records the
+    ambiguity for a human instead of guessing, and ``dedup_key`` in
+    :mod:`url_filters`, which prevents the same asset being fetched twice by identity.
+    """
+    for position, candidate in enumerate(existing, start=1):
+        distance = hamming_distance(fingerprint.dhash, candidate.dhash)
+        correlation = _correlation(fingerprint.gray, candidate.gray)
+        if distance <= hard_threshold and correlation >= hard_corr_threshold:
+            return (
+                f"re-served copy of accepted image #{position} "
+                f"(dHash {distance} bits apart, correlation {correlation:.4f})"
+            )
+        if distance <= soft_threshold and correlation >= corr_threshold:
+            return (
+                f"near-identical to accepted image #{position} "
+                f"(dHash {distance} bits apart, correlation {correlation:.4f})"
+            )
+    return ""
+
+
 def is_visual_duplicate(
     fingerprint: ImageFingerprint,
     existing: Sequence[ImageFingerprint],
@@ -81,22 +133,17 @@ def is_visual_duplicate(
     corr_threshold: float,
     hard_corr_threshold: float = 0.985,
 ) -> bool:
-    """Same angle twice (resize/re-encode) => duplicate; a different angle is not.
-
-    The dHash of two catalogue angles of the same appliance can sit inside the hard
-    hamming radius (both are a wide body band on white), so the hard path also
-    demands a near-perfect grey-patch correlation - re-served copies correlate
-    ~1.0, a genuinely different angle measures far below (live 2026-10-09: the
-    row's correct second angle was rejected as a "duplicate" of the first).
-    """
-    for candidate in existing:
-        distance = hamming_distance(fingerprint.dhash, candidate.dhash)
-        correlation = _correlation(fingerprint.gray, candidate.gray)
-        if distance <= hard_threshold and correlation >= hard_corr_threshold:
-            return True
-        if distance <= soft_threshold and correlation >= corr_threshold:
-            return True
-    return False
+    """True when this image repeats an already accepted angle of the same product."""
+    return bool(
+        duplicate_reason(
+            fingerprint,
+            existing,
+            hard_threshold=hard_threshold,
+            soft_threshold=soft_threshold,
+            corr_threshold=corr_threshold,
+            hard_corr_threshold=hard_corr_threshold,
+        )
+    )
 
 
 class ProductDedup:
@@ -109,11 +156,13 @@ class ProductDedup:
         soft_threshold: int,
         corr_threshold: float,
         hard_corr_threshold: float = 0.985,
+        shape_iou_min: float = 0.90,
     ) -> None:
         self._hard = hard_threshold
         self._soft = soft_threshold
         self._corr = corr_threshold
         self._hard_corr = hard_corr_threshold
+        self._shape_iou = shape_iou_min
         self._entries: list[tuple[str, ImageFingerprint]] = []
         self._accepted_color_families: list[str] = []
 
@@ -137,31 +186,67 @@ class ProductDedup:
             )
         return True, ""
 
-    def is_duplicate(self, image: Image.Image) -> bool:
-        """True when this image repeats an already accepted angle of this product."""
-        fingerprint = compute_fingerprint(image)
-        return is_visual_duplicate(
-            fingerprint,
+    def duplicate_reason(
+        self, image: Image.Image, *, fingerprint: ImageFingerprint | None = None
+    ) -> str:
+        """The sentence explaining a repeat, or ``""`` when this is a new angle.
+
+        ``fingerprint`` lets the caller compute the hash once per candidate: the gate and
+        the bookkeeping below need the same value, and re-resizing a 1200px image twice
+        per accepted picture was measurable waste (2.0x, owner run 2026-10-09).
+        """
+        current = compute_fingerprint(image) if fingerprint is None else fingerprint
+        return duplicate_reason(
+            current,
             [entry for _, entry in self._entries],
             hard_threshold=self._hard,
             soft_threshold=self._soft,
             corr_threshold=self._corr,
             hard_corr_threshold=self._hard_corr,
+            shape_iou_min=self._shape_iou,
         )
 
-    def add(self, image: Image.Image, url: str) -> bool:
+    def is_duplicate(
+        self, image: Image.Image, *, fingerprint: ImageFingerprint | None = None
+    ) -> bool:
+        """True when this image repeats an already accepted angle of this product."""
+        return bool(self.duplicate_reason(image, fingerprint=fingerprint))
+
+    def review_shape_match(
+        self, image: Image.Image, *, fingerprint: ImageFingerprint | None = None
+    ) -> str:
+        """An angle that looks like a repeat but is not proven one - flag it, keep it.
+
+        Returned for the review CSV: inside the hard hamming radius but short of the
+        correlation bar, the pair is *probably* the same picture from another shop, yet
+        the measurements cannot say so (see :func:`duplicate_reason`).  Publishing a
+        second angle of the same product is cheap; deleting a product's only side view is
+        not, so this is a note for a human rather than a rejection.
+        """
+        current = compute_fingerprint(image) if fingerprint is None else fingerprint
+        best = ""
+        for position, candidate in enumerate([entry for _, entry in self._entries], start=1):
+            distance = hamming_distance(current.dhash, candidate.dhash)
+            if distance > self._hard:
+                continue
+            correlation = _correlation(current.gray, candidate.gray)
+            if correlation >= self._hard_corr:
+                continue                                        # already a real duplicate
+            overlap = shape_overlap(current.shape, candidate.shape)
+            best = (
+                f"possible repeat of accepted image #{position}: dHash {distance} bits apart, "
+                f"correlation {correlation:.4f}, silhouette IoU {overlap:.3f} - kept, review"
+            )
+        return best
+
+    def add(
+        self, image: Image.Image, url: str, *, fingerprint: ImageFingerprint | None = None
+    ) -> bool:
         """Remember an accepted image.  Returns False when it was a duplicate."""
-        fingerprint = compute_fingerprint(image)
-        if is_visual_duplicate(
-            fingerprint,
-            [entry for _, entry in self._entries],
-            hard_threshold=self._hard,
-            soft_threshold=self._soft,
-            corr_threshold=self._corr,
-            hard_corr_threshold=self._hard_corr,
-        ):
+        current = compute_fingerprint(image) if fingerprint is None else fingerprint
+        if self.duplicate_reason(image, fingerprint=current):
             return False
-        self._entries.append((url, fingerprint))
+        self._entries.append((url, current))
         from image_quality import extract_foreground_color_profile
 
         profile = extract_foreground_color_profile(image)
