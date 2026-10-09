@@ -6,6 +6,7 @@ from bs4 import BeautifulSoup
 from conftest import load_fixture
 
 from gallery_extractors import ExtractionContext, extract_candidates, registry_extractor_for
+from gallery_extractors.json_ld import extract as json_ld_extract
 from gallery_extractors.shopify_json import (
     looks_like_shopify,
     parse_product_json,
@@ -209,3 +210,51 @@ def test_woo_store_api_urls_and_parsing() -> None:
     ]
     assert all(candidate.source == "woo_json" for candidate in candidates)
     assert parse_store_products('{"detail":"no route"}', context) == []
+
+
+# --------------------------------------------------------------------------- #
+# S-json_ld: a row with no model code may still be identified by its own page
+# --------------------------------------------------------------------------- #
+_LDPAGE = "https://www.orient.com.pk/products/frost-18w-classic-white.html"
+
+
+def _two_product_page() -> str:
+    """A shop page whose JSON-LD names the product *and* a related one.
+
+    Shape taken from the live capture ``uploads/live/orient_frost.html``
+    (owner, 2026-10-10): the Frost node declares its image as
+    ``assets/og-images/frost-18w-classic-white.jpg`` and the page's ``<img>`` tags
+    are all cross-sell tiles.
+    """
+    return (
+        '<html><head><script type="application/ld+json">'
+        '{"@context":"https://schema.org","@graph":['
+        '{"@type":"Product","name":"Megatron Titanium 12X","sku":"megatron-12x",'
+        '"url":"https://www.orient.com.pk/products/megatron-titanium-12x.html",'
+        '"image":"https://www.orient.com.pk/assets/products-images/ac/megatron/01.png"},'
+        '{"@type":"Product","name":"Frost 18W Classic White","sku":"frost-18w-classic-white",'
+        f'"url":"{_LDPAGE}",'
+        '"image":"https://www.orient.com.pk/assets/og-images/frost-18w-classic-white.jpg?v=20260618c"}'
+        "]}</script></head><body></body></html>"
+    )
+
+
+def test_model_free_title_still_reads_the_page_owning_node() -> None:
+    """Frost failed the row because a title with no model code owns nothing to match."""
+    context = _context(_LDPAGE, _two_product_page(), "Frost 18W Classic White | Orient Electronics Pakistan", "orient")
+    urls = [candidate.url for candidate in json_ld_extract(context)]
+    assert urls == ["https://www.orient.com.pk/assets/og-images/frost-18w-classic-white.jpg"]
+    assert context.keys.tokens == () and context.keys.identities == ()
+
+
+def test_page_owning_node_never_leaks_a_related_product() -> None:
+    """The exception is only for the node that names *this* page; the tile stays out."""
+    context = _context(_LDPAGE, _two_product_page(), "Frost 18W Classic White | Orient Electronics Pakistan", "orient")
+    assert all("megatron" not in candidate.url for candidate in json_ld_extract(context))
+
+
+def test_model_bearing_rows_keep_the_strict_gate() -> None:
+    """Rows that own a model code are matched exactly as before - nothing is loosened."""
+    context = _context(_LDPAGE, _two_product_page(), "Orient Megatron FW-9999X Titanium", "orient")
+    assert context.keys.tokens  # the row owns a model code, so the exception must not apply
+    assert [c.url for c in json_ld_extract(context)] == []

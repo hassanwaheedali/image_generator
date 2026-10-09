@@ -3,11 +3,20 @@
 Only a node whose **own** name/sku/mpn/model/productID/url matches the product keys
 is used, and only that node's ``image`` is read.  ``ItemList`` / related nodes are
 never descended into.
+
+One exception, deliberately narrow: a row whose title carries *no* model code at all
+("Frost 18W Classic White | Orient Electronics Pakistan") owns nothing to match, so the
+gate above refuses the page's own node and the image the page declared is never seen.
+Such a row accepts a node that names **this very page** as its product page - a claim a
+related-product tile cannot make.  Rows that do own a model key are matched exactly as
+before.
 """
 
 from __future__ import annotations
 
+import re
 from typing import Any
+from urllib.parse import unquote, urljoin, urlsplit
 
 from bs4 import BeautifulSoup
 
@@ -83,10 +92,49 @@ def product_node_texts(soup: BeautifulSoup) -> list[str]:
     return texts
 
 
+#: Fields a node may use to name its own product page.
+_PAGE_URL_FIELDS = ("url", "@id", "mainEntityOfPage")
+
+
+def _page_slug(value: str) -> str:
+    """The last path segment of a URL - or a bare sku - without its file extension."""
+    path = urlsplit(value).path
+    text = unquote(path or value).strip("/")
+    tail = text.rsplit("/", 1)[-1]
+    return re.sub(r"\.(?:html?|php|aspx?|shtml)$", "", tail, flags=re.IGNORECASE).casefold()
+
+
+def _declares_page(node: dict[str, Any], page_url: str) -> bool:
+    """True when the product node names *this* page as its own product page.
+
+    Stronger than a name match, which is why it is trusted for model-free rows: the
+    node has to carry this URL (or a sku equal to this page's slug), and a shop's
+    related-product / upsell nodes always name their own address instead.
+    """
+    wanted = _page_slug(page_url)
+    if not wanted:
+        return False
+    for field in _PAGE_URL_FIELDS:
+        value = node.get(field)
+        for item in value if isinstance(value, list) else [value]:
+            if isinstance(item, dict):
+                item = item.get("@id") or item.get("url")
+            if isinstance(item, str) and item.strip() and (
+                _page_slug(urljoin(page_url, item.strip())) == wanted
+            ):
+                return True
+    sku = node.get("sku")
+    return bool(isinstance(sku, str) and _page_slug(sku.strip()) == wanted)
+
+
 def extract(context: ExtractionContext) -> list[ImageCandidate]:
     """Images of JSON-LD product nodes whose own identity matches this product."""
     candidates: list[ImageCandidate] = []
     order = 0
+    # A title without a model code has nothing to match, and then the page's own node
+    # is the only honest source left (owner finding 2026-10-10, uploads/live/orient_frost.html:
+    # the node declared og-images/frost-18w-classic-white.jpg and extract() returned 0).
+    model_free = not context.keys.tokens and not context.keys.identities
     for block in iter_ld_json_blocks(context.soup):
         payload = safe_json_loads(block)
         if payload is None:
@@ -95,7 +143,11 @@ def extract(context: ExtractionContext) -> list[ImageCandidate]:
             if not isinstance(node, dict) or not _type_is_product(node):
                 continue
             identity = _identity_text(node)
-            if not identity or not find_matching_keys(identity, context.keys):
+            if not identity:
+                continue
+            if not find_matching_keys(identity, context.keys) and not (
+                model_free and _declares_page(node, context.page_url)
+            ):
                 continue
             for url in _image_urls(node):
                 canonical = canonicalize_url(url, context.page_url)

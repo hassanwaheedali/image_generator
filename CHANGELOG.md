@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **A row whose title has no model code can now use the page's own declared image.**
+  `json_ld` accepted only a node whose name/sku/model matched a model key - and a title
+  like `Frost 18W Classic White | Orient Electronics Pakistan` owns no key to match, so
+  the page's own `Product` node was refused and its declared image never entered the
+  candidate list. Verified on the owner's live capture (`uploads/live/orient_frost.html`,
+  2026-10-10): `extract()` returned **0** candidates while the node carried
+  `assets/og-images/frost-18w-classic-white.jpg`. Such a node is now accepted when it
+  names **this page** as its product page (`url`/`@id`/`mainEntityOfPage`, or a `sku`
+  equal to the page slug) - a claim a cross-sell tile cannot make, which is why the
+  exception is closed for every row that *does* own a model code. On the same capture the
+  row goes 7 candidates (all cross-sell tiles, all correctly S3-rejected) -> 8, first =
+  the Frost image. 6 of 34 rows own no model code; the run's only `failed` row is one of
+  them. **Needs the owner's live re-run**: this sandbox cannot download from
+  `orient.com.pk`, so the image's quality-gate pass is unproven here.
 - **S18 - a crop may not cut the product.** The isolation box followed the strict
   foreground mask, and a white shell on a white background fades out *inside* that
   mask, so the box stopped at the product's waist. Measured on the owner run of

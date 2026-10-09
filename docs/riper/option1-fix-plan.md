@@ -109,3 +109,26 @@ Evidence trail, in order:
 7. Open, deliberately not hidden: **13 products where the ink already touches the source's
    own frame edge.** For those the site's file is the cut one; no crop can repair it. That
    is a *candidate choice* problem (prefer an uncut source), not an isolation problem.
+
+**2026-10-10 · the Frost row — a scraping gap, after two wrong conclusions. SHIPPED, needs a live re-run.**
+
+1. Claim A (mine, from the old log): "the crash hides the reason". Half true - fixing it
+   only produced a *reason*, not an image.
+2. Claim B (mine, from the live capture): "Orient publishes no gallery on this page, the
+   7 S3 rejects are all correct, there is nothing to scrape". **Wrong, and the owner
+   caught it by pointing at the page.** The capture does contain the product image - the
+   page's own JSON-LD `Product` node declares
+   `assets/og-images/frost-18w-classic-white.jpg?v=20260618c`.
+3. Mechanism, reproduced with the shipped code: `json_ld.extract()` returned 0
+   candidates because the identity gate needs a model-key match and this title has
+   `tokens=() identities=()`. So *the extractor never looked at the one image the page
+   admits to having*. `<img>`-only scanning + a model-key gate = a blind spot for every
+   model-code-free row (6 of 34 rows here; the run's only `failed` row is one of them).
+4. Fix, kept narrow on purpose: the node is accepted when it *names this page*
+   (`url`/`@id`/`mainEntityOfPage` == page slug, or `sku` == page slug) - and only for
+   rows that own no model code, so no row that can be matched by model is affected.
+   Proved non-leaky: a page whose JSON-LD also lists `megatron-titanium-12x` yields only
+   the Frost image.
+5. Measurement: same capture, all five sources - 7 candidates -> 8, first = `frost-18w-classic-white.jpg`.
+6. Lesson recorded so it is not repeated: "the page has no images" is a claim about *the
+   extractor's* reach, not about the page. Check `og:image` / `ld+json` before saying it.
