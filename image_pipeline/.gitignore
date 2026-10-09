@@ -4,8 +4,6 @@
 secrets.env
 env.txt
 
-# Run artefacts
-output/
 
 # Python
 __pycache__/
