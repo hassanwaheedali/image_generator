@@ -316,3 +316,21 @@ def test_direct_processes_titles_without_a_model_code(tmp_path: Path) -> None:
     result, accepted = process_direct_product(task, deps, _direct_config(tmp_path))
     assert len(accepted) == 1
     assert result.status is Status.PARTIAL
+
+
+# --------------------------------------------------------------------------- #
+# Task O2-5: the --direct CLI flag
+# --------------------------------------------------------------------------- #
+from main import build_config, build_parser  # noqa: E402
+
+
+def test_cli_direct_flag_sets_direct_mode() -> None:
+    args = build_parser().parse_args(["--direct", "--dry-run"])
+    config = build_config(args)
+    assert config.direct_mode is True
+
+
+def test_cli_default_stays_option_1() -> None:
+    args = build_parser().parse_args(["--dry-run"])
+    config = build_config(args)
+    assert config.direct_mode is False
