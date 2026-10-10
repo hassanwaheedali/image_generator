@@ -29,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and only falls back to the generic URL headers when no image column exists; Option 1's column
   choice is unchanged. Verified live with a two-column sheet whose Source URLs point at a dead
   port: every row still published from `Images`, and the yellow template still died on S19.
+- **Pinned transitive `soupsieve>=2,<3`.** A fresh install pulled soupsieve 3.0, whose stricter
+  CSS parser rejects Option 1's region-strip selector list (two e2e tests failed on a clean
+  checkout); 2.x is the verified major.
+
 ### Added
 - **Option 2: `main.py --direct` — direct image URLs, no scraping.** The sheet's URL column is
   read as the product's own image URLs; per row the pipeline downloads, validates, composes on
