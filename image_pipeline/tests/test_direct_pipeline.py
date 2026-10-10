@@ -53,7 +53,11 @@ def test_branded_template_guard_validation(kwargs: dict[str, object], message_pa
 # --------------------------------------------------------------------------- #
 from PIL import Image, ImageDraw  # noqa: E402
 
-from image_quality import branded_template_reason  # noqa: E402
+from image_quality import (  # noqa: E402
+    branded_template_reason,
+    run_quality_gates,
+    validate_image_bytes,
+)
 
 
 def _white_product_photo(corner_colour: tuple[int, int, int] = (255, 255, 255)) -> Image.Image:
@@ -334,3 +338,76 @@ def test_cli_default_stays_option_1() -> None:
     args = build_parser().parse_args(["--dry-run"])
     config = build_config(args)
     assert config.direct_mode is False
+
+
+# --------------------------------------------------------------------------- #
+# Task O2-6: real web photos as fixtures (AC / refrigerator / other / template)
+# --------------------------------------------------------------------------- #
+REAL_FIXTURES = Path(__file__).parent / "fixtures" / "option2"
+
+
+def _real_image(name: str) -> Image.Image:
+    data = (REAL_FIXTURES / name).read_bytes()
+    config = PipelineConfig(dry_run=True)
+    return validate_image_bytes(
+        data,
+        "image/jpeg",
+        max_bytes=config.max_image_bytes,
+        max_pixels=config.max_image_pixels,
+        min_lossy_bytes=config.min_lossy_image_bytes,
+        min_lossy_bytes_per_pixel=config.min_lossy_bytes_per_pixel,
+        blur_sharpness_floor=config.salvage_min_sharpness,
+    )
+
+
+def test_s19_blocks_a_real_yellow_store_template() -> None:
+    config = PipelineConfig(dry_run=True)
+    reason = branded_template_reason(_real_image("yellow_template.jpg"), config)
+    assert reason is not None
+    assert "store template" in reason
+
+
+@pytest.mark.parametrize("name", ["ac_white_2.jpg", "fridge_white.jpg", "washer_white.jpg"])
+def test_real_white_background_products_pass_every_gate(name: str) -> None:
+    config = PipelineConfig(dry_run=True)
+    image = _real_image(name)
+    assert branded_template_reason(image, config) is None
+    assert run_quality_gates(image, config) == ("ok", "")
+
+
+def test_a_frame_filling_close_up_stays_rejected_by_s7() -> None:
+    """S7 keeps its Option 1 strictness: the crop close-up is not a studio shot."""
+    config = PipelineConfig(dry_run=True)
+    image = _real_image("ac_white_1.jpg")
+    assert branded_template_reason(image, config) is None
+    rule_id, _ = run_quality_gates(image, config)
+    assert rule_id == "S7"
+
+
+def test_direct_end_to_end_on_real_photos(tmp_path: Path) -> None:
+    """One row per category: clean photos publish, the yellow template does not."""
+    base = "http://fixtures.test/"
+    urls = {
+        base + name: (REAL_FIXTURES / name).read_bytes()
+        for name in ("ac_white_1.jpg", "ac_white_2.jpg", "fridge_white.jpg",
+                     "washer_white.jpg", "yellow_template.jpg")
+    }
+    deps, fetcher = _direct_deps(tmp_path, urls)
+    config = _direct_config(tmp_path, min_required_images=1)
+
+    ac = ProductTask(0, "Cool Breeze 12X Inverter AC", (base + "ac_white_1.jpg", base + "ac_white_2.jpg"))
+    fridge = ProductTask(1, "Frost Master 340L Refrigerator", (base + "fridge_white.jpg",))
+    washer = ProductTask(2, "Wash Pro 8kg Washing Machine", (base + "washer_white.jpg",))
+    promo = ProductTask(3, "Mega Sale Template Product", (base + "yellow_template.jpg",))
+    outcomes = {
+        task.title: process_direct_product(task, deps, config)[0]
+        for task in (ac, fridge, washer, promo)
+    }
+
+    assert outcomes["Cool Breeze 12X Inverter AC"].status is Status.OK       # ac_white_2 composes
+    assert outcomes["Frost Master 340L Refrigerator"].status is Status.OK
+    assert outcomes["Wash Pro 8kg Washing Machine"].status is Status.OK
+    assert outcomes["Mega Sale Template Product"].status is Status.FAILED
+    assert "S19" in (tmp_path / "decisions.jsonl").read_text(encoding="utf-8")
+    # downloads only ever touched the image URLs - nothing else was fetched
+    assert sorted(fetcher.requested) == sorted(urls)
