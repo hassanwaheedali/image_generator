@@ -240,3 +240,25 @@ pasted, not on reasoning.
    downloaded. That is the next change, and it needs the same-angle pair to be visible to the
    dedup at all (see G5 logging gap: the crop box and the dedup verdict are not both logged).
 
+## 7. "Haier shows 6 images, the script downloads 1" - measured, and it is not an extractor bug
+
+Their question, 2026-10-10. Live page `haier.com/pk/air-conditioners/hsu-13hfcp023wdc-w-.shtml`
+(`www.haier.com` is not reachable from this sandbox - `SSL_ERROR_SYSCALL` - so the page was
+replicated from the owner's own pasted `.sd_imgs` markup and run through the real code path).
+
+* `extract_candidates` on that markup: **8 candidates, all the crisp `_1200.png` files**
+  (6 product views, then the 2 emblem files), `source=registry:haier`.  Nothing is being
+  skipped by the extractor any more and no `_60.png` thumb survives.
+* `_page_download_allowance` for that page: **8** - a curated gallery is read in full, so the
+  two-level download budget is not the limit either.
+* The limit is the *customer target*: `_row_is_done` = `len(accepted) >= min(target_images_per_product,
+  max_images_per_product)` and the candidate loop breaks on it (`pipeline.py:1351`).  With the
+  default `--target-images 3`, the row publishes 3 and stops - in their run those 3 slots were
+  `1 photo + 2 emblems`, which is exactly why the folder looked like "only one image".
+* So: S20 alone turns that row into **3 real photos** (the emblems can no longer spend slots);
+  `--target-images 6` reaches all six.  Dedup S10 will still fold near-identical angles - the
+  page's views 1 and 4 are both the flat front - and that folding is what the owner asked for
+  ("never publish the same picture twice"), so 6 gallery images do not mean 6 published files.
+* Deliberately NOT changed: the default target stays 3, because every extra slot is also an extra
+  slot a retailer's junk can fill, and downloads per row drive the run's wall time.
+
