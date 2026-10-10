@@ -323,3 +323,61 @@ def test_product_hero_picture_is_a_gallery_source() -> None:
     # another model's photo
     if tile is not None:
         assert "S3" in tile.dom_flags
+
+
+# --------------------------------------------------------------------------- #
+# S19 - Haier names the crisp file in data-imgurl (owner's run, 2026-10-10)
+# --------------------------------------------------------------------------- #
+_HAIER_GALLERY_HTML = """
+<html><body>
+  <div class="sd_imgs">
+    <ul>
+      <li data-id="W020260404458450118371">
+        <a href="javascript:;" class="js_proImg_cur">
+          <img src="https://www.haier.com/pk/media/image/product/31365/s/W020260404458450118371_60.png"
+               data-imgurl="https://www.haier.com/pk/media/image/product/31365/lg/W020260404458450118371_1200.png"
+               alt="Haier HSU-13HFPC">
+        </a>
+      </li>
+      <li data-id="W020260406514479331714">
+        <a href="javascript:;">
+          <img src="https://www.haier.com/pk/media/image/product/31365/s/W020260406514479331714_60.png"
+               data-imgurl="https://www.haier.com/pk/media/image/product/31365/lg/W020260406514479331714_1200.png"
+               alt="Haier HSU-13HFPC side view">
+        </a>
+      </li>
+      <li data-id="W020260404458942582487">
+        <a href="javascript:;">
+          <img src="https://www.haier.com/pk/media/image/product/31365/s/W020260404458942582487_60.png"
+               data-imgurl="https://www.haier.com/pk/media/image/product/31365/lg/W020260404458942582487.png"
+               alt="Haier logo">
+        </a>
+      </li>
+    </ul>
+  </div>
+</body></html>
+"""
+
+
+def test_haier_gallery_uses_the_declared_crisp_file() -> None:
+    """The owner's live complaint (2026-10-10): "the page gallery has 6 crystal clear
+    images, why did you download a blurry one".  Haier's markup puts the 60px thumbnail
+    in ``src`` and the 1200px asset in ``data-imgurl`` - an attribute this pipeline did
+    not read, so it took the thumb and then *guessed* a size onto an unnamed file.
+    """
+    context = _context(HAIER, _HAIER_GALLERY_HTML, "Haier HSU-13HFPC 0.75 WD", "haier")
+    urls = [candidate.url for candidate in extract_candidates(context)]
+    assert (
+        "https://www.haier.com/pk/media/image/product/31365/lg/W020260404458450118371_1200.png"
+        in urls
+    )
+    assert all("_60.png" not in url for url in urls), urls
+
+
+def test_haier_emblem_is_still_extracted_but_fails_on_pixels() -> None:
+    """Extraction is not where a brand's own gallery gets judged: the emblem file is
+    named by the page, so it is collected (and S20 removes it once its pixels are read).
+    """
+    context = _context(HAIER, _HAIER_GALLERY_HTML, "Haier HSU-13HFPC 0.75 WD", "haier")
+    urls = [candidate.url for candidate in extract_candidates(context)]
+    assert any("W020260404458942582487" in url for url in urls)

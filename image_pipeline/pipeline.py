@@ -72,6 +72,7 @@ from model_matching import (
     near_miss_codes,
     relaxed_page_match,
     url_belongs_to_other_model,
+    url_names_other_capacity_code,
 )
 from models import (
     AcceptedImage,
@@ -1351,6 +1352,19 @@ def _consume_candidates(
         if _row_is_done(accepted, config):
             break
         verdict = _decide_candidate(candidate, keys, seen_keys)
+        if (
+            verdict is None
+            and config.capacity_code_gate_enabled
+            and url_names_other_capacity_code(candidate.url, keys)
+        ):
+            # S4's key comparison cannot see a row whose only model code is a capacity
+            # pair ("18X"), so the wrong-product file ("…Super-18G-EVA-…") slipped into
+            # the gallery.  Checked here rather than inside _decide_candidate because
+            # that function is deliberately config-free.
+            verdict = (
+                "S4",
+                "image URL names another capacity code than this row (different model)",
+            )
         if verdict is not None:
             rule, detail = verdict
             rejections[rule] += 1

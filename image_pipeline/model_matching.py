@@ -762,6 +762,48 @@ def url_belongs_to_other_model(url: str, keys: ModelKeys) -> bool:
     return any(_alpha_prefix(token) in product_prefixes for token in tokens)
 
 
+#: A capacity-and-series code, the way this catalog's rows and file names identify a
+#: split AC: two or three digits plus one lone letter ("18x", "19c", "12x", "18g").
+_CAPACITY_CODE_RE = re.compile(r"(?<![a-z0-9])\d{2,3}[a-z](?![a-z0-9])")
+
+
+def capacity_codes(text: str) -> frozenset[str]:
+    """The ``<capacity><series letter>`` codes in a title or a file name.
+
+    Rows like ``Orient Split AC Hyper 18X Super White`` carry no HSU-style part number -
+    their whole identity is that pair - and retailers write the same pair into the file
+    name (``Orient-Super-18G-EVA-T3-…``).  Bounded on both sides on purpose: a size
+    suffix (``-800x800``), an upload folder (``2024/12``) and a random asset id
+    (``W020260404458450118371``) all fail the shape, so they cannot invent a code.
+    """
+    return frozenset(_CAPACITY_CODE_RE.findall(normalize_text(text)))
+
+
+def url_names_other_capacity_code(url: str, keys: ModelKeys) -> bool:
+    """Safeguard S4, second half: the file names *another* capacity code than the row.
+
+    Live on 2026-10-10 (owner's run): the row ``Orient Split AC Hyper 18X Super White``
+    published ``…/Orient-Super-18G-EVA-T3-1.5-Ton-DC-Inverter-Air-Conditioner2.jpg`` - a
+    silver 18G EVA wearing an orange "1.1 Meter Long" badge, a different product - and
+    :func:`url_belongs_to_other_model` let it through.  Its reason is exact: that row's
+    only key is ``18X``, whose *alphabetic* prefix is empty, so S4's prefix comparison
+    had nothing to compare and gave up (``if not product_prefixes: return False``).
+    Comparing the digit-plus-letter code instead names the mismatch directly.
+
+    Both sides must carry a code and they must be disjoint, so a page that also names
+    our own code stays accepted (``…-1.5-Ton-Hyper-18X-T3-Super-White-Turbo-Pro.webp``
+    is the correct file for this row and is kept by the intersection).
+    """
+    ours = capacity_codes(" ".join(keys.tokens)) or capacity_codes(keys.cleaned_title)
+    if not ours:
+        return False
+    path = unquote(urlsplit(unquote(url)).path)
+    theirs = capacity_codes(path.rsplit("/", 1)[-1])
+    if not theirs:
+        return False
+    return not (ours & theirs)
+
+
 def is_display_product(title: str) -> bool:
     """True for TVs, monitors, and screens where display wallpapers contain arbitrary colours.
 

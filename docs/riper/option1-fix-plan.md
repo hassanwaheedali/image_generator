@@ -201,3 +201,42 @@ is `…/assets/products-images-2026/air-conditioners/15-ton-pulse-ultra-white-dc
    both claims about *which container the extractor looked at*, not about the page. When a
    row fails, list what the DOM actually holds before concluding anything - the same mistake
    produced the wrong "Orient publishes no Frost gallery" statement earlier today.
+
+## 6. Round 3 - the owner's three Orient finals and the Haier emblem (2026-10-10, evening)
+
+Three more holes were reported after §5 shipped. All three were measured on the owner's own
+run output (`output/images/*/raw/*.jpg`, 33 rows, 72 published files) and on the markup they
+pasted, not on reasoning.
+
+1. **Haier: "the page gallery has 6 crystal clear images, why download a blurry one".** Root
+   cause is one missing attribute: Haier writes
+   `<img src="…_60.png" data-imgurl="…_1200.png">`. `_ATTR_PRIORITY` did not include
+   `data-imgurl`, so the extractor collected the 60px thumb; the size-guess ladder then
+   invented a URL, and the row published a soft unnamed file. Fixed in
+   `gallery_extractors/__init__.py`, tested with the owner's pasted gallery markup.
+2. **Haier: the AI/laurel emblem.** The gate written for this emblem (S14) only fires on a
+   *non-white* ground; the 2026-10-10 files are `logo_white_bg.png`, so its very first test
+   bailed them out. No URL rule can help: the emblems are `W020260404458942582487.png` - random
+   asset ids with no `logo` token in the name. Fixed with S20, a content gate measured on the
+   run: ink share, ink-box span and coarse texture. It rejects 14 of 72 published files, all
+   of them complaints, and no real photo.
+3. **"why here not go to brand official, clearly bug".** It is not a quota bug: `run_report.csv`
+   line 14 for the Hyper 18X row reads `sources tried: www.orient.com.pk:sitemap:0, …`, so the
+   official Orient host *was* queried first (Path 2 in `process_product`) and its sitemap yielded
+   zero candidate pages for that model. The row then filled up from the sheet's retailer pages.
+   What *was* broken is what those retailer pages were allowed to publish - the wrong-model file
+   in item 4 below - and that is fixed here. Remaining gap (G5): an official source that returns
+   0 pages is logged in `run_report.csv` but not per-image in `decisions.jsonl`, so a "we asked
+   Orient and Orient had nothing" decision is invisible in the file the owner reads.
+4. **"the 3rd is fully wrong … clearly different color and different product picture".** Root
+   cause found in S4 itself: it compares alphabetic prefixes, and this row's key is `18X` - no
+   letters, nothing to compare, `return False`. The capacity-code half added tonight rejects the
+   `18G` file (1 of 72 published images across the whole run).
+5. **Blur.** Measured before touching anything: the blurry `01-raw` of the Hyper 18X row has
+   laplacian variance 330.9, while the good population of the same run runs min 189.9 / p10 298.3
+   / median 617.0. **An absolute blur floor is therefore not safe** - any threshold that kills
+   331 also kills hundreds of legitimate photos. The correct lever is a *preference*: when S10
+   calls two candidates the same angle, the sharper one must win instead of the first one
+   downloaded. That is the next change, and it needs the same-angle pair to be visible to the
+   dedup at all (see G5 logging gap: the crop box and the dedup verdict are not both logged).
+
