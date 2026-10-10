@@ -292,3 +292,35 @@ the junk and were never downloaded.
    photo with a label strip, I need the bytes to gate it correctly: `www.dawlance.com.pk` is
    blocked from this sandbox (`SSL_ERROR_SYSCALL`), so I cannot fetch it myself.
 
+## 9. The Dawlance badge-panel file: cut it, do not reject it (owner's screenshot, 2026-10-10 night)
+
+The file they sent is a studio shot of the unit with a **flat black panel** pasted under it
+(4 feature badges, a "1.5 Ton" pill, a 6/12-year warranty block).  S20 called the layout artwork -
+correctly - and the whole image was lost.  The instruction was the same one given for Orient's
+hero: cut the labels, keep the product.
+
+1. First idea, killed by measurement: "if the bottom band is dark, cut it".  Three of their own
+   accepted photos are dark products on dark grounds (Orient Titanium olive-black 78 % band,
+   EcoStar Duke 67 %/56 %), so that rule would truncate real photographs.
+2. What actually separates them is *flatness*, not darkness - a pasted panel has one hard straight
+   edge and uniform rows, a product has highlights.  Five conditions, all required: boundary jump
+   >= 150, band mean <= 70, band row-mean std <= 45, kept side mean >= 170, edge flat across >= 95 %
+   of the width.  Their panel measures 238 / 28.5 / 23.7 / 222 / 1.00; the three real photos
+   56-82 / 164-181 / 89-106 / 236-255 / 0.67-0.88.  Scan of all 72 published files: **0 cut**.
+3. The kept area is a *light grey plate*, so S20 still called it full-bleed ink (>6 from white
+   everywhere).  Raising that threshold globally would re-admit all four Orient posters (same
+   light wash) - so the exemption is bound to the cut itself: `panel_cut` is the detector's
+   `("bottom", 270)` verdict, the line-art branch and S21 stay in force, and the crop is then
+   judged as a product and passes.
+4. Also caught while doing this: `_layout_rescue_verdict` had a stale call signature after the
+   refactor (would have raised `TypeError` for any official gallery image hitting S20/S21).  It
+   is now covered by an end-to-end test, which fails without the fix.
+5. The rescue stays narrow for the same reason: judging the *padded canvas* rather than the tight
+   crop rescued 12 of their 16 junk files.  Measured first, so it is not in the tree; 0 rescues on
+   their corpus with the shipped rule.
+6. Not done, on purpose: the attachment did not reach this sandbox (`/home/user/uploads` does not
+   exist) and `www.dawlance.com.pk` is blocked at TLS, so the panel numbers were calibrated on a
+   faithful replica of their screenshot plus their own run's badge files.  If their real file's
+   boundary is soft (a gradient into the panel rather than one row), the flatness test will refuse
+   the cut and the row loses the image again - `--keep-rejected` will show exactly that in one run.
+

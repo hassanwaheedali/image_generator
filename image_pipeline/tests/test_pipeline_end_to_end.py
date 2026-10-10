@@ -48,6 +48,8 @@ from pipeline import (
     BatchRunner,
     DryRunHost,
     PipelineDeps,
+    _dump_rejected,
+    _layout_rescue_verdict,
     _page_download_allowance,
     ensure_banner_url,
     finalize_and_upload,
@@ -2181,3 +2183,127 @@ def test_a_row_without_any_model_code_gets_a_note_and_not_a_crash() -> None:
     assert not keys.tokens and not keys.identities              # the shape that used to crash
     reason = _tolerated_spelling_reason("Orient Cooltron Frost 18W", keys)
     assert reason.startswith("page shows ") and "sheet model" in reason
+
+
+# --------------------------------------------------------------------------- #
+# official-gallery layout rescue (S20/S21) + --keep-rejected evidence dump
+# --------------------------------------------------------------------------- #
+def _product_wearing_a_marketing_panel(size: int = 1600) -> Image.Image:
+    """A real product photo sitting on a marketing panel that bleeds off all four edges.
+
+    Orient's hero is this shape: a tinted card painted edge to edge, the appliance in the
+    middle.  S20 names the layout correctly - it *is* artwork - and the owner's rule of
+    2026-10-10 says what to do about it: "cut the bottom labels, advertisement marketing
+    labels, and add only product".  The body under the panel is a genuine accepted photo, so
+    the crop the rescue publishes passes every gate on its own.
+    """
+    image = Image.new("RGB", (size, size), (226, 236, 248))
+    unit = size // 2
+    image.paste(clean_product_image(unit, unit, "#2f5fa8"), ((size - unit) // 2, (size - unit) // 2))
+    return image
+
+
+def _emblem_sheet(size: int = 1600) -> Image.Image:
+    """Line art filling the frame - the S20 branch the rescue must never touch.
+
+    Same construction as the emblem fixture in ``test_image_quality``: dense blocky marks
+    reaching all four edges with studio-white corner boxes, so S7 and S14 stay quiet and only
+    the layout sees it.  Its S20 reason is the *line art* branch, and that branch has nothing
+    to crop - the artwork is the whole picture.
+    """
+    image = Image.new("RGB", (size, size), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    margin = size // 8
+    shades = (35, 120, 255, 60, 255)
+    cell = 40
+    for y in range(0, size, cell):
+        for x in range(0, size, cell):
+            in_mark = (margin <= x <= size - margin - 1) or (margin <= y <= size - margin - 1)
+            inside = not (x < margin or y < margin or x >= size - margin or y >= size - margin)
+            if in_mark and inside:
+                shade = shades[(x // cell + 3 * (y // cell)) % len(shades)]
+                if shade != 255:
+                    draw.rectangle((x, y, x + cell - 1, y + cell - 1), fill=(shade,) * 3)
+    for edge in (0, size - 1):
+        draw.point((edge, size // 2), fill=(35, 35, 35))
+        draw.point((size // 2, edge), fill=(35, 35, 35))
+    return image
+
+
+def test_official_gallery_rescues_a_product_inside_marketing_artwork(tmp_path: Path) -> None:
+    """Owner 2026-10-10: "marketing link easily scrap[es] but this actual[ly] not" - the page's
+    own hero is marketing *artwork around* the product, so it must be cropped, not discarded."""
+    from image_quality import run_quality_gates
+
+    config = live_config(tmp_path)
+    image = _product_wearing_a_marketing_panel()
+    rule, detail = run_quality_gates(image, config)
+    assert rule == "S20" and detail.startswith("painted artwork"), detail
+    rescued, reason = _layout_rescue_verdict(image, config, rule, detail)
+    assert rescued, reason
+    assert "isolated product was judged instead" in reason
+
+
+def test_official_gallery_never_rescues_an_emblem_or_a_caption_sheet(tmp_path: Path) -> None:
+    """The rescue is limited to the painted-panel branch on purpose: line art has no product
+    inside it, and the corpus proves the limit works - all 16 junk files of the owner's run
+    (8 Haier emblem files, 2 in-box caption sheets, 6 ad renders) stay rejected."""
+    from image_quality import run_quality_gates
+
+    config = live_config(tmp_path)
+    image = _emblem_sheet()
+    rule, detail = run_quality_gates(image, config)
+    assert rule == "S20" and detail.startswith("line art"), detail
+    assert _layout_rescue_verdict(image, config, rule, detail) == (False, "")
+    # a switch-off returns the row to the plain S20/S21 behaviour
+    assert _layout_rescue_verdict(
+        _product_wearing_a_marketing_panel(),
+        replace(config, official_layout_rescue=False),
+        "S20",
+        "painted artwork covers 84% of the frame",
+    ) == (False, "")
+
+
+def test_keep_rejected_writes_the_pixels_that_died(tmp_path: Path) -> None:
+    """The owner asked where a rejection can be found: the log has the sentence, and with
+    ``--keep-rejected`` the bytes land next to the published folder, named by the rule."""
+    config = live_config(tmp_path, keep_rejected_images=True)
+    _dump_rejected(_emblem_sheet(), config, "Frost 18W Classic White", "https://x/a.png", "S20")
+    folder = config.output_dir / "images" / safe_slug("Frost 18W Classic White") / "rejected"
+    written = sorted(folder.glob("*.jpg"))
+    assert len(written) == 1
+    assert written[0].name.startswith("S20-")
+    assert Image.open(written[0]).size == _emblem_sheet().size
+
+
+def test_a_pasted_marketing_panel_is_cut_before_the_row_is_judged(tmp_path: Path) -> None:
+    """The owner's Dawlance file of 2026-10-10: a studio shot of the unit with a flat black
+    badge/warranty panel pasted underneath.  They asked for the panel to be cut and the
+    product published - "cut the bottom labels, advertisement marketing labels, and add only
+    product" - and this drives the whole path, including the rescue re-check that a unit test
+    cannot reach.
+    """
+    import io
+
+    from PIL import Image as PILImage
+    from test_image_quality import _unit_with_badge_panel
+
+    fixture = _unit_with_badge_panel(size=900)
+    buf = io.BytesIO()
+    fixture.save(buf, format="PNG")
+    images = {IMG1: buf.getvalue()}
+    config = live_config(tmp_path, min_short_side=120, min_long_side=200)
+    deps, _, _, _ = build_deps(tmp_path, {HAIER_PAGE: load_fixture("product_ok")}, images)
+    result, accepted = process_product(
+        task(0, "Haier HSU-12HFPAA Inverter AC", (HAIER_PAGE,)), deps, config
+    )
+    lines = [
+        json.loads(line) for line in (tmp_path / "out" / "decisions.jsonl").read_text().splitlines()
+    ]
+    assert any(line["rule_id"] == "S7.panel" for line in lines), lines
+    assert accepted, [line["detail"] for line in lines]
+    saved = sorted((config.output_dir / "images" / safe_slug(result.title) / "raw").glob("*.jpg"))
+    assert saved, result.title
+    with PILImage.open(saved[0]) as published:
+        assert published.size[1] < fixture.size[1]          # the panel is gone from the file too
+    assert result.status in (Status.OK, Status.PARTIAL)

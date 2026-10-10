@@ -208,6 +208,26 @@ class PipelineConfig:
     diagram_sheet_enabled: bool = True
     diagram_min_parts: int = 4
     diagram_max_dominant_share: float = 0.20
+    #: On an *official* product page, a full-bleed layout (S20) or a caption-sheet layout
+    #: (S21) is not fatal on its own: the pipeline isolates the product inside the artwork
+    #: and re-runs every gate on that crop, publishing the crop.  Owner rule of 2026-10-10:
+    #: "cut the bottom labels, advertisement marketing labels, and add only product".
+    #: S7.panel - cut a *pasted* marketing panel (badges, capacity pill, warranty block)
+    #: off the top or bottom of an image.  Only a dead-flat dark block with a hard straight
+    #: edge qualifies, so a dark product on a dark ground is left alone (measured on the
+    #: owner's run: 3 accepted photos are that shape and none of them qualifies).
+    marketing_panel_split_enabled: bool = True
+    panel_band_max_mean: float = 70.0
+    panel_side_min_mean: float = 170.0
+    panel_min_jump: float = 150.0
+    panel_max_row_std: float = 45.0
+    panel_min_ratio: float = 0.12
+    panel_max_ratio: float = 0.72
+    panel_edge_flat_min: float = 0.95
+    official_layout_rescue: bool = True
+    #: Write rejected pixels to ``<product>/rejected/<rule>-<hash>.jpg`` so a refusal can be
+    #: inspected instead of argued about.  Debugging aid; off by default.
+    keep_rejected_images: bool = False
     gallery_publishes_all: bool = True
     gallery_publishes_all_min: int = 4
     allow_title_only_verification: bool = False

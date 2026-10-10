@@ -41,6 +41,7 @@ from image_quality import (
     is_qr_or_barcode,
     layout_metrics,
     marketing_layout_reason,
+    marketing_panel_split,
     neutral_corner_count,
     run_quality_gates,
     strip_promo_band,
@@ -1280,3 +1281,84 @@ def test_s21_can_be_switched_off(config: PipelineConfig) -> None:
     from dataclasses import replace
 
     assert diagram_sheet_reason(_caption_sheet(), replace(config, diagram_sheet_enabled=False)) == ""
+
+
+# --------------------------------------------------------------------------- #
+# S7.panel - a pasted marketing panel is cut, a dark product is not
+# --------------------------------------------------------------------------- #
+def _unit_with_badge_panel(size: int = 600) -> Image.Image:
+    """The owner's Dawlance file of 2026-10-10, drawn as a fixture.
+
+    A studio shot of the indoor unit on a light grey plate, with a **flat black panel**
+    glued underneath it carrying feature badges, a capacity pill and a warranty block.
+    The panel is pasted artwork: dead flat, full width, and its top edge is one hard
+    straight line - which is what the split keys on.
+    """
+    image = Image.new("RGB", (size, size * 3 // 5), (246, 247, 249))
+    draw = ImageDraw.Draw(image)
+    w, h = image.size
+    band = int(h * 0.55)
+    draw.rounded_rectangle(
+        (w // 16, h // 20, 15 * w // 16, int(h * 0.50)), radius=12, fill=(232, 233, 236)
+    )
+    draw.rectangle((w // 16, int(h * 0.45), 15 * w // 16, int(h * 0.50)), fill=(58, 60, 64))
+    draw.rectangle((0, band, w, h), fill=(8, 9, 12))
+    for i in range(4):
+        cx = w // 8 + i * w // 6
+        draw.ellipse((cx - w // 20, band + h // 8, cx + w // 20, band + h // 3), fill=(28, 60, 150))
+        draw.rectangle((cx - w // 20, band + h // 3, cx + w // 20, band + h // 3 + 8), fill=(238, 240, 244))
+    draw.rounded_rectangle((w // 2 - w // 10, band + h // 20, w // 2 + w // 10, band + h // 8),
+                           radius=8, fill=(40, 70, 170))
+    return image
+
+
+def _dark_product_on_dark_ground(size: int = 600) -> Image.Image:
+    """A black appliance on a grey studio ground - the shape a naive "cut the dark bottom"
+    rule destroys, and the reason the split demands a flat panel and a hard edge."""
+    image = Image.new("RGB", (size, size), (198, 200, 204))
+    draw = ImageDraw.Draw(image)
+    for y in range(size):                       # a real gradient, not a pasted block
+        shade = 198 - int(120 * (y / size))
+        draw.line((0, y, size, y), fill=(shade, shade, shade + 4))
+    draw.rectangle((size // 6, size // 4, 5 * size // 6, 13 * size // 16), fill=(24, 25, 28))
+    draw.rectangle((size // 6, size // 3, 5 * size // 6, size // 3 + 10), fill=(150, 152, 158))
+    return image
+
+
+def test_marketing_panel_split_cuts_the_pasted_panel(config: PipelineConfig) -> None:
+    image = _unit_with_badge_panel()
+    crop, panel = marketing_panel_split(image, config)
+    assert panel is not None
+    side, pixels = panel
+    assert side == "bottom" and pixels > 0
+    assert crop.size == (image.size[0], image.size[1] - pixels)
+    assert crop.size[1] > config.min_short_side          # the product area is still a photo
+
+
+def test_the_cut_product_passes_the_gates(config: PipelineConfig) -> None:
+    """"only products gets at end": the panel is gone and the unit is accepted."""
+    image = _unit_with_badge_panel()
+    assert run_quality_gates(image, config)[0] == "S20"  # as published before tonight
+    crop, panel = marketing_panel_split(image, config)
+    assert panel is not None
+    assert run_quality_gates(crop, config, panel_cut=panel) == ("ok", "")
+    # without the detector's verdict the same crop is still read as artwork
+    assert run_quality_gates(crop, config)[0] == "S20"
+
+
+def test_marketing_panel_split_leaves_a_dark_product_alone(config: PipelineConfig) -> None:
+    assert marketing_panel_split(_dark_product_on_dark_ground(), config)[1] is None
+
+
+def test_the_wash_exemption_is_only_reachable_through_a_real_cut(config: PipelineConfig) -> None:
+    """The exemption must not become a way back for an ad render: a full-bleed light wash is
+    still rejected whenever nothing was cut, and the poster shape is never cut."""
+    image = _full_bleed_poster()
+    assert marketing_panel_split(image, config)[1] is None
+    assert run_quality_gates(image, config)[0] == "S20"
+    assert run_quality_gates(image, config, panel_cut=marketing_panel_split(image, config)[1])[0] == "S20"
+
+
+def test_marketing_panel_split_can_be_switched_off(config: PipelineConfig) -> None:
+    off = replace(config, marketing_panel_split_enabled=False)
+    assert marketing_panel_split(_unit_with_badge_panel(), off)[1] is None

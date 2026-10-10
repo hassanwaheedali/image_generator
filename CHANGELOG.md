@@ -8,6 +8,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **A pasted marketing panel is now cut off the product instead of condemning the image**
+  (`image_quality.marketing_panel_split`, rule id `S7.panel`).  The owner's Dawlance file of
+  2026-10-10 is a studio shot of the indoor unit with a flat black panel glued underneath it -
+  feature badges, a "1.5 Ton" pill, a warranty block - and S20 correctly called the *layout*
+  artwork, which threw the product away.  Their instruction: "it should download but on isolated
+  it cuts bottom labels advertisement marketing labels and add only product".  `strip_promo_band`
+  could not do it (it caps a strip at `promo_band_max_ratio` and demands a bright gap row, while
+  this panel covers ~45 % of the frame and sits under the unit's dark lip).  Widening that rule
+  was measured and rejected: 3 of the owner's own accepted photos are dark products on dark
+  grounds (Orient Titanium olive-black, EcoStar Duke x2), so "cut the dark bottom band" would
+  truncate real photographs.  What actually separates the two is flatness: the panel measures
+  band mean 28 / row-std 24 / jump 238 / edge flatness 1.00, the real photos 164-181 / 89-106 /
+  56-82 / 0.67-0.88, so all five conditions must hold.  **Measured on their 72 published files: 0
+  cut, and the verdicts are unchanged (56 ok, S20 14, S21 2)**; on their file's shape the panel is
+  cut and the remaining unit passes every gate.  Flag: `marketing_panel_split_enabled=False`.
+- **S20's "painted artwork" branch no longer fires on an image whose panel this pipeline just
+  cut** (`run_quality_gates(..., panel_cut=…)`).  Dawlance and Orient shoot on a light grey plate,
+  so after the cut the kept area still measures as 100 % "ink" (any pixel >6 from white) and the
+  image was lost anyway.  Raising the tolerance globally was measured and refused - it lets all
+  four Orient marketing posters back in, because their wash is the same light grey.  Instead the
+  exemption is reachable only through the detector's own verdict: `panel_cut` is the
+  ``("bottom", 270)`` tuple `marketing_panel_split` returned, so a caller cannot claim it, the
+  line-art branch and S21 stay in force, and an uncropped poster is still rejected.
+- **A crash on any official gallery image that reached S20/S21** (`_layout_rescue_verdict` was
+  called with the pre-refactor arity, so the rescue raised `TypeError` instead of deciding).  It
+  survived the suite because no test drove that path; `test_a_pasted_marketing_panel_is_cut_before_
+  the_row_is_judged` now does, end to end through `process_product`.
+- **The official-gallery layout rescue (S20/S21) is narrower than first written, and that is the
+  point.**  Judging the padded canvas instead of the tight crop rescued 12 of the owner's 16 junk
+  files (every Haier emblem among them) - `to_square_canvas` pads to 1200 px and that drops the
+  ink span under S20's threshold; measuring that before shipping is why it is not in the tree.
+  The rescue now (a) applies only to the painted-artwork branch, never to line art or caption
+  sheets, and (b) re-runs S20/S21/S14/S8/S6/S9 on the isolated body.  **On their 16 files: 0
+  rescued.**  Flag: `official_layout_rescue=False`.
+- **`--keep-rejected`** (`keep_rejected_images`): writes the pixels a pixel gate refused to
+  `output/images/<product>/rejected/<rule>-<hash>.jpg`, named after the rule.  Answer to "if
+  rejected, where can we find [it]" - until now a rejected candidate left nothing to look at, so
+  a row's folder could not distinguish "never downloaded" from "downloaded and refused".
 - **A brand's own gallery is no longer truncated at 3 images** (`pipeline._page_publish_goal`,
   owner: "download all product only images … remove this hardcoded concept").  The candidate
   loop broke on `_row_is_done`, i.e. at `target_images_per_product` (3) - which was fine until

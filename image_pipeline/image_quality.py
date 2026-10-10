@@ -687,12 +687,15 @@ def run_quality_gates(
     config: PipelineConfig,
     *,
     official_gallery: bool = False,
+    panel_cut: tuple[str, int] | None = None,
 ) -> tuple[str, str]:
     """Run the geometric gates in the required order; stop at the first failure.
 
     Order (spec 7.2): S13 (already done on the bytes) -> S8 -> S6 -> S9 -> S7.
     ``official_gallery`` relaxes **only** the S7 border-ring test, and only through
-    :func:`official_gallery_pass`; every other gate is unchanged.  Returns
+    :func:`official_gallery_pass`; every other gate is unchanged.  ``after_panel_cut`` skips
+    only S20's painted-artwork branch, for an image whose marketing panel this pipeline itself
+    just cut off (see :func:`is_marketing_layout`).  Returns
     ``("ok", "")`` or ``(rule_id, detail)``.
     """
     if not is_large_enough(
@@ -711,7 +714,7 @@ def run_quality_gates(
         return "S9", "QR/barcode detected"
     if is_monochrome_emblem(image, config):
         return "S14", "monochrome logo/emblem on a grey ground - not a product photo"
-    if is_marketing_layout(image, config):
+    if is_marketing_layout(image, config, panel_cut=panel_cut):
         return "S20", marketing_layout_reason(image, config)
     diagram = diagram_sheet_reason(image, config)
     if diagram:
@@ -1098,7 +1101,12 @@ def layout_metrics(image: Image.Image) -> tuple[float, float, float]:
     return float(ink.mean()), span, texture
 
 
-def is_marketing_layout(image: Image.Image, config: PipelineConfig) -> bool:
+def is_marketing_layout(
+    image: Image.Image,
+    config: PipelineConfig,
+    *,
+    panel_cut: tuple[str, int] | None = None,
+) -> bool:
     """Safeguard **S20**: artwork that fills its canvas edge to edge is not a photo.
 
     This is the hole the owner caught twice (2026-10-10, Haier): "this link clearly
@@ -1120,6 +1128,16 @@ def is_marketing_layout(image: Image.Image, config: PipelineConfig) -> bool:
     ink_fraction, span, texture = layout_metrics(image)
     if span < _LAYOUT_FULL_BLEED_SPAN:
         return False
+    if panel_cut is not None and panel_cut[1] >= 8:
+        # The "painted artwork around the product" verdict was already acted on: the flat
+        # marketing panel has been cut off this exact image by ``marketing_panel_split``, so
+        # what is left is the studio area, and its near-white wash still measures as ink (the
+        # Dawlance file's remaining area reads 100 % faint-ink because Orient and Dawlance
+        # shoot on a light grey plate, not pure white).  Raising the tolerance globally is not
+        # the answer - measured on the owner's run, that would let all four Orient marketing
+        # posters back in, since their wash is the same light grey.  The line-art branch and
+        # S21 stay in force here: they describe the product area itself, not the panel.
+        return texture >= config.marketing_max_texture
     rgb = np.asarray(image.convert("RGB").resize((128, 128), Image.Resampling.BOX), dtype=float)
     corner = max(
         float(rgb[:16, :16].max(axis=2).mean()),
@@ -1191,3 +1209,82 @@ def diagram_sheet_reason(image: Image.Image, config: PipelineConfig) -> str:
         f"layout of {parts} comparable parts with no dominant body (largest covers "
         f"{dominant:.0%} of the artwork) - an in-box/manual caption sheet, not the product"
     )
+
+
+# --------------------------------------------------------------------------- #
+# S7.panel - a pasted marketing panel below (or above) the product
+# --------------------------------------------------------------------------- #
+def marketing_panel_split(
+    image: Image.Image, config: PipelineConfig
+) -> tuple[Image.Image, tuple[str, int] | None]:
+    """Cut a flat marketing panel off the edge of an image, keeping the product.
+
+    The owner's Dawlance file of 2026-10-10 is the case: the top half is a normal studio
+    shot of the indoor unit, and the bottom half is a **pasted black panel** carrying feature
+    badges, a "1.5 Ton" pill and a warranty block.  Their instruction was explicit and it is
+    the same rule they gave for Orient's hero - "it should download but on isolated it cuts
+    bottom labels, advertisement marketing labels, and add only product".
+
+    ``strip_promo_band`` cannot see this: it caps a promo strip at ``promo_band_max_ratio`` and
+    demands a bright gap row on the inner side, while this panel covers ~45 % of the frame and
+    sits directly under the unit's dark lip.  Refusing to widen that rule was measured, not
+    assumed - a "cut any dark bottom band" rule truncates real photographs, because 3 of the
+    owner's own accepted files are exactly that shape (Orient Titanium olive-black, EcoStar
+    Duke x2).  What separates a *pasted panel* from a *dark product* is that a panel is dead
+    flat and its edge is a hard line across the whole width:
+
+    ==========================  ==========  ==============  ======  ==========
+                                band mean   band row std    jump    edge flatness
+    ==========================  ==========  ==============  ======  ==========
+    pasted black panel              28.5          23.7       238       1.00
+    Orient Titanium olive-black    178.7          91.2        56       0.88
+    EcoStar Duke (x2)          163.8 / 181.4   105.7 / 88.9   79 / 82  0.67 / 0.72
+    ==========================  ==========  ==============  ======  ==========
+
+    All five conditions have to hold, and a scan of the owner's 72 published files with these
+    thresholds finds **no other image to cut**.  Returns ``(image, None)`` when there is no
+    panel, else ``(cropped, (side, pixels))``.
+    """
+    if not config.marketing_panel_split_enabled:
+        return image, None
+    grey = np.asarray(image.convert("L"), dtype=float)
+    height, width = grey.shape[0], grey.shape[1]
+    if height < 64 or width < 64:
+        return image, None
+    row_mean = grey.mean(axis=1)
+    # The panel's border is the single hardest horizontal line in the picture: search for it
+    # rather than walking in from the edge, because a panel is black *with bright badges in it*,
+    # so its individual rows are not all dark.
+    lo = max(int(0.28 * height), 1)
+    hi = min(int(0.90 * height), height - 1)
+    if hi <= lo:
+        return image, None
+    jump, y = max(
+        (abs(float(row_mean[i] - row_mean[i - 1])), i) for i in range(lo, hi)
+    )
+    if jump < config.panel_min_jump:
+        return image, None
+    downward = float(row_mean[y]) < float(row_mean[y - 1])
+    band = grey[y:] if downward else grey[:y]
+    rest = row_mean[:y] if downward else row_mean[y + 1 :]
+    ratio = band.shape[0] / height
+    if not config.panel_min_ratio <= ratio <= config.panel_max_ratio:
+        return image, None
+    if float(band.mean()) > config.panel_band_max_mean:
+        return image, None      # a dark *product* is not a flat black panel
+    if float(band.mean(axis=1).std()) > config.panel_max_row_std:
+        return image, None      # highlights and shadows: a photograph, not pasted artwork
+    if rest.size == 0 or float(rest.mean()) < config.panel_side_min_mean:
+        return image, None      # what is kept must be a bright studio area
+    inner, outer = (y - 1, y) if downward else (y, y - 1)
+    flat = float(np.mean(np.abs(grey[inner] - grey[outer]) > 0.5 * jump))
+    if flat < config.panel_edge_flat_min:
+        return image, None      # the seam must run straight across the whole width
+    edge = y
+    cropped = image.crop((0, 0, width, edge)) if downward else image.crop(
+        (0, edge, width, height)
+    )
+    if cropped.size[1] == height:
+        return image, None
+    side = "bottom" if downward else "top"
+    return cropped, (side, int(band.shape[0]))

@@ -57,6 +57,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="input",
         help="enterprise input directory to look for sheets (default: input)",
     )
+    parser.add_argument(
+        "--keep-rejected",
+        action="store_true",
+        help="also write rejected images to <product>/rejected/<rule>-<hash>.jpg for inspection",
+    )
     parser.add_argument("--assets-dir", default="assets", help="folder with the two templates and two banners")
     parser.add_argument("--output-dir", default="output", help="where the CSVs, images and logs go")
     parser.add_argument("--state-dir", default="state", help="checkpoint and banner cache folder")
@@ -121,6 +126,7 @@ def build_config(args: argparse.Namespace) -> PipelineConfig:
         min_required_images=int(args.min_images),
         max_images_per_product=int(args.max_images),
         target_images_per_product=int(args.target_images),
+        keep_rejected_images=bool(getattr(args, "keep_rejected", False)),
         fallback_enabled=not bool(args.no_fallback),
         refresh_sitemaps=bool(args.refresh_sitemaps),
     )
