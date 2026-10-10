@@ -33,6 +33,12 @@ URL_ALIASES: tuple[str, ...] = (
     "sourceurl", "sourcelink", "images", "image", "imageurls", "imageurl", "sourceurls",
     "url", "urls", "link", "pagelink",
 )
+#: Option 2 (--direct) reads the sheet's direct-image column, never the Source URL
+#: column (that one belongs to Option 1's scraping).  Falls back to URL_ALIASES only
+#: when the sheet carries no image column at all.
+IMAGE_URL_ALIASES: tuple[str, ...] = (
+    "images", "image", "imageurls", "imageurl", "directimageurls", "directimages",
+)
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
@@ -79,11 +85,15 @@ def _read_rows(path: Path) -> list[dict[str, Any]]:
     raise ValueError(f"unsupported input format: {path.suffix!r} (use .csv or .xlsx)")
 
 
-def read_input(path: Path) -> list[ProductTask]:
+def read_input(path: Path, *, direct: bool = False) -> list[ProductTask]:
     """Read ``Title`` + source-URL rows into ordered ``ProductTask`` objects.
 
     Header names are matched case-insensitively and ignoring spaces/underscores, so
     ``Source URL``, ``source_url``, ``SourceURL`` and ``Images`` all work.
+    With ``direct`` (Option 2) the image-URL column (``Images`` / ``image_urls``) is
+    read and a ``Source URL`` column on the same sheet is ignored - page links belong
+    to Option 1's scraping, direct mode only downloads the images themselves.
+
     Blank titles / URLs are returned as tasks with empty fields; ``build_tasks``
     turns them into failed rows in ``main``.
     """
@@ -92,7 +102,9 @@ def read_input(path: Path) -> list[ProductTask]:
         return []
     fieldnames = list(rows[0].keys())
     title_field = find_column(fieldnames, TITLE_ALIASES)
-    url_field = find_column(fieldnames, URL_ALIASES)
+    url_field = find_column(fieldnames, IMAGE_URL_ALIASES) if direct else None
+    if url_field is None:
+        url_field = find_column(fieldnames, URL_ALIASES)
     if title_field is None or url_field is None:
         raise ValueError(
             "input must have a Title column and a source-URL column "

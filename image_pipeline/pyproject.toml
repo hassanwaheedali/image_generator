@@ -54,6 +54,8 @@ dependencies = [
     "scipy>=1.11",                 # connected-component labelling for product isolation
     "opencv-python-headless>=4.8", # QR / barcode decode (S9); headless = no GUI deps
     "beautifulsoup4>=4.12",        # DOM parsing / region stripping
+    "soupsieve>=2,<3",             # transitive bs4 pin: v3's CSS parser rejects the
+                                   # region-strip selector list verified on v2 (2026-10-10)
     "lxml>=5",                     # BeautifulSoup parser backend
     "requests>=2.31",              # plain HTTP for the image-host upload
     "openpyxl>=3.1",               # .xlsx input sheets

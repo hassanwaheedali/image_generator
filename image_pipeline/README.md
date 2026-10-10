@@ -110,7 +110,7 @@ python3 main.py --direct --input my_links.csv --dry-run
 | `--output-dir` | CSVs, images, logs (default `output`) |
 | `--state-dir` | checkpoint + banner-URL cache (default `state`) |
 | `--dry-run` | no uploads, no platform CSVs; everything else runs |
-| `--direct` | Option 2: the sheet's URL column holds direct image URLs; no pages are fetched, nothing is scraped; S19 skips store theme templates |
+| `--direct` | Option 2: reads the sheet's `Images` / `image_urls` column as direct image URLs (a `Source URL` column on the same sheet is ignored - it belongs to Option 1); no pages are fetched, nothing is scraped; S19 skips store theme templates |
 | `--redo TITLE...` | force re-process these exact titles even if the checkpoint says `ok` |
 | `--limit N` | stop after N products (checkpoint still written) |
 | `--workers N` | parallel product workers (default 4; per-domain requests are still rate-limited) |
