@@ -69,6 +69,18 @@ GALLERY_CONTAINER_SELECTORS: tuple[str, ...] = (
     ".gallery-thumbs",
     ".thumbnails",
     ".product-thumbnails",
+    # Product-hero slots.  A shop that ships one picture per model puts it in the hero,
+    # not in a gallery widget, and the strictly-scoped page fallback never runs once any
+    # other source produced a candidate - so the one real photo on the page was invisible
+    # (live Orient page 2026-10-10: <div class="pdp-hero__image"><picture><img
+    # src="../assets/products-images-2026/air-conditioners/15-ton-frost-classic-white-
+    # dc-inverter.png" alt="Frost 18W Classic White">, zero candidates pointed at it while
+    # eight cross-sell tiles were extracted and rejected).
+    '[class*="pdp-hero" i]',
+    '[class*="product-hero" i]',
+    '[class*="hero__image" i]',
+    '[class*="product-image" i]',
+    '[class*="product-media" i]',
     ".slick-slider",
     ".flexslider",
     ".product-media-gallery",

@@ -286,3 +286,40 @@ def test_page_identity_lie_is_blocked_even_with_the_page_slug_as_sku() -> None:
     assert run("Split AC 18000 BTU by Orient", "zzz", _LDPAGE, "https://cdn/og/ok.jpg") == [
         "https://cdn/og/ok.jpg"
     ]
+
+
+def test_product_hero_picture_is_a_gallery_source() -> None:
+    """A one-picture-per-model shop puts the photo in the hero, not in a gallery widget.
+
+    Live Orient page, 2026-10-10: the row's only real photo sat in
+    ``<div class="pdp-hero__image"><picture><img src="...15-ton-frost-classic-white-
+    dc-inverter.png" alt="Frost 18W Classic White">``, while eight cross-sell tiles were
+    extracted and rejected - because the page-wide fallback never runs once another
+    source produced a candidate.  8 candidates -> 9, and the hero is among them.
+    """
+    page = "https://www.orient.com.pk/products/frost-18w-classic-white.html"
+    hero = "../assets/products-images-2026/air-conditioners/15-ton-frost-classic-white-dc-inverter.png"
+    html = (
+        '<html><body><section class="pdp-hero"><div class="pdp-hero__image"><picture>'
+        f'<source type="image/webp" srcset="{hero}.webp">'
+        f'<img src="{hero}" alt="Frost 18W Classic White">'
+        "</picture></div>"
+        '<div class="related-products"><a href="../megatron-x.html">'
+        '<img src="../assets/products-images/ac/ultron/05.png"></a></div>'
+        "</section></body></html>"
+    )
+    context = _context(page, html, "Frost 18W Classic White | Orient Electronics Pakistan", "orient")
+    candidates = extract_candidates(context)
+    hero_candidate = next(c for c in candidates if "products-images-2026" in c.url)
+    tile = next((c for c in candidates if "ultron" in c.url), None)
+    # the hero is an absolute URL on the product page, carrying no S3 flag: nothing links it away
+    assert hero_candidate.url == (
+        "https://www.orient.com.pk/assets/products-images-2026/air-conditioners/"
+        "15-ton-frost-classic-white-dc-inverter.png"
+    )
+    assert hero_candidate.page_url == page
+    assert "S3" not in hero_candidate.dom_flags
+    # the cross-sell tile keeps being flagged, so the new selectors cannot smuggle in
+    # another model's photo
+    if tile is not None:
+        assert "S3" in tile.dom_flags

@@ -173,3 +173,31 @@ settled by measurement on the owner's real images/log rather than by argument.
 | Haier sibling-extension rung | can a guessed URL replace the page's own file? | yes - probe uses `[0]`, download takes the first answer | contained: `url_rewrite_cross_extension_enabled = False` |
 | JSON-LD page identity | can a related tile claim this page and steal its image? | the first guard was circular (word check read the node's `url`); 3 of 4 lies passed | fixed: name/brand only; `url`/`sku` excluded from vouching |
 | open (pre-existing, not mine) | probe measures only the *guessed* URL | a small guess kills the candidate; the page's own URL is never probed | needs its own gate; proposed next |
+
+**2026-10-10 · the advertisement kept getting accepted - two root causes, both now closed.**
+
+Owner evidence, in their words: the raw picture is clean and perfect, the isolated one is
+cut in half (that was S18, above); and separately `…/og-images/pulse-19c-ultra-white-t3.jpg`
+"is an ad picture, brand logo and price written, we cannot use this", while the real photo
+is `…/assets/products-images-2026/air-conditioners/15-ton-pulse-ultra-white-dc-inverter.png`.
+
+1. Why the ad got in: the JSON-LD node of an Orient page declares `image` = its
+   `og-images/<slug>.jpg` social card. That card is a *marketing render* - logo + price.
+   Before this session the card still reached the same place via the page-wide scan, so
+   the ad was already being accepted in the owner's earlier run; my `json_ld` exception
+   widened it (8 cards accepted in the 02:28 run). Fixed at the safeguard layer, not by
+   narrowing the extraction: S5 blocks share-card paths for every source.
+2. Why the right photo was missing: Orient's hero `<picture>` lives in
+   `.pdp-hero__image`, and the gallery-container selector list knows only
+   `.product-gallery`, `.woocommerce-product-gallery`, `.product-images`, `.product__photos`,
+   `.gallery-thumbs`, `.thumbnails`, `.product-thumbnails`, `.slick-slider`, `.flexslider`,
+   `.product-media-gallery`, `.gallery-placeholder`, `.fotorama`. Sources 1-4 produced the
+   cross-sell tiles, so the "only when nothing else was found" whole-page fallback never
+   ran. Net effect: the page's one true image was structurally invisible.
+3. Both fixed with data (selector list + keyword corpus), no new code branches. Measured on
+   the live capture: candidates 8 -> 9, the 9th being the file the owner found by hand; the
+   hero passes S3/S4/S5; category page candidate count unchanged (no extra download cost).
+4. Structural lesson for this repo: "no images on this page" and "this image is fine" are
+   both claims about *which container the extractor looked at*, not about the page. When a
+   row fails, list what the DOM actually holds before concluding anything - the same mistake
+   produced the wrong "Orient publishes no Frost gallery" statement earlier today.

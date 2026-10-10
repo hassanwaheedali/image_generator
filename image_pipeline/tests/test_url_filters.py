@@ -328,3 +328,23 @@ def test_kec_sku_titles_resolve_to_kenwood_and_its_pk_site_is_official() -> None
     assert host_is_official(
         "https://www.kenwoodpakistan.pk/products/kec-1267s-comfort-pro", "kenwood"
     )
+
+
+def test_generated_social_cards_are_blocked_but_real_paths_are_not() -> None:
+    """Owner finding 2026-10-10: ``assets/og-images/pulse-19c-ultra-white-t3.jpg`` was
+    accepted as a product image, and the file really is an advertisement - Orient burns
+    its logo and the price into it.  The share-card shapes are blocked; a bare ``og``
+    token is not (a file named ``og.png`` says nothing about being a marketing card)."""
+    from url_filters import has_bad_keyword
+
+    assert has_bad_keyword("https://www.orient.com.pk/assets/og-images/pulse-19c-ultra-white-t3.jpg")
+    assert has_bad_keyword("https://shop.example/media/og_image/hsu-13hfcp.png")
+    assert has_bad_keyword("https://shop.example/skin/frontend/social-card-ac.png")
+    assert has_bad_keyword("https://shop.example/pub/share-image/meta.jpg")
+    # the real Orient gallery asset, and ordinary product photography, stay allowed
+    assert not has_bad_keyword(
+        "https://www.orient.com.pk/assets/products-images-2026/air-conditioners/"
+        "15-ton-frost-classic-white-dc-inverter.png"
+    )
+    assert not has_bad_keyword("https://cdn.shop/a/og.png")
+    assert not has_bad_keyword("https://cdn.shop/vogue/summer.png")

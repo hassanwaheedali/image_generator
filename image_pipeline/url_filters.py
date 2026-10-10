@@ -21,12 +21,21 @@ BAD_URL_KEYWORDS: frozenset[str] = frozenset(
         "spacer", "qr", "qrcode", "barcode", "warranty", "guarantee", "seal",
         "certified", "energy-guide", "star-rating", "special-price", "topimg",
         "newpro", "remote", "accessory", "accessories",
+        # Generated social/OG share cards.  These are marketing renders, not product
+        # photography: the owner's live check of assets/og-images/pulse-19c-ultra-white-t3.jpg
+        # showed the brand logo and the price printed into the picture, and the pipeline
+        # had accepted it as a product image.  A row left with no other image stays empty
+        # on purpose - a wrong picture on the shop is worse than none.
+        "ogimage", "socialcard", "sharecard",
     }
 )
 
 #: Multi-word entries match as consecutive tokens.
 MULTI_WORD_BAD_KEYWORDS: tuple[str, ...] = (
     "energy-guide", "star-rating", "special-price", "water-saving", "cold-plasma",
+    # The /og-images/<slug>.jpg shape Orient uses (tokens "og" + "images"). Written as a
+    # phrase so the bare token "og" never blocks an unrelated file.
+    "og images", "og image", "social card", "share image", "meta image",
 )
 
 #: Resize suffixes stripped by canonicalisation (section 6.2).

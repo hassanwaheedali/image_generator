@@ -8,6 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **The product hero is now read as a gallery** - this is the hole behind "the script
+  downloaded the wrong picture". Orient keeps one photo per model in
+  `<div class="pdp-hero__image"><picture>…`, with no `.product-gallery` widget anywhere on
+  the page, and source 5 (the whole-page scan) only runs when sources 1-4 found nothing.
+  So the extractor collected eight cross-sell tiles from the old `products-images/ac/ultron`
+  folder, rejected all eight at S3, and never once saw the real photo carrying
+  `alt="Frost 18W Classic White"`. Five hero-shaped containers are now gallery containers
+  (`pdp-hero`, `product-hero`, `hero__image`, `product-image`, `product-media`). Measured
+  on the live capture `uploads/live/orient_frost.html`: **8 candidates -> 9, and the 9th is
+  `products-images-2026/air-conditioners/15-ton-frost-classic-white-dc-inverter.png`**,
+  which passes S3 (no anchor), S4 (not another model) and S5. The owner's own file check on
+  Orient's site found exactly this asset, which is what confirmed the direction.
+  Category pages are unchanged (20 candidates before and after), so no extra downloads.
+- **Generated social-share cards can no longer be mistaken for product photos.** S5 now
+  blocks `og-images`/`og_image`/`social-card`/`share-image`/`meta-image` paths plus the
+  single tokens `ogimage`/`socialcard`/`sharecard`. The trigger: the owner's run accepted
+  `assets/og-images/pulse-19c-ultra-white-t3.jpg`, which is an advertisement - brand logo
+  and the price printed into the picture - and eight such cards were kept across
+  `qg-12x-aura`, `pulse-19c`, `platinium-12x` and `platinium-18x`. This was *aggravated by
+  this session's own JSON-LD fix*: reading the page's declared image hands in whatever the
+  shop put in `og:image`, and Orient puts a marketing card there. Rejected by every source
+  now, at the same layer as `logo` and `banner`. A row whose only image is a share card
+  stays empty on purpose - per the owner's rule, a wrong picture on the shop is worse than
+  none. Bare `og.png` is not blocked (the phrase must be `og` + `image(s)`).
 - **S18 crop closure now measures ink against the studio background, and only runs on a
   near-white one.** Doubt-reviewing my own fix found a regression it would have caused:
   "ink" was every pixel a few levels from *pure white*, so on a dark or gradient
