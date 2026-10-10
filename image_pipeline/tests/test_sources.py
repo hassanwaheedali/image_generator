@@ -444,3 +444,38 @@ def test_shandaarbuy_is_a_default_retail_shopify_source(tmp_path: Path) -> None:
     found, report = chain.find_candidates(title=keys.cleaned_title, brand="tcl", keys=keys)
     assert any("shandaarbuy" in candidate.url for candidate in found)
     assert "shandaarbuy.pk:shopify:1" in report.tried
+
+
+#: The real shape of Orient's own file names (from their cached sitemap, 272 urls).
+ORIENT_SITEMAP = (
+    "https://www.orient.com.pk/products/titanium-12s-olive-black-t3-plus.html",
+    "https://www.orient.com.pk/products/titanium-18u-olive-black-t3-plus.html",
+    "https://www.orient.com.pk/products/titanium-55t-qled-gray.html",
+    "https://www.orient.com.pk/products/qg-12x-aura-white-t3-plus.html",
+    "https://www.orient.com.pk/air-conditioners.html",
+)
+
+MEGATRON_TITLE = (
+    "Orient Megatron Titanium 12X Olive Black 1 Ton Inverter AC\u2013T3 Tropical Wind "
+    "Puff Heat &amp; Cool 4D Air Throw"
+)
+
+
+def test_a_brand_sitemap_is_found_even_when_its_capacity_letter_differs() -> None:
+    """The owner's "why did it not go to brand official" of 2026-10-10: the sheet says
+    ``12X``, Orient's own file name says ``12s``, so *no* URL on the brand's site matched
+    the row and the fallback answered with Daraz and Lazada pictures.  One URL matches now,
+    and it is the right one - the 18U sibling and the TV line stay out."""
+    keys = build_model_keys(MEGATRON_TITLE)
+    hits = [url for url in ORIENT_SITEMAP if model_tokens_in_url(url, keys)]
+    assert hits == ["https://www.orient.com.pk/products/titanium-12s-olive-black-t3-plus.html"]
+
+
+def test_the_fuzzy_route_needs_the_name_not_just_a_capacity_code() -> None:
+    """"12" alone must never match a page: the tolerance needs the model name after the
+    letter, which is what keeps this a lookup rule and not a wildcard."""
+    bare = build_model_keys("Orient 12X")
+    assert not model_tokens_in_url(
+        "https://www.orient.com.pk/products/titanium-12s-olive-black-t3-plus.html", bare
+    )
+    assert not model_tokens_in_url("https://www.orient.com.pk/air-conditioners.html", bare)

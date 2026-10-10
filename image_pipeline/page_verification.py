@@ -23,6 +23,7 @@ from soupsieve import match as css_match
 from config import PipelineConfig
 from model_matching import (
     extract_variant_facts,
+    fuzzy_identity_match,
     match_product,
     near_miss_codes,
     variant_conflicts,
@@ -30,6 +31,7 @@ from model_matching import (
 from models import ModelKeys, PageMatchResult
 from url_filters import (
     IMAGE_EXTENSIONS,
+    host_is_official,
     host_is_other_manufacturer,
 )
 
@@ -426,7 +428,19 @@ def verify_page(
         variant_separation_enabled=options.variant_separation_enabled,
     )
     strength = decision.strength
+    rule = decision.rule
+    found = decision.found
     notes: list[str] = []
+
+    if strength == 0 and brand and host_is_official(page_url, brand):
+        # The brand's own page spells its own series letter: the sheet says ``12X``, Orient's
+        # page and file name say ``titanium-12s-olive-black-t3-plus``.  Exact codes still
+        # decide every product-vs-product question - this only lifts *the brand's own host*
+        # from "refuse this page" to the tolerated level, so the official gallery is looked
+        # at before a marketplace's copy of the product.  A retailer page never gets this.
+        identity = fuzzy_identity_match(f"{page_name} {page_url}", keys)
+        if identity:
+            strength, rule, found = 1, "fuzzy_identity", (identity,)
 
     # A size/type difference only annotates the run report; a colour difference is not
     # flagged here any more - match_product rejects that page outright.
@@ -439,7 +453,12 @@ def verify_page(
             for axis in variant_conflicts(title_facts, page_facts)
         )
 
-    if decision.rule == "colour_conflict":
+    if rule == "fuzzy_identity":
+        detail = (
+            f"brand page names this product line; only its capacity letter differs "
+            f"({'/'.join(found)} matched with the letter tolerated) - tolerated, official host"
+        )
+    elif decision.rule == "colour_conflict":
         # The page carries the model's own code but a different colourway.
         detail = (
             f"page shows another colourway (title: {keys.colour_word}) - "
@@ -450,23 +469,23 @@ def verify_page(
         detail = "no model key found on the page"
         if hints:
             detail += f" (page shows {'/'.join(hints)})"
-    elif decision.rule == "brand_code":
-        detail = f"brand+code match: {brand} + {'/'.join(decision.found)} in the page name/URL"
-    elif decision.rule == "body_brand_code":
-        detail = f"brand+code match: {brand} + {'/'.join(decision.found)} in the body text"
-    elif decision.rule == "body_model_key":
+    elif rule == "brand_code":
+        detail = f"brand+code match: {brand} + {'/'.join(found)} in the page name/URL"
+    elif rule == "body_brand_code":
+        detail = f"brand+code match: {brand} + {'/'.join(found)} in the body text"
+    elif rule == "body_model_key":
         detail = "model key found in body text only"
-    elif decision.rule in ("keyword", "body_keyword"):
+    elif rule in ("keyword", "body_keyword"):
         detail = "keyword match - this product is sold by name, not by a model code"
     else:
-        detail = f"model key found in the page name/URL ({'/'.join(decision.found)})"
+        detail = f"model key found in the page name/URL ({'/'.join(found)})"
 
     return PageMatchResult(
         page_url,
         strength,
-        decision.found,
+        found,
         detail,
-        decision.rule,
+        rule,
         tuple(notes),
         page_name,
         tolerated=decision.tolerated,

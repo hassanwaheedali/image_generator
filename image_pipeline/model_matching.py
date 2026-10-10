@@ -533,6 +533,38 @@ def truncation_variants(core: str) -> tuple[str, ...]:
     return tuple(variants)
 
 
+#: A digit run, the ONE letter glued to it, and a tail long enough to be the product's
+#: name - the shape of ``12xolive``, where the sheet's ``12X`` meets the brand's ``12S``.
+_FUZZY_CODE_RE = re.compile(r"(\d{2,})([a-z])([a-z]{4,})")
+
+
+def fuzzy_identity_match(text: str, keys: ModelKeys) -> str:
+    """Which of the row's identities the given text matches with only its capacity letter
+    differing - ``""`` when none does.
+
+    Measured on Orient (owner, 2026-10-10): the sheet title says ``Titanium 12X Olive Black``,
+    Orient's own page and file name say ``titanium-12s-olive-black-t3-plus.html``, because the
+    letter after the tonnage digits is the brand's series code, not part of what the reseller
+    copied.  The row therefore matched *nothing* on the brand site - no URL, no page - and the
+    images came from Daraz and Lazada instead.
+
+    This is deliberately not a general typo tolerance and it is not an acceptance: every
+    safeguard that separates two products by code still uses the exact keys.  What it does
+    allow is *finding* the brand's own page, which is why the tail must be a name of >= 4
+    letters and the digit run >= 2 digits, so ``12`` alone can never match anything.  Callers
+    treat a hit as a tolerated level (S15-style), never as proof.
+    """
+    slug = normalize_key(text)
+    if not slug:
+        return ""
+    for identity in keys.identities:
+        for match in _FUZZY_CODE_RE.finditer(identity):
+            digits, _letter, tail = match.groups()
+            if re.search(re.escape(digits) + r"[a-z]?" + re.escape(tail), slug):
+                return identity
+    return ""
+
+
 def near_miss_codes(text: str, keys: ModelKeys) -> tuple[str, ...]:
     """Codes on the page that *look like* this product's family but did not match.
 

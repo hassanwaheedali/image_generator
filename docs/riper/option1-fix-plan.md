@@ -439,3 +439,72 @@ band and no panel) and `tests/test_pipeline_end_to_end.py::test_a_cut_out_brand_
 (drives the row, then opens the saved JPG and asserts its four corners are light).  Regression: their 72
 published files are all mode `RGB` with no alpha - `--check-image` on all 72 returns **111 publishes, S20 28,
 S21 4, S7 1, 0 panel cuts**, identical to the measurement in section 9.
+
+---
+
+## 13. Round thirteen (2026-10-10): a brand page that spells the code differently was no page at all
+
+### Checkpoint
+- Branch: `arena/fe3fb54c-image-generator` (on top of `3048089`). No new module, no config
+  change, no new threshold for the image gates.
+
+### Honest status: **closed**.
+
+### The complaint
+The owner pasted the decision lines for the Orient Megatron row and asked why it went to Daraz,
+Lazada and `aysline` "instead of orient official site which has image
+`https://www.orient.com.pk/products/titanium-12s-olive-black-t3-plus.html`":
+
+```
+S1 page strength 0 - no model key found on the page      <- also on the brand page and 3 retailers
+S15.tolerated - shop does not write the model at all     <- on aysonline.pk, and no line for orient.com.pk at all
+S3 image is linked to a different page - the product page  (dozens, lazcdn.com/*)
+```
+
+### Investigation
+- **`G1` is not missing config**: `config.source_platforms["www.orient.com.pk"] = "sitemap"` and
+  `config.brand_sources["orient"] = ("https://www.orient.com.pk",)` - Orient is a *tier-one*
+  source, and `KNOWN_BRANDS` knows the domain. The earlier guess in this plan's notes that Orient
+  "is in neither tier" was wrong, and so was the guess that the en-dash or `&amp;` caused it.
+- **the crawl found the page, the matching threw it away**: the cached sitemap
+  `image_pipeline/state/sitemaps/www.orient.com.pk.jsonl` has 272 urls, 233 of them under
+  `/products/`, including the exact one the owner quoted.
+- **`S1`'s own key rule refused the row twice over.** For that title
+  `build_model_keys` returns `tokens=('12x','ac-t3')`, `identities=('12xolive','act3tropicalwind')`
+  and - because a code exists - `keywords=()` (documented at `model_matching.py:490`: "the brand+tail
+  route only runs for a row that names no code at all"). Then:
+  - `model_tokens_in_url` needs a variant of length >= 4; `12x` is 3, and `12xolive` is not a
+    substring of `titanium12soliveblackt3plushtml` because the brand writes `12s`. **0 of 272 urls.**
+  - The one row that *did* work in the owner's log (`QG 12X Aura White`) is exactly the case where
+    Orient's slug happens to carry the sheet's spelling: `qg-12x-aura-white-t3-plus` contains
+    `12xaura` -> strength 1 -> `accept source=sheet`.
+  - `S1` on the page itself: identity `12xolive` is not in `titanium12soliveblack...` ->
+    `strength=0 - no model key found on the page`, the line in their log. The QG row's
+    `near-miss code qg12x -> QG 12X Aura White T3+` proves the same mechanism in reverse.
+- **The QG row also showed the other half of the story**: `1 of 2 product images were dropped`
+  with `S3 image is linked to a different page` on a `lazcdn.com` url - an image found *near* a
+  product page is not that product's picture, and that rule is working as designed.
+
+### The fix
+`fuzzy_identity_match(text, keys)` in `model_matching.py`: for each identity shaped like a code
+plus a name (`12xolive`), match the same text with the code's letter optional (`12[a-z]?olive`)
+- so a brand that writes `12S` for a row that says `12X` is understood. Deliberately narrow:
+- it needs >= 2 digits **and** a name tail of >= 4 letters, so `12`, `t3`, `500` alone can never
+  match anything ("this is not a wildcard");
+- it is tried **only** on `keys.identities` (the exact code+name keys), never on `keywords`;
+- in `sources.model_tokens_in_url` it is the *last* route, after the existing exact and truncated
+  ones;
+- in `page_verification.verify_page` it lifts a page from 0 to **1 only when the host is the brand's
+  own domain** - the owner's rule that a safeguard must not be forced on brand-official pages cuts
+  both ways: a shop is not owed that trust, because a shop writing `12S` could be selling the `12U`.
+  Retailer pages behave exactly as before.
+
+### Verification
+| measure | before | after |
+| --- | --- | --- |
+| Orient sitemap urls matching the Megatron row | **0 of 272** | **1 of 272**, the page the owner named, ranked first |
+| `S1` on `orient.com.pk/products/titanium-12s-...html` | `strength=0 rule=none` - never offered | `strength=1 rule=fuzzy_identity` |
+| `S1` on the *same* page on a retailer's domain | `strength=0` | `strength=0` (unchanged) |
+| `S1` on Orient's `titanium-18u-olive-black` page | refused | refused (unchanged) |
+| suite | green | **green** (5 new tests), `ruff` clean, `mypy --strict` at baseline |
+

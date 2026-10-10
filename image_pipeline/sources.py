@@ -38,7 +38,7 @@ from urllib.parse import quote_plus, urlsplit, urlunsplit
 
 from config import PipelineConfig
 from csv_io import atomic_write_text
-from model_matching import truncation_variants
+from model_matching import fuzzy_identity_match, truncation_variants
 from models import ModelKeys, PageCandidate, SourceSearchReport
 from textnorm import normalize_key
 from url_filters import is_excluded_host
@@ -281,7 +281,15 @@ def parse_sitemap(text: str) -> tuple[list[str], list[str]]:
 
 
 def model_tokens_in_url(url: str, keys: ModelKeys) -> bool:
-    """Does the URL slug carry this product's model (separators ignored)?"""
+    """Does the URL slug carry this product's model (separators ignored)?
+
+    Codes first, exactly as before.  Then :func:`fuzzy_identity_match`, because a brand's
+    file names are built from the model *name* plus the brand's own capacity letter, which
+    is not the letter the reseller's title used (Orient: ``12X`` in the sheet, ``12s`` in
+    ``titanium-12s-olive-black-t3-plus.html``).  Without that, no URL on the brand's site is
+    ever offered for such a row and the fallback ends up on Daraz and Lazada - which is what
+    the owner saw on 2026-10-10 ("why did it not go to brand official").
+    """
     slug = normalize_key(url)
     for token in (*keys.tokens, *keys.identities):
         if not token:
@@ -289,7 +297,7 @@ def model_tokens_in_url(url: str, keys: ModelKeys) -> bool:
         for variant in (token, *truncation_variants(token)):
             if len(variant) >= 4 and variant in slug:
                 return True
-    return False
+    return bool(fuzzy_identity_match(slug, keys))
 
 
 def rank_candidates(
