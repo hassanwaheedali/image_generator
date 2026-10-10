@@ -84,6 +84,11 @@ _ATTR_PRIORITY: tuple[str, ...] = (
     "data-highres",
     "data-full",
     "data-original",
+    # Haier's product template puts the crisp gallery asset here (owner-supplied markup,
+    # 2026-10-10): <img src="…_60.png" data-imgurl="…_1200.png">. Missing this is why the
+    # run took the 60px thumbnail and then *guessed* a size, landing on a blurry unnamed
+    # file while the page named the sharp one.
+    "data-imgurl",
     "data-lazy-src",
     "data-src",
     "src",

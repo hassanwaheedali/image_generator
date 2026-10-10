@@ -6,6 +6,7 @@ import pytest
 
 from model_matching import (
     build_model_keys,
+    capacity_codes,
     code_like_tokens,
     extract_colour_families,
     extract_variant_facts,
@@ -20,6 +21,7 @@ from model_matching import (
     score_match,
     truncation_variants,
     url_belongs_to_other_model,
+    url_names_other_capacity_code,
     variant_conflicts,
 )
 
@@ -671,3 +673,51 @@ def test_a_keyword_row_never_matches_a_conflicting_size() -> None:
         keys=keys, brand="dawlance", strong_text="Dawlance Inspire Pro T3 Inverter 1.5 Ton"
     )
     assert not verdict.matched
+
+
+# --------------------------------------------------------------------------- #
+# S4 second half - the capacity code the file name sells (owner 2026-10-10)
+# --------------------------------------------------------------------------- #
+_HYPER_18X = "Orient Split AC Hyper 18X Super White"
+_WRONG = (
+    "https://selectronics.com.pk/media/catalog/product/O/r/"
+    "Orient-Super-18G-EVA-T3-1.5-Ton-DC-Inverter-Air-Conditioner2.jpg"
+)
+_RIGHT = (
+    "https://bijlibazar.com/wp-content/uploads/2025/07/"
+    "Orient-Split-AC-1.5-Ton-Hyper-18X-T3-Super-White-Turbo-Pro.webp"
+)
+
+
+def test_capacity_codes_are_read_from_both_sides() -> None:
+    keys = build_model_keys(_HYPER_18X)
+    assert capacity_codes(" ".join(keys.tokens)) == frozenset({"18x"})
+    assert capacity_codes(_WRONG.rsplit("/", 1)[-1]) == frozenset({"18g"})
+
+
+def test_s4_rejects_a_file_selling_another_capacity_code() -> None:
+    """The live hole: the owner's "Hyper 18X" row published a silver 18G EVA with an
+    orange "1.1 Meter Long" badge, and S4 gave up because ``18X`` has no alphabetic
+    prefix to compare (``if not product_prefixes: return False``)."""
+    keys = build_model_keys(_HYPER_18X)
+    assert not url_belongs_to_other_model(_WRONG, keys)  # the old half cannot see it
+    assert url_names_other_capacity_code(_WRONG, keys)
+
+
+def test_s4_keeps_the_url_that_names_our_own_capacity_code() -> None:
+    keys = build_model_keys(_HYPER_18X)
+    assert not url_names_other_capacity_code(_RIGHT, keys)
+
+
+def test_s4_capacity_code_stays_quiet_when_no_code_is_comparable() -> None:
+    """Size suffixes, upload folders, random asset ids and code-less rows must not be
+    read as model statements - otherwise this rule would eat the catalog."""
+    keys = build_model_keys(_HYPER_18X)
+    for url in (
+        "https://cdn.x.com/a/orient-hyper-product-name-800x800.jpg",
+        "https://cdn.x.com/wp-content/uploads/2024/12/Ariston-Electric-Water-Heater.jpg",
+        "https://haier.com/pk/media/image/product/31365/lg/W020260404458450118371_1200.png",
+    ):
+        assert not url_names_other_capacity_code(url, keys), url
+    blank = build_model_keys("Orient Split AC Super Dc Inverter")
+    assert not url_names_other_capacity_code(_WRONG, blank)

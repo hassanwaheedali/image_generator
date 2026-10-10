@@ -447,6 +447,19 @@ class PipelineConfig:
     #: Emblem ink is stroke-work; a dark appliance body covers far more.
     logo_ink_max_fraction: float = 0.30
 
+    #: S20 - the white-ground sibling of S14 (owner's Haier review, 2026-10-10): the
+    #: brand's own gallery mixed its AI/laurel emblem into the product images and S14
+    #: skipped it because it only fires on a grey ground.  A full-bleed frame is judged
+    #: by what covers it: a poster paints most of the canvas, an emblem is dense line
+    #: art.  Measured on the 72 accepted raws of that run, real product photos sit at
+    #: ink 0.22-0.44 and texture 3-10, so both thresholds are set far outside them.
+    #: S4 half: reject a file whose capacity code contradicts the row's (row "18X" vs
+    #: file "18G").  Only runs when both sides carry such a code and they share none.
+    capacity_code_gate_enabled: bool = True
+    marketing_layout_enabled: bool = True
+    marketing_max_ink_fraction: float = 0.75
+    marketing_max_texture: float = 18.0
+
     # ----- visual color verification (S16) --------------------------------
     #: Owner decision 2026-10-08: the pixel-colour gate is a *rare-condition* tool,
     #: off by default.  It false-rejected a white Dawlance WD-1051 dispenser whose
@@ -726,6 +739,7 @@ class PipelineConfig:
             ("isolation_min_foreground_fraction", self.isolation_min_foreground_fraction),
             ("isolation_min_component_ratio", self.isolation_min_component_ratio),
             ("degenerate_crop_ratio", self.degenerate_crop_ratio),
+            ("marketing_max_ink_fraction", self.marketing_max_ink_fraction),
         ):
             if not 0.0 < value <= 1.0:
                 raise ConfigError(f"{name} must be in (0, 1]")
@@ -735,6 +749,8 @@ class PipelineConfig:
             raise ConfigError("isolation_merge_radius_ratio must be in (0, 0.25]")
         if not 0.0 < self.isolation_multi_body_ratio <= 1.0:
             raise ConfigError("isolation_multi_body_ratio must be in (0, 1]")
+        if self.marketing_max_texture <= 0:
+            raise ConfigError("marketing_max_texture must be > 0")
         if not 0 < self.isolation_ink_scan_distance < 64:
             raise ConfigError("isolation_ink_scan_distance must be in (0, 64)")
         if not 0 <= self.white_fallback_tolerance <= 64:

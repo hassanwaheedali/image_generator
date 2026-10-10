@@ -14,6 +14,7 @@ env.txt
 *.pem
 
 # Run Artifacts & Generated State
+output/
 state/checkpoint.jsonl
 **/state/checkpoint.jsonl
 state/banner_urls.json

@@ -34,8 +34,11 @@ from image_quality import (
     border_is_clean,
     has_extreme_aspect,
     is_large_enough,
+    is_marketing_layout,
     is_monochrome_emblem,
     is_qr_or_barcode,
+    layout_metrics,
+    marketing_layout_reason,
     neutral_corner_count,
     run_quality_gates,
     strip_promo_band,
@@ -1143,3 +1146,86 @@ def test_the_emblem_still_fails_on_official_galleries() -> None:
     S7 bar is relaxed."""
     config = PipelineConfig(output_dir=Path("/tmp/s14"), dry_run=True)
     assert run_quality_gates(_grey_emblem(), config, official_gallery=True)[0] == "S14"
+
+
+# --------------------------------------------------------------------------- #
+# S20 - full-bleed marketing artwork on a white canvas
+# --------------------------------------------------------------------------- #
+def _white_ground_emblem(size: int = 1182, cell: int = 25) -> Image.Image:
+    """A brand emblem sheet on studio white - the shape of Haier's ``logo_white_bg``
+    files the owner reported on 2026-10-10 (1182x1182, mean saturation ~0.3, artwork
+    reaching all four edges).  The mark is dense blocky stroke-work, so a 64x64
+    resample of it keeps jumping between dark and light; the four corner boxes stay
+    clean studio white, which is exactly why S7 and S14 both stayed quiet about it.
+    """
+    image = Image.new("RGB", (size, size), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    rng = np.random.default_rng(7)                       # fixed seed: a deterministic test
+    margin = size // 8
+    shades = (35, 120, 255, 60, 255)
+    for y in range(0, size, cell):
+        for x in range(0, size, cell):
+            in_mark = (margin <= x <= size - margin - 1) or (margin <= y <= size - margin - 1)
+            inside = not (x < margin or y < margin or x >= size - margin or y >= size - margin)
+            if in_mark and inside:
+                shade = shades[int(rng.integers(0, len(shades)))]
+                if shade != 255:
+                    draw.rectangle((x, y, x + cell - 1, y + cell - 1), fill=(shade,) * 3)
+    for edge in (0, size - 1):                           # and the ink touches every side
+        draw.point((edge, size // 2), fill=(35, 35, 35))
+        draw.point((size // 2, edge), fill=(35, 35, 35))
+    return image
+
+
+def _full_bleed_poster(size: int = 800) -> Image.Image:
+    """Orient's marketing renders: a light-blue wash painted past all four edges."""
+    image = Image.new("RGB", (size, size), (238, 244, 251))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((size // 8, size // 8, 7 * size // 8, size // 4), fill=(30, 60, 160))
+    draw.rectangle((size // 8, size // 2, 3 * size // 4, 3 * size // 4), fill=(250, 250, 250))
+    return image
+
+
+def test_s20_rejects_an_emblem_on_a_white_ground(config: PipelineConfig) -> None:
+    """The hole the owner kept hitting: S14 only fires on a grey ground, so a white
+    ``logo_white_bg`` emblem walked past every gate.  S20 judges the content, and it
+    fires end to end - the calm white ring keeps S7 quiet, exactly like the live files.
+    """
+    image = _white_ground_emblem()
+    assert is_marketing_layout(image, config)
+    rule, detail = run_quality_gates(image, config)
+    assert rule == "S20", detail
+    assert "line art" in detail
+
+
+def test_s20_rejects_a_full_bleed_marketing_render(config: PipelineConfig) -> None:
+    image = _full_bleed_poster()
+    ink_fraction, span, _texture = layout_metrics(image)
+    assert span >= 0.98 and ink_fraction >= config.marketing_max_ink_fraction
+    assert is_marketing_layout(image, config)
+    assert "painted artwork" in marketing_layout_reason(image, config)
+
+
+def test_s20_leaves_a_product_that_fills_the_frame_alone(config: PipelineConfig) -> None:
+    """A white unit photographed edge to edge on a white studio ground is not artwork:
+    ink 0.36 and texture 10 in the owner's Midea gallery, both far below the cut-offs."""
+    image = Image.new("RGB", (600, 600), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 190, 599, 410), fill=(205, 207, 211))     # long unit, spans wide
+    draw.rectangle((0, 411, 599, 430), fill=(150, 152, 156))
+    assert not is_marketing_layout(image, config)
+
+
+def test_s20_does_not_speak_about_a_lifestyle_scene(config: PipelineConfig) -> None:
+    """A photo of a room also fills its frame, but its corners are not a white canvas -
+    that case belongs to S7, and S20 must not answer for it."""
+    image = Image.new("RGB", (600, 600), (30, 90, 200))
+    draw = ImageDraw.Draw(image)
+    for step in range(0, 600, 7):
+        draw.line((step, 0, step, 600), fill=(180, 40, 40), width=2)
+    assert not is_marketing_layout(image, config)
+
+
+def test_s20_can_be_switched_off(config: PipelineConfig) -> None:
+    relaxed = replace(config, marketing_layout_enabled=False)
+    assert run_quality_gates(_white_ground_emblem(), relaxed)[0] != "S20"

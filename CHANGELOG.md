@@ -8,6 +8,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Haier's crisp gallery file was being ignored, and the run published a blur instead**
+  (`gallery_extractors/_ATTR_PRIORITY`). Haier's markup is
+  `<img src="…_60.png" data-imgurl="…_1200.png">`: the thumbnail sits in `src` and the page
+  names the sharp asset in `data-imgurl`, an attribute this pipeline did not read. So the
+  60px thumb was collected, the size-guess ladder then invented a URL for it, and the row
+  published a blurry unnamed file while the six crystal-clear images the owner saw on the
+  page stayed untouched. `data-imgurl` now sits between `data-original` and `data-lazy-src`.
+  Proved by `tests/test_gallery_extractors.py::test_haier_gallery_uses_the_declared_crisp_file`
+  (built from the owner's pasted markup): the `_1200.png` files are collected, no `_60.png`
+  survives.
+- **S20 - full-bleed artwork on a white canvas is rejected on content, not on URL words**
+  (`image_quality.is_marketing_layout`). This is the hole behind "this link clearly show a
+  emblem ai label add picture why this script keep downloading and not rejecting", reported
+  three times. The cause was not a missing gate but a *scoped* one: S14 (`is_monochrome_emblem`)
+  was written for exactly the Haier "AI + laurel" emblem, but it opens with
+  `if corner >= config.logo_background_max_value: return False` - it only fires when the ground
+  is *not* white, because the live case on 2026-10-09 was the grey-disc variant. The 2026-10-10
+  files are the same emblem on a white ground, so S14 bailed out on its first test and nothing
+  else in the chain asks about content: square (S8 ok), crisp (S6 ok), no banned word (S5 ok),
+  no other model named (S4 ok), white-on-white (S7 ok). S20 asks the one question that separates
+  them: a product photo leaves its studio whitespace to the edges, an emblem or poster does not.
+  It reads three numbers - non-white ink share, the ink box's span of the frame, and coarse
+  texture - and only judges frames whose artwork touches all four sides on a white canvas.
+  Measured on the owner's 72 accepted raws: emblems ink 0.13-0.23 / span 1.00 / texture 28-56,
+  badge strips 0.57-0.59 / 1.00 / 23-26, Orient posters 0.92-0.95 / 1.00 / 8, real product
+  photos 0.22-0.46 / 0.21-1.00 / 3-10. **S20 rejects 14 of the 72 published files and all 14
+  are files the owner had complained about** (8 Haier emblem files, 2 Dawlance badge strips,
+  4 Orient marketing posters); not one real photo is in the list. Evidence sheet:
+  `docs/riper/evidence/s20-marketing-layout.png`. Rollback flag: `marketing_layout_enabled=False`.
+- **S4 now also reads the capacity code, so another model's photo cannot be sold as this row's**
+  (`model_matching.url_names_other_capacity_code`). The owner's image 3 was a *silver* 18G EVA
+  wearing an orange "1.1 Meter Long" badge, accepted for the row `Orient Split AC Hyper 18X
+  Super White` from `…/Orient-Super-18G-EVA-T3-1.5-Ton-DC-Inverter-Air-Conditioner2.jpg`. S4
+  compares *alphabetic* prefixes of model codes and this row's only key is `18X`, whose
+  alphabetic prefix is empty, so `url_belongs_to_other_model` returned False at
+  `if not product_prefixes: return False`. The new half compares the digit-plus-letter pair
+  (`18x` vs `18g`) that this catalog uses as its identity, and it needs a code on both sides and
+  a disjoint pair, so `-800x800` size suffixes, `2024/12` upload folders and `W02026…` asset ids
+  cannot fire it. Re-checked against every accepted image in the owner's run: **72 accepted
+  images -> exactly 1 newly rejected**, the wrong-product file above; the correct
+  `…-Hyper-18X-T3-Super-White-Turbo-Pro.webp` stays. Rollback flag:
+  `capacity_code_gate_enabled=False`.
+- **The product hero is now read as a gallery** - this is the hole behind "the script
+  downloaded the wrong picture". Orient keeps one photo per model in
+  `<div class="pdp-hero__image"><picture>…`, with no `.product-gallery` widget anywhere on
+  the page, and source 5 (the whole-page scan) only runs when sources 1-4 found nothing.
+  So the extractor collected eight cross-sell tiles from the old `products-images/ac/ultron`
+  folder, rejected all eight at S3, and never once saw the real photo carrying
+  `alt="Frost 18W Classic White"`. Five hero-shaped containers are now gallery containers
+  (`pdp-hero`, `product-hero`, `hero__image`, `product-image`, `product-media`). Measured
+  on the live capture `uploads/live/orient_frost.html`: **8 candidates -> 9, and the 9th is
+  `products-images-2026/air-conditioners/15-ton-frost-classic-white-dc-inverter.png`**,
+  which passes S3 (no anchor), S4 (not another model) and S5. The owner's own file check on
+  Orient's site found exactly this asset, which is what confirmed the direction.
+  Category pages are unchanged (20 candidates before and after), so no extra downloads.
+- **Generated social-share cards can no longer be mistaken for product photos.** S5 now
+  blocks `og-images`/`og_image`/`social-card`/`share-image`/`meta-image` paths plus the
+  single tokens `ogimage`/`socialcard`/`sharecard`. The trigger: the owner's run accepted
+  `assets/og-images/pulse-19c-ultra-white-t3.jpg`, which is an advertisement - brand logo
+  and the price printed into the picture - and eight such cards were kept across
+  `qg-12x-aura`, `pulse-19c`, `platinium-12x` and `platinium-18x`. This was *aggravated by
+  this session's own JSON-LD fix*: reading the page's declared image hands in whatever the
+  shop put in `og:image`, and Orient puts a marketing card there. Rejected by every source
+  now, at the same layer as `logo` and `banner`. A row whose only image is a share card
+  stays empty on purpose - per the owner's rule, a wrong picture on the shop is worse than
+  none. Bare `og.png` is not blocked (the phrase must be `og` + `image(s)`).
 - **S18 crop closure now measures ink against the studio background, and only runs on a
   near-white one.** Doubt-reviewing my own fix found a regression it would have caused:
   "ink" was every pixel a few levels from *pure white*, so on a dark or gradient

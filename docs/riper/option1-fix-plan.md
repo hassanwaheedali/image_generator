@@ -173,3 +173,92 @@ settled by measurement on the owner's real images/log rather than by argument.
 | Haier sibling-extension rung | can a guessed URL replace the page's own file? | yes - probe uses `[0]`, download takes the first answer | contained: `url_rewrite_cross_extension_enabled = False` |
 | JSON-LD page identity | can a related tile claim this page and steal its image? | the first guard was circular (word check read the node's `url`); 3 of 4 lies passed | fixed: name/brand only; `url`/`sku` excluded from vouching |
 | open (pre-existing, not mine) | probe measures only the *guessed* URL | a small guess kills the candidate; the page's own URL is never probed | needs its own gate; proposed next |
+
+**2026-10-10 · the advertisement kept getting accepted - two root causes, both now closed.**
+
+Owner evidence, in their words: the raw picture is clean and perfect, the isolated one is
+cut in half (that was S18, above); and separately `…/og-images/pulse-19c-ultra-white-t3.jpg`
+"is an ad picture, brand logo and price written, we cannot use this", while the real photo
+is `…/assets/products-images-2026/air-conditioners/15-ton-pulse-ultra-white-dc-inverter.png`.
+
+1. Why the ad got in: the JSON-LD node of an Orient page declares `image` = its
+   `og-images/<slug>.jpg` social card. That card is a *marketing render* - logo + price.
+   Before this session the card still reached the same place via the page-wide scan, so
+   the ad was already being accepted in the owner's earlier run; my `json_ld` exception
+   widened it (8 cards accepted in the 02:28 run). Fixed at the safeguard layer, not by
+   narrowing the extraction: S5 blocks share-card paths for every source.
+2. Why the right photo was missing: Orient's hero `<picture>` lives in
+   `.pdp-hero__image`, and the gallery-container selector list knows only
+   `.product-gallery`, `.woocommerce-product-gallery`, `.product-images`, `.product__photos`,
+   `.gallery-thumbs`, `.thumbnails`, `.product-thumbnails`, `.slick-slider`, `.flexslider`,
+   `.product-media-gallery`, `.gallery-placeholder`, `.fotorama`. Sources 1-4 produced the
+   cross-sell tiles, so the "only when nothing else was found" whole-page fallback never
+   ran. Net effect: the page's one true image was structurally invisible.
+3. Both fixed with data (selector list + keyword corpus), no new code branches. Measured on
+   the live capture: candidates 8 -> 9, the 9th being the file the owner found by hand; the
+   hero passes S3/S4/S5; category page candidate count unchanged (no extra download cost).
+4. Structural lesson for this repo: "no images on this page" and "this image is fine" are
+   both claims about *which container the extractor looked at*, not about the page. When a
+   row fails, list what the DOM actually holds before concluding anything - the same mistake
+   produced the wrong "Orient publishes no Frost gallery" statement earlier today.
+
+## 6. Round 3 - the owner's three Orient finals and the Haier emblem (2026-10-10, evening)
+
+Three more holes were reported after §5 shipped. All three were measured on the owner's own
+run output (`output/images/*/raw/*.jpg`, 33 rows, 72 published files) and on the markup they
+pasted, not on reasoning.
+
+1. **Haier: "the page gallery has 6 crystal clear images, why download a blurry one".** Root
+   cause is one missing attribute: Haier writes
+   `<img src="…_60.png" data-imgurl="…_1200.png">`. `_ATTR_PRIORITY` did not include
+   `data-imgurl`, so the extractor collected the 60px thumb; the size-guess ladder then
+   invented a URL, and the row published a soft unnamed file. Fixed in
+   `gallery_extractors/__init__.py`, tested with the owner's pasted gallery markup.
+2. **Haier: the AI/laurel emblem.** The gate written for this emblem (S14) only fires on a
+   *non-white* ground; the 2026-10-10 files are `logo_white_bg.png`, so its very first test
+   bailed them out. No URL rule can help: the emblems are `W020260404458942582487.png` - random
+   asset ids with no `logo` token in the name. Fixed with S20, a content gate measured on the
+   run: ink share, ink-box span and coarse texture. It rejects 14 of 72 published files, all
+   of them complaints, and no real photo.
+3. **"why here not go to brand official, clearly bug".** It is not a quota bug: `run_report.csv`
+   line 14 for the Hyper 18X row reads `sources tried: www.orient.com.pk:sitemap:0, …`, so the
+   official Orient host *was* queried first (Path 2 in `process_product`) and its sitemap yielded
+   zero candidate pages for that model. The row then filled up from the sheet's retailer pages.
+   What *was* broken is what those retailer pages were allowed to publish - the wrong-model file
+   in item 4 below - and that is fixed here. Remaining gap (G5): an official source that returns
+   0 pages is logged in `run_report.csv` but not per-image in `decisions.jsonl`, so a "we asked
+   Orient and Orient had nothing" decision is invisible in the file the owner reads.
+4. **"the 3rd is fully wrong … clearly different color and different product picture".** Root
+   cause found in S4 itself: it compares alphabetic prefixes, and this row's key is `18X` - no
+   letters, nothing to compare, `return False`. The capacity-code half added tonight rejects the
+   `18G` file (1 of 72 published images across the whole run).
+5. **Blur.** Measured before touching anything: the blurry `01-raw` of the Hyper 18X row has
+   laplacian variance 330.9, while the good population of the same run runs min 189.9 / p10 298.3
+   / median 617.0. **An absolute blur floor is therefore not safe** - any threshold that kills
+   331 also kills hundreds of legitimate photos. The correct lever is a *preference*: when S10
+   calls two candidates the same angle, the sharper one must win instead of the first one
+   downloaded. That is the next change, and it needs the same-angle pair to be visible to the
+   dedup at all (see G5 logging gap: the crop box and the dedup verdict are not both logged).
+
+## 7. "Haier shows 6 images, the script downloads 1" - measured, and it is not an extractor bug
+
+Their question, 2026-10-10. Live page `haier.com/pk/air-conditioners/hsu-13hfcp023wdc-w-.shtml`
+(`www.haier.com` is not reachable from this sandbox - `SSL_ERROR_SYSCALL` - so the page was
+replicated from the owner's own pasted `.sd_imgs` markup and run through the real code path).
+
+* `extract_candidates` on that markup: **8 candidates, all the crisp `_1200.png` files**
+  (6 product views, then the 2 emblem files), `source=registry:haier`.  Nothing is being
+  skipped by the extractor any more and no `_60.png` thumb survives.
+* `_page_download_allowance` for that page: **8** - a curated gallery is read in full, so the
+  two-level download budget is not the limit either.
+* The limit is the *customer target*: `_row_is_done` = `len(accepted) >= min(target_images_per_product,
+  max_images_per_product)` and the candidate loop breaks on it (`pipeline.py:1351`).  With the
+  default `--target-images 3`, the row publishes 3 and stops - in their run those 3 slots were
+  `1 photo + 2 emblems`, which is exactly why the folder looked like "only one image".
+* So: S20 alone turns that row into **3 real photos** (the emblems can no longer spend slots);
+  `--target-images 6` reaches all six.  Dedup S10 will still fold near-identical angles - the
+  page's views 1 and 4 are both the flat front - and that folding is what the owner asked for
+  ("never publish the same picture twice"), so 6 gallery images do not mean 6 published files.
+* Deliberately NOT changed: the default target stays 3, because every extra slot is also an extra
+  slot a retailer's junk can fill, and downloads per row drive the run's wall time.
+

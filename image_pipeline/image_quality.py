@@ -711,6 +711,8 @@ def run_quality_gates(
         return "S9", "QR/barcode detected"
     if is_monochrome_emblem(image, config):
         return "S14", "monochrome logo/emblem on a grey ground - not a product photo"
+    if is_marketing_layout(image, config):
+        return "S20", marketing_layout_reason(image, config)
     ring_clean = border_is_clean(
         image,
         ring_ratio=config.border_ring_ratio,
@@ -1048,3 +1050,97 @@ def verify_image_color(
 
     return True, ""
 
+
+# --------------------------------------------------------------------------- #
+# S20 - full-bleed marketing artwork (the white-ground sibling of S14)
+# --------------------------------------------------------------------------- #
+#: How far a pixel must sit from pure studio white to count as artwork.
+_LAYOUT_INK_TOLERANCE = 6
+#: An artwork box must be this close to the whole frame to be called full-bleed.
+_LAYOUT_FULL_BLEED_SPAN = 0.98
+#: S20 speaks only about a white canvas: the brightest corner must be at least this
+#: close to white.  A lifestyle photo of a room fills its frame too, but it is not an
+#: emblem on studio white - S7 (or its official-gallery rescue) owns that case.
+_LAYOUT_WHITE_GROUND_MIN = 0.90
+
+
+def layout_metrics(image: Image.Image) -> tuple[float, float, float]:
+    """Return ``(ink fraction, ink bbox span, coarse texture)`` of a studio image.
+
+    All three read the same white-background assumption S7 uses, and each describes a
+    different thing about what fills the frame:
+
+    * ``ink fraction`` - share of pixels that are not white.  Product photos of split
+      ACs on studio white measure 0.22-0.44 across this pipeline's accepted set; a
+      marketing poster that paints its whole canvas covers 0.95.
+    * ``ink bbox span`` - area of the smallest box touching all artwork, over the
+      frame area.  A product floats inside its canvas (0.21-0.27); a poster bleeds to
+      all four edges (1.00).
+    * ``coarse texture`` - mean absolute grey-level change on a 64x64 resample.
+      Photographs measure 3-10 (a full-bleed Midea shot reaches 10.3); a logo or
+      emblem sheet is dense line art (37-55); an AC wearing a strip of feature badges
+      sits at 23-26.
+    """
+    rgb = np.asarray(image.convert("RGB"), dtype=float)
+    grey = np.asarray(image.convert("L").resize((64, 64)), dtype=float)
+    ink = np.abs(rgb - 255.0).max(axis=2) > _LAYOUT_INK_TOLERANCE
+    rows = np.flatnonzero(ink.any(axis=1))
+    cols = np.flatnonzero(ink.any(axis=0))
+    if rows.size == 0 or cols.size == 0:
+        return 0.0, 0.0, 0.0
+    span = float((rows[-1] - rows[0] + 1) * (cols[-1] - cols[0] + 1)) / float(ink.size)
+    texture = float(
+        np.abs(np.diff(grey, axis=0)).mean() + np.abs(np.diff(grey, axis=1)).mean()
+    )
+    return float(ink.mean()), span, texture
+
+
+def is_marketing_layout(image: Image.Image, config: PipelineConfig) -> bool:
+    """Safeguard **S20**: artwork that fills its canvas edge to edge is not a photo.
+
+    This is the hole the owner caught twice (2026-10-10, Haier): "this link clearly
+    show a emblem ai label add picture why this script keep downloading and not
+    rejecting".  The page's *own* gallery held ``logo_white_bg.png`` - the brand's
+    AI-and-laurel emblem - and it passed every gate because each one asked a question
+    the emblem happens to answer: it is square (S8), crisp (S6), it has no banned word
+    in its URL (S5), no other model's name (S4), it is white on white (S7) and it is
+    monochrome.  **S14 was the gate written for exactly this emblem, and it gave up on
+    the first test**: it requires a *non-white* ground (``corner >=
+    logo_background_max_value`` -> keep), because the live case that made it was the
+    grey-disc variant of 2026-10-09.  These files are the same emblem on a WHITE
+    ground, so the corner check bailed them out.  S20 is that sibling: it never asks
+    about the ground colour, it asks whether anything *is* a product - a real unit
+    leaves its studio whitespace to the edges, an emblem or a poster does not.
+    """
+    if not config.marketing_layout_enabled:
+        return False
+    ink_fraction, span, texture = layout_metrics(image)
+    if span < _LAYOUT_FULL_BLEED_SPAN:
+        return False
+    rgb = np.asarray(image.convert("RGB").resize((128, 128), Image.Resampling.BOX), dtype=float)
+    corner = max(
+        float(rgb[:16, :16].max(axis=2).mean()),
+        float(rgb[:16, -16:].max(axis=2).mean()),
+        float(rgb[-16:, :16].max(axis=2).mean()),
+        float(rgb[-16:, -16:].max(axis=2).mean()),
+    )
+    if corner < _LAYOUT_WHITE_GROUND_MIN * 255.0:
+        return False
+    return (
+        ink_fraction >= config.marketing_max_ink_fraction
+        or texture >= config.marketing_max_texture
+    )
+
+
+def marketing_layout_reason(image: Image.Image, config: PipelineConfig) -> str:
+    """One sentence naming which S20 signal fired, for ``decisions.jsonl``."""
+    ink_fraction, _span, texture = layout_metrics(image)
+    if ink_fraction >= config.marketing_max_ink_fraction:
+        return (
+            f"painted artwork covers {ink_fraction:.0%} of the frame and reaches all "
+            "four edges (poster/banner, not a product photo)"
+        )
+    return (
+        f"line art of texture {texture:.1f} reaches every edge of a full-bleed frame "
+        "(logo/emblem/badge sheet, not a product photo)"
+    )
