@@ -1452,3 +1452,118 @@ def test_s16_wrong_colour_sibling_is_still_rejected_on_a_brand_page() -> None:
     ok, reason = verify_image_color(image, "white", official=True)
     assert not ok
     assert "dark body" in reason
+
+
+# --------------------------------------------------------------------------- #
+# alpha: a cut-out PNG is judged on the ground the customer sees, not on black
+# --------------------------------------------------------------------------- #
+
+
+def _cut_out_unit_png(size: int = 900) -> bytes:
+    """What Orient, Haier and Dawlance really publish: the unit on a **transparent** ground,
+    with the plate colour coming from the page's CSS (``#e5e5e5`` in the owner's Orient case).
+    """
+    image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle(
+        (size // 10, int(size * 0.36), 9 * size // 10, int(size * 0.66)),
+        radius=22,
+        fill=(246, 247, 249, 255),
+    )
+    draw.rectangle(
+        (size // 10 + 30, int(size * 0.44), 9 * size // 10 - 30, int(size * 0.50)),
+        fill=(74, 80, 92, 255),
+    )
+    draw.rounded_rectangle(
+        (size // 10 + 30, int(size * 0.60), 9 * size // 10 - 30, int(size * 0.64)),
+        radius=10,
+        fill=(226, 231, 240, 255),
+    )
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _decode(content: bytes) -> Image.Image:
+    from image_quality import validate_image_bytes
+
+    return validate_image_bytes(
+        content, "image/png", max_bytes=20_000_000, max_pixels=60_000_000
+    )
+
+
+def test_a_cut_out_png_is_flattened_on_white_at_decode(config: PipelineConfig) -> None:
+    """One choke point, so no gate can repeat the mistake: the decoder hands every stage an
+    RGB image whose transparent ground is studio white.
+    """
+    content = _cut_out_unit_png()
+    image = _decode(content)
+    assert image.mode == "RGB"
+    corners = [
+        image.getpixel((4, 4)),
+        image.getpixel((image.size[0] - 5, 4)),
+        image.getpixel((4, image.size[1] - 5)),
+        image.getpixel((image.size[0] - 5, image.size[1] - 5)),
+    ]
+    assert corners == [(255, 255, 255)] * 4, corners
+    # what PIL's own convert did to the same bytes - the black the gates were reading
+    assert Image.open(io.BytesIO(content)).convert("RGB").getpixel((4, 4)) == (0, 0, 0)
+
+
+def test_s16_never_reads_a_transparent_ground_as_a_dark_product(config: PipelineConfig) -> None:
+    """The owner's second Orient reject, `product area is dark (mean 0.42) - conflicts with
+    target 'white'`, was this: the row's "Matt White" unit on a CSS-painted plate, decoded
+    onto black.  The same file judged on white is plainly white.
+    """
+    from image_quality import run_quality_gates, verify_image_color
+
+    image = _decode(_cut_out_unit_png())
+    ok, reason = verify_image_color(image, "white")
+    assert ok, reason
+    assert run_quality_gates(image, config, official_gallery=True)[0] == "ok"
+
+    # ...and the pre-fix view of those exact bytes is what produced their log line.
+    black = Image.open(io.BytesIO(_cut_out_unit_png())).convert("RGB")
+    was_ok, was_reason = verify_image_color(black, "white")
+    assert not was_ok
+    assert "product area is dark" in was_reason
+
+
+def test_the_cutters_invent_nothing_on_a_cut_out_png(config: PipelineConfig) -> None:
+    """The promo-band, edge-seam and marketing-panel cutters all key on "a flat dark band next
+    to a bright kept area" - which is exactly what a transparent margin looks like when it is
+    composited onto black.  Judged on white they find nothing to cut, so no product is
+    silently cropped by an image that has no band at all.
+    """
+    from image_quality import marketing_panel_split, strip_promo_band, trim_edge_seams
+
+    image = _decode(_cut_out_unit_png())
+    assert strip_promo_band(image, config)[1] is None
+    assert trim_edge_seams(image, config)[1] == []
+    assert marketing_panel_split(image, config)[1] is None
+
+
+def test_a_wide_cut_out_unit_loses_no_band_to_the_transparency(config: PipelineConfig) -> None:
+    """The second half of the same hole, seen on the owner's `Platinium 18X Matt White`
+    asset of 2026-10-10: a unit drawn as a wide band touching both side edges on a
+    transparent ground.  Read on black, the empty bottom *is* a flat dark band under a
+    bright area, so `strip_promo_band` cut 489 px off a picture that has no band at all.
+    """
+    from image_quality import marketing_panel_split, strip_promo_band, verify_image_color
+
+    wide = Image.new("RGBA", (2000, 1873), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(wide)
+    draw.rectangle((0, 580, 2000, 1311), fill=(246, 247, 249, 255))
+    draw.rectangle((0, 1311, 2000, 1377), fill=(238, 240, 244, 255))
+    buffer = io.BytesIO()
+    wide.save(buffer, format="WEBP", quality=90)
+    image = _decode(buffer.getvalue())
+    assert image.size == (2000, 1873)
+    assert strip_promo_band(image, config)[1] is None
+    assert marketing_panel_split(image, config)[1] is None
+    assert verify_image_color(image, "white")[0] is True
+
+    # and the pre-fix read of those exact bytes is what did the damage
+    black = Image.open(io.BytesIO(buffer.getvalue())).convert("RGB")
+    assert not verify_image_color(black, "white")[0]
+    assert strip_promo_band(black, config)[1] is not None

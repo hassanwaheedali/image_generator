@@ -399,3 +399,43 @@ fix, this safeguard should work correctly, I strictly say, or remove it".  So it
    publish can now be lost to this gate.
 5. **`--check-image FILE --check-title "TITLE"`** now runs S16 too (per bar, with the file-name carve-out
    mirrored), so "will my official file survive?" is one command on their own machine and not a promise from me.
+
+## 12. The real Orient root cause: transparency was composited onto BLACK (owner's file, 2026-10-10 late night)
+
+The owner sent the actual asset - `15-ton-platinium-matt-white-dc-inverter-230fb832.webp` - a cut-out of a
+white unit, with the plate colour (`#e5e5e5`) coming from the page's CSS, and the log line:
+
+    "rule_id":"S16","detail":"product area is dark (mean 0.42) - conflicts with target 'white' (family white)"
+
+That is not a marketing-layout problem and not the wash/saturation problem of section 11.  **`validate_image_bytes`
+returned the decoded image in its native mode (RGBA), and eight pixel readers in `image_quality` called
+`image.convert("RGB")` - which composites transparency onto black, not white.**  Every one of those gates was
+therefore judging the brand's product photo against a ground the brand never published.
+
+Measured on a faithful replica of the owner's frame (2000x1873 cut-out webp), before vs after one change
+(`to_rgb` at the decode, and the same helper in the eight readers):
+
+| what the gate saw | BEFORE (black) | AFTER (studio white) |
+|---|---|---|
+| centre mean | 0.54 (their log: 0.42) | 0.98 |
+| S16 colour vs `white` | **REJECT** - "product area is dominated by a dark body" | ok |
+| S7 border ring | **REJECT** - "border ring is not a clean background" | ok |
+| `strip_promo_band` | **invented a 489 px bottom crop** on a picture with no band | no cut |
+| S20 / S21 / S14 | abstained: their white-ground precondition never held | judging real pixels |
+
+Two directions of damage from one hole, which is why "brand official" kept failing only for Orient: the
+rejecting gates (S16, S7) fired on a black ground that does not exist, the rejecting gates that need a *white*
+ground (S14/S20/S21) went silent, and a cutter chopped 489 px off the product.  Brands that publish flat JPEGs
+(most of the corpus) never trip it; Orient, Haier and Dawlance publish cut-outs.
+
+Deliberate choices: **no flag and no new knob** - `to_rgb` already existed and already meant "flatten on white",
+eleven call sites in `compositing`/`dedup` were already using it, and a switch back to "judge the ground PIL
+invented" has no rollback value.  Nothing in S16's thresholds was touched, so the colour gate keeps every
+correct reject it had (their own 3 S16 catches from the last run are unaffected).
+
+Proved without reasoning from logs: `tests/test_image_quality.py` (3 tests: the decode flattens; S16 on the
+cut-out is ok while the pre-fix read of the *same bytes* is the reject they logged; a wide cut-out loses no
+band and no panel) and `tests/test_pipeline_end_to_end.py::test_a_cut_out_brand_png_publishes_with_a_white_ground`
+(drives the row, then opens the saved JPG and asserts its four corners are light).  Regression: their 72
+published files are all mode `RGB` with no alpha - `--check-image` on all 72 returns **111 publishes, S20 28,
+S21 4, S7 1, 0 panel cuts**, identical to the measurement in section 9.
