@@ -287,6 +287,7 @@ class PipelineConfig:
             "friendshome.pk": "shopify",
             "jalalelectronics.com": "shopify",
             "electrociti.pk": "shopify",
+            "whitehouse.com.pk": "shopify",
             "www.alfatah.com.pk": "woo",
             "www.almumtaz.com.pk": "woo",
             "hadielectronics.com.pk": "woo",
@@ -321,6 +322,7 @@ class PipelineConfig:
         "https://friendshome.pk",
         "https://jalalelectronics.com",
         "https://electrociti.pk",
+        "https://whitehouse.com.pk",
     )
     retail_woo_sources: tuple[str, ...] = (
         "https://www.alfatah.com.pk",
