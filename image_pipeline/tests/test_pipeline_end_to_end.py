@@ -2307,3 +2307,53 @@ def test_a_pasted_marketing_panel_is_cut_before_the_row_is_judged(tmp_path: Path
     with PILImage.open(saved[0]) as published:
         assert published.size[1] < fixture.size[1]          # the panel is gone from the file too
     assert result.status in (Status.OK, Status.PARTIAL)
+
+
+def test_a_tinted_studio_wash_cannot_cost_the_row_the_brands_own_hero(tmp_path: Path) -> None:
+    """The owner's Orient row of 2026-10-10: the hero was found and downloaded, then S16 said
+    "product area is a saturated colour (60% chromatic) - conflicts with target 'white'" and
+    the row lost the only correct picture.  Their instruction was to make the safeguard
+    correct rather than delete it: "don't force this in brand official, only in retailer".
+    So the same image must publish from the brand's page and still be refused from a retailer.
+    """
+    from test_image_quality import _chroma_spread_share, _unit_on_a_tinted_plate
+
+    strong = _unit_on_a_tinted_plate((150, 190, 240))  # tint the metric really calls a colour
+    assert _chroma_spread_share(strong) >= 0.45  # the pre-fix measure condemns this file
+    buf = io.BytesIO()
+    strong.save(buf, format="PNG")
+    images = {IMG1: buf.getvalue()}
+    title = "Haier HSU-12HFPAA White Inverter AC"
+
+    brand_deps, _, _, _ = build_deps(
+        tmp_path, {HAIER_PAGE: load_fixture("product_ok")}, images
+    )
+    brand_result, brand_accepted = process_product(task(0, title, (HAIER_PAGE,)), brand_deps, live_config(tmp_path))
+    assert brand_accepted, "the brand's own hero must not be lost to a studio wash"
+    lines = [
+        json.loads(line)
+        for line in (tmp_path / "out" / "decisions.jsonl").read_text().splitlines()
+    ]
+    exemption = [line for line in lines if line["rule_id"] == "S16.official"]
+    assert exemption, [line["rule_id"] for line in lines]
+    assert "not enforced" in exemption[0]["detail"]
+    assert brand_result.status in (Status.OK, Status.PARTIAL)
+
+    # Same pixels, same model, a retailer's page: the colour gate keeps its teeth.
+    retail_tmp = tmp_path / "retail"
+    retail_tmp.mkdir()
+    retail_deps, _, _, _ = build_deps(
+        retail_tmp, {SHOPIFY_PAGE: load_fixture("product_ok")}, images
+    )
+    _, retail_accepted = process_product(
+        task(0, title, (SHOPIFY_PAGE,)), retail_deps, live_config(retail_tmp)
+    )
+    assert not retail_accepted, "a wash-dominant picture from a retailer is still a colour conflict"
+    retail_lines = [
+        json.loads(line)
+        for line in (retail_tmp / "out" / "decisions.jsonl").read_text().splitlines()
+    ]
+    assert any(
+        line["rule_id"] == "S16" and "saturated colour" in line["detail"]
+        for line in retail_lines
+    ), [line["rule_id"] for line in retail_lines]

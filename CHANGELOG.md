@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **S16 no longer mistakes a studio wash for a coloured product, and does not judge brand pages on it at
+  all.**  The owner's Orient `Frost 18W Classic White` row of 2026-10-10 *found* the brand's own hero and
+  then threw it away: `S16 product area is a saturated colour (60% chromatic) - conflicts with target
+  'white'`.  The measure was raw channel spread (>0.10), which is what a pale blue-grey plate under a white
+  unit looks like; it is now HSV saturation (>0.22) with a brightness cap (<0.95) - a wash measures 0.01
+  where it measured 0.45, purple/red/blue/green/gold bodies keep 0.61-0.62, and the bar cannot go higher
+  than 0.24-ish without re-opening the gold-on-white hole.  Per the owner's instruction the
+  chromatic-dominance branch is then not enforced on a brand-owned page (logged as `S16.official`, image
+  kept) while the two identity signals - bright-on-black, dark-body-on-white - stay in force everywhere, and
+  a file name naming another colourway cancels the exemption.  Measured on their 72 published files: 0
+  affected; end to end: the same image goes 0 -> 1 published from a brand page and is still rejected from a
+  retailer.  `color_gate_official_chroma_exempt=False` restores the old behaviour
+  (`docs/riper/option1-fix-plan.md` section 11).
 - **A pasted marketing panel is now cut off the product instead of condemning the image**
   (`image_quality.marketing_panel_split`, rule id `S7.panel`).  The owner's Dawlance file of
   2026-10-10 is a studio shot of the indoor unit with a flat black panel glued underneath it -
@@ -211,6 +224,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Those frames now go through whole, which is strictly better than a fragment.
 
 ### Added
+- **`python main.py --check-image FILE [FILE ...]` - the gates, for one file, with no crawl.**
+  Whether an official image gets published has two halves: the URL/DOM half can be replayed offline
+  against a saved page, but the pixel half (S7 ring, S8 size, S20/S21 layout, the panel cut, the
+  official rescues) needs the real bytes, and until now the only way to ask was to run a crawl and read
+  `decisions.jsonl`.  This applies the pipeline's *own* functions - imported, not reimplemented, so the
+  check cannot drift from the run - and prints both bars (`brand-official page` and `retailer page`),
+  what the promo-band/edge-seam/marketing-panel cuts did to the size, and the files the run would write.
+  Needs no sheet, no assets, no API key, no network; exit 0 publish, 1 a gate stops it, 2 unreadable.
+  Cross-checked on the owner's 72 published files: **56 PUBLISH on the official bar, 55 on the retailer
+  bar** (one file saved only by the official studio-corner pass), 14 S20 and 2 S21 on each - the same
+  numbers as the end-to-end sweep in `docs/riper/option1-fix-plan.md` section 9.
+  `--check-title "Frost 18W Classic White"` adds the row's title, so the model and colour gates (S16) are
+  judged exactly as they would be for that row - the check that settled the Orient question.
 - **Safeguard S10 now says why.** A duplicate rejection records the signal and the
   measurement (`re-served copy of accepted image #1 (dHash 3 bits apart, correlation
   0.9688)`) instead of the string "near-duplicate", and an *ambiguous* pair - close

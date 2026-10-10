@@ -500,13 +500,31 @@ class PipelineConfig:
     marketing_max_texture: float = 18.0
 
     # ----- visual color verification (S16) --------------------------------
-    #: Owner decision 2026-10-08: the pixel-colour gate is a *rare-condition* tool,
-    #: off by default.  It false-rejected a white Dawlance WD-1051 dispenser whose
-    #: blue accent panel read as hue 213 deg ("conflicts with target 'white'"), and
-    #: on LED TVs the screen shows arbitrary content, so a picture-based colour check
-    #: can never be trusted there.  Flip on manually for a run that really needs it
-    #: (e.g. a colourway-mixing brand page); display products stay exempt regardless.
+    #: Owner decision 2026-10-08: keep it narrow.  It false-rejected a white Dawlance
+    #: WD-1051 dispenser whose blue accent panel read as hue 213 deg ("conflicts with
+    #: target 'white'"), and on LED TVs the screen shows arbitrary content, so a
+    #: picture-based colour check can never be trusted there; display products stay exempt
+    #: regardless.  The switch has been on since the base commit (the comment used to claim
+    #: otherwise), which is why it also ate the owner's Orient Frost hero on 2026-10-10.
+    #: What S16 does now: on a *retailer* page it may reject a wrong colour, on the brand's
+    #: own page only the two identity-strength signals run (see
+    #: ``color_gate_official_chroma_exempt``), and the "is it a colour or is it a wash"
+    #: test is saturation-based instead of raw channel spread.
     color_gate_enabled: bool = True
+    #: Skip the chromatic-dominance branch on a brand-owned page.  The brand's hero *is*
+    #: the definitive picture of that variant, and a coloured studio plate around a white
+    #: unit is not a colour conflict; a dark body on a white row is, and that branch stays
+    #: in force on every page.  Set False to restore the pre-2026-10-10 behaviour.
+    color_gate_official_chroma_exempt: bool = True
+    #: A product-area pixel counts as "a colour" only above this HSV saturation *and* below
+    #: this value, because a studio wash is bright and low-saturation while a coloured body
+    #: is neither.  Measured on 64x64 centre crops, share of the product area: pale cool plate
+    #: #e9eefb 0.01, mid cool plate #c9d9f2 0.01 (the old channel-spread test said 0.45 -
+    #: that is the number that ate the owner's Orient hero), purple/red/blue/green bodies
+    #: 0.61-0.62, a **golden** body 0.61 (a 0.30 or 0.35 bar drops gold to 0.00 and re-opens
+    #: the gold-on-white hole the tests guard), white/black/silver bodies 0.00.
+    color_chroma_min_saturation: float = 0.22
+    color_chroma_max_value: float = 0.95
 
     # ----- last-resort salvage --------------------------------------------
     #: Owner decision 2026-10-08 ("jab kuch na bachey toh kam quality wali hi le lon"):

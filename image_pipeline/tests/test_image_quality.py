@@ -1362,3 +1362,93 @@ def test_the_wash_exemption_is_only_reachable_through_a_real_cut(config: Pipelin
 def test_marketing_panel_split_can_be_switched_off(config: PipelineConfig) -> None:
     off = replace(config, marketing_panel_split_enabled=False)
     assert marketing_panel_split(_unit_with_badge_panel(), off)[1] is None
+
+
+# --------------------------------------------------------------------------- #
+# S16 - a studio wash is not a colour, and a brand page is never judged on one
+# --------------------------------------------------------------------------- #
+
+
+def _unit_on_a_tinted_plate(plate: tuple[int, int, int], size: int = 700) -> Image.Image:
+    """The owner's Orient Frost hero of 2026-10-10, drawn as a fixture: a white indoor unit
+    centred on a coloured studio plate that stops short of the corners, so S7 and S20 stay
+    quiet and the only voice left in the run is the colour gate.  With a pale plate the old
+    measure reads 0.55 "chromatic" and the new one 0.00; with a strongly tinted plate both
+    read 0.55, which is what the brand-page exemption then has to say something about.
+    """
+    image = Image.new("RGB", (size, size), (252, 252, 252))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle(
+        (size // 10, 3 * size // 10, 9 * size // 10, 4 * size // 5), radius=24, fill=plate
+    )
+    draw.rounded_rectangle(
+        (size // 4, size // 2 - 34, 3 * size // 4, size // 2 + 44), radius=14, fill=(250, 251, 253)
+    )
+    draw.rectangle(
+        (size // 4 + 16, size // 2 - 12, 3 * size // 4 - 16, size // 2 + 6), fill=(74, 80, 92)
+    )
+    return image
+
+
+def _chroma_spread_share(image: Image.Image) -> float:
+    """The pre-fix S16 measure: share of the product area with channel spread > 0.10."""
+    arr = np.asarray(
+        image.convert("RGB").resize((64, 64), Image.Resampling.BOX), dtype=np.float32
+    ) / 255.0
+    centre = arr[7:57, 7:57]
+    high = centre.max(axis=-1)
+    delta = high - centre.min(axis=-1)
+    product = ~((high > 0.90) & (delta < 0.08))
+    return float(np.mean((delta > 0.10) & product))
+
+
+def test_s16_does_not_call_a_cool_studio_plate_a_saturated_product() -> None:
+    """The hole that ate the Orient row: a light blue-grey plate around a white unit measured
+    as "saturated colour", so the brand's own hero was rejected for contradicting "white".
+    A wash is bright and weakly saturated; a colour is neither."""
+    from image_quality import verify_image_color
+
+    image = _unit_on_a_tinted_plate((201, 217, 242))
+    assert _chroma_spread_share(image) >= 0.45  # the old measure condemns this exact file
+    ok, reason = verify_image_color(image, "white")
+    assert ok, reason
+    assert reason == ""
+
+
+def test_s16_still_calls_a_golden_body_a_conflict_with_a_white_row() -> None:
+    """The bar had to stay low (0.22): a golden body sits at saturation 0.24, and a 0.30 bar
+    re-opened the gold-on-white hole this gate exists for."""
+    from image_quality import verify_image_color
+
+    ok, reason = verify_image_color(_create_synthetic_appliance((210, 195, 160)), "white")
+    assert not ok
+    assert "saturated colour" in reason
+
+
+def test_s16_wash_conflict_is_logged_but_not_enforced_on_a_brand_page() -> None:
+    """Owner instruction of 2026-10-10: "don't force this in brand official, only in retailer -
+    but this safeguard should work correctly".  So the retailer bar keeps the reject, the brand
+    bar records the measurement as a keep, and the flag rolls the whole thing back."""
+    from image_quality import verify_image_color
+
+    image = _unit_on_a_tinted_plate((150, 190, 240))  # strongly tinted: the new metric fires too
+    assert not verify_image_color(image, "white")[0]
+    ok, reason = verify_image_color(image, "white", official=True)
+    assert ok
+    assert "not enforced" in reason
+    strict = verify_image_color(image, "white", official=True, exempt_chroma_on_official=False)
+    assert not strict[0]
+
+
+def test_s16_wrong_colour_sibling_is_still_rejected_on_a_brand_page() -> None:
+    """The exemption is one branch, not a switch-off.  A near-black body on a white row - the
+    official-Haier-CDN catch of 2026-10-09 - is an identity signal and still rejects, on the
+    brand's own page, with the brand's own URL."""
+    from image_quality import verify_image_color
+
+    image = Image.new("RGB", (700, 700), (250, 250, 250))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((120, 220, 580, 520), radius=18, fill=(22, 24, 28))
+    ok, reason = verify_image_color(image, "white", official=True)
+    assert not ok
+    assert "dark body" in reason

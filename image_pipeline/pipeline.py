@@ -108,7 +108,7 @@ from url_filters import (
     upscale_candidates,
     url_filename,
 )
-from variant_terms import identity_alpha_tail
+from variant_terms import colour_word_conflict, identity_alpha_tail
 
 LOG = logging.getLogger("pipeline")
 
@@ -1665,13 +1665,33 @@ def _consume_candidates(
             and keys.colour_word
             and not is_display_product(task.title)
         ):
-            color_ok, color_detail = verify_image_color(image, keys.colour_word)
+            # The brand-page exemption yields when the brand's *own file name* names a
+            # different colourway.  Orient-style assets are per variant
+            # ("...classic-white-dc-inverter.png"), so a contradiction there is a real
+            # sibling mix-up and S16 keeps its teeth even on the official page.
+            exempt_chroma = config.color_gate_official_chroma_exempt and not colour_word_conflict(
+                keys.colour_word, used_url.rsplit("/", 1)[-1]
+            )
+            color_ok, color_detail = verify_image_color(
+                image,
+                keys.colour_word,
+                official=official_gallery,
+                exempt_chroma_on_official=exempt_chroma,
+                min_saturation=config.color_chroma_min_saturation,
+                wash_max_value=config.color_chroma_max_value,
+            )
             if not color_ok:
                 rejections["S16"] += 1
                 deps.decisions.reject(
                     title=task.title, url=used_url, rule_id="S16", detail=color_detail
                 )
                 continue
+            if color_detail:
+                # Exempted, not silent: the owner reads this folder to find out why a
+                # picture was or was not used, so the measurement stays on the record.
+                deps.decisions.keep(
+                    title=task.title, url=used_url, rule_id="S16.official", detail=color_detail
+                )
         # One fingerprint per candidate, reused by the gate and by the bookkeeping after
         # compose - the same 32x32 resample of the same 1200px image, once instead of twice.
         fingerprint = compute_fingerprint(image)

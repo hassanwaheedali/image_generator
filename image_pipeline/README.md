@@ -94,6 +94,9 @@ python3 main.py --input sheet.xlsx --limit 5 --workers 4 --redo "Haier HSU-12 1.
 
 # ignore the checkpoint completely
 python3 main.py --input sheet.csv --no-resume
+
+# ask the gates about one saved file - no crawl, no sheet, no API key
+python3 main.py --check-image output/images/orient-.../rejected/S20-1a2b3c4d.jpg
 ```
 
 | Flag | Meaning |
@@ -106,8 +109,11 @@ python3 main.py --input sheet.csv --no-resume
 | `--redo TITLE...` | force re-process these exact titles even if the checkpoint says `ok` |
 | `--limit N` | stop after N products (checkpoint still written) |
 | `--workers N` | parallel product workers (default 4; per-domain requests are still rate-limited) |
-| `--min-images` / `--max-images` | quotas (default 2 / 5; fewer than `--min-images` ⇒ `partial`) |
-| `--target-images` | images to aim for per product (default 3 — the pipeline stops collecting once it has 3 and only uses the sheet's own URLs) |
+| `--min-images` / `--max-images` | quotas (default 2 / 10; fewer than `--min-images` ⇒ `partial`) |
+| `--target-images` | images to aim for per product (default 3). This is only how many are *sought*: a page with its own curated gallery is published in full up to `--max-images`, because the owner's "it should download all product only images" outranks the target |
+| `--keep-rejected` | also write the rejected pixels to `<product>/rejected/<rule>-<hash>.jpg`, so "why did that one die" is answered from the folder, not only from `decisions.jsonl` |
+| `--check-image FILE...` | no crawl, no sheet, no key: run the pipeline's real gate chain (promo band, edge seams, marketing-panel cut, S1-S21, the official rescues) on saved files and print the verdict for the brand-official bar and the retailer bar. Exit 0 = publishes, 1 = a gate stops it, 2 = unreadable |
+| `--check-title TITLE` | with `--check-image`: judge the row title too, so the model and colour gates (S16) run exactly as they would for that row |
 | `--no-fallback` | never search brand/retail sources; only the sheet's own URLs are used |
 | `--refresh-sitemaps` | ignore `state/sitemaps/*` caches and re-crawl the sitemap indexes |
 | `--no-resume` | ignore `state/checkpoint.jsonl` |

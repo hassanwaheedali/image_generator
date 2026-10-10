@@ -944,11 +944,25 @@ def sharpness_score(image: Image.Image) -> float:
 def verify_image_color(
     image: Image.Image,
     target_color_word: str,
+    *,
+    official: bool = False,
+    exempt_chroma_on_official: bool = True,
+    min_saturation: float = 0.22,
+    wash_max_value: float = 0.95,
 ) -> tuple[bool, str]:
     """Safeguard S16: does the image's foreground chromaticity contradict the target colour?
 
     Fails open (returns True) when target_color_word is empty or not a known colour.
     Returns (False, reason) when a strong chromatic foreground contradicts the target.
+
+    ``official`` marks a page owned by the brand itself (``host_is_official``).  A brand's
+    own hero is the definitive picture of that exact variant, so on such a page S16 keeps
+    the two signals that actually catch a wrong-colour sibling - the brightness conflict
+    and the dark-body conflict, both measured on the product area - and gives up only the
+    third one, *chromatic dominance*, which cannot tell a coloured product from a coloured
+    studio wash.  ``exempt_chroma_on_official=False`` restores the old, stricter behaviour.
+    A non-empty detail paired with ``True`` means "would have been rejected, exempted
+    because this is the brand's page" - so the run can log it instead of going silent.
     """
     if not target_color_word or not target_color_word.strip():
         return True, ""
@@ -986,7 +1000,18 @@ def verify_image_color(
         product_frac = float(np.mean(product))
         product_mean = float(c_max[product].mean()) if product.any() else 1.0
         dark_frac = float(np.mean(c_max < 0.45))
-        chromatic_coverage = float(np.mean((c_delta > 0.10) & product))
+        # A colour, not a tint.  The old test was "channel spread > 0.10", which cannot
+        # separate a coloured product from a coloured studio background: the owner's Orient
+        # Frost hero of 2026-10-10 - a white unit on a cool plate - measured 60 %
+        # "chromatic" and the brand's own picture was thrown away.  Saturation (spread /
+        # value) plus a brightness cap is what separates them: a studio wash is bright and
+        # weakly saturated (0.01 of the product area on a #c9d9f2 plate, where the old test
+        # said 0.45), a coloured body is neither (0.61-0.62 for purple/red/blue/green/gold).
+        # The bar is 0.22 and not higher because a golden body sits at saturation 0.24 - a
+        # 0.30 bar re-opens the gold-on-white hole this gate was written for.
+        saturation = np.divide(c_delta, np.maximum(c_max, 1e-6))
+        chromatic = (saturation > min_saturation) & (c_max < wash_max_value)
+        chromatic_coverage = float(np.mean(chromatic & product))
         if target_family == "black" and central_mean > 0.75 and dark_frac < 0.08:
             # No dark body anywhere in the product area - a white/bright unit on a
             # black row.  The dark_frac guard keeps a *correct* small black unit
@@ -1012,11 +1037,22 @@ def verify_image_color(
                     f"conflicts with target '{target_color_word}' (family white)"
                 )
         if chromatic_coverage >= 0.45:
-            return False, (
-                f"product area is a saturated colour "
-                f"({chromatic_coverage:.0%} chromatic) - "
-                f"conflicts with target '{target_color_word}' (family {target_family})"
+            reason = (
+                f"product area is a saturated colour ({chromatic_coverage:.0%} of it at "
+                f"saturation > {min_saturation:.2f}) - conflicts with target "
+                f"'{target_color_word}' (family {target_family})"
             )
+            if official and exempt_chroma_on_official:
+                # Only this branch.  A dark body on a white row, or a bright body on a
+                # black row, is a wrong *product* and still rejects on a brand page too -
+                # that is how the Haier official-CDN dark-body catch of 2026-10-09 stays
+                # alive.  What a brand page is never judged on is wash dominance, because
+                # the tint lives in the brand's own studio setup, not in the variant.
+                return True, (
+                    f"{reason}; not enforced - this is the brand's own page, whose hero "
+                    "defines the variant's colour"
+                )
+            return False, reason
         return True, ""
 
     profile = extract_foreground_color_profile(image)

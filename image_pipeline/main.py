@@ -2,6 +2,7 @@
 
     python main.py --input "sample test 10 products images.csv" --dry-run
     FREEIMAGE_API_KEY=... python main.py --input sheet.xlsx --workers 4
+    python main.py --check-image path/to/hero.png      # which gate stops this file, no crawl
 
 Fail-fast order: assets -> config (incl. API key) -> sheet -> checkpoint -> run.
 """
@@ -61,6 +62,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--keep-rejected",
         action="store_true",
         help="also write rejected images to <product>/rejected/<rule>-<hash>.jpg for inspection",
+    )
+    parser.add_argument(
+        "--check-image",
+        nargs="+",
+        default=[],
+        metavar="FILE",
+        help="no crawl: run the real gates on these saved files and print what stops each one",
+    )
+    parser.add_argument(
+        "--check-title",
+        default="",
+        metavar="TITLE",
+        help="with --check-image: judge the row title too, so the colour gate is applied as in that row",
     )
     parser.add_argument("--assets-dir", default="assets", help="folder with the two templates and two banners")
     parser.add_argument("--output-dir", default="output", help="where the CSVs, images and logs go")
@@ -254,8 +268,121 @@ def empty_row_results(tasks: list[ProductTask]) -> list[ProductResult]:
     return results
 
 
+def _check_local_images(
+    paths: list[str], config: PipelineConfig, title: str = ""
+) -> int:
+    """Apply the pipeline's own image chain to saved files and print the verdicts.
+
+    This exists because "will the official product image be published?" has two halves.
+    The URL/DOM half can be replayed offline against a captured page, but the pixel half
+    (S7 ring, S8 size, S20 marketing layout, S21 body layout, the panel cut, the official
+    rescues) can only be answered for real bytes.  Rather than burning a whole crawl to ask
+    it about one file, point this at the file.  The helpers are the pipeline's own on
+    purpose: a checker that reimplemented the gates could drift from the run and lie.
+
+    Returns 0 when every file would publish, 1 when a gate stops one, 2 when one cannot be
+    opened at all.
+    """
+    from PIL import Image
+
+    from compositing import isolate_main_product, to_square_canvas
+    from image_quality import (
+        marketing_panel_split,
+        official_gallery_pass,
+        run_quality_gates,
+        strip_promo_band,
+        trim_edge_seams,
+        verify_image_color,
+    )
+    from model_matching import build_model_keys
+
+    colour_word = build_model_keys(title).colour_word if title else ""
+    from pipeline import _layout_rescue_verdict
+
+    exit_code = 0
+    for raw in paths:
+        path = Path(raw)
+        try:
+            with Image.open(path) as opened:
+                image = opened.convert("RGB")
+        except (OSError, ValueError) as exc:
+            print(f"{path.name}: cannot open ({exc})")
+            exit_code = 2
+            continue
+        original = image.size
+        # The same three cuts _visit_page applies before it judges anything.
+        image, _band = strip_promo_band(image, config)
+        image, _seams = trim_edge_seams(image, config)
+        image, panel = marketing_panel_split(image, config)
+        print(
+            f"{path.name}: {original[0]}x{original[1]}"
+            + (f" -> {image.size[0]}x{image.size[1]} after cutting the {panel[0]} marketing panel" if panel else "")
+        )
+        for label, official in (("brand-official page", True), ("retailer page", False)):
+            rule_id, detail = run_quality_gates(
+                image, config, official_gallery=official, panel_cut=panel
+            )
+            if rule_id == "S7" and official and official_gallery_pass(image, config):
+                rule_id, detail = "ok", "saved by the official studio-corner pass"
+            if rule_id in ("S20", "S21") and official:
+                rescued, reason = _layout_rescue_verdict(image, config, rule_id, detail)
+                if rescued:
+                    rule_id, detail = "ok", f"saved by {reason}"
+            if rule_id == "ok":
+                print(f"  {label:19s}: PUBLISH")
+            else:
+                exit_code = exit_code or 1
+                print(f"  {label:19s}: STOP {rule_id} {detail}")
+        isolated, _degraded = isolate_main_product(image, config)
+        square = to_square_canvas(
+            isolated,
+            config.canonical_side,
+            fill_ratio=config.product_fill_ratio,
+            max_upscale=config.max_upscale,
+        )
+        if colour_word:
+            # S16 is judged on the same pixels the gates saw, per bar: the owner's Orient
+            # row died here, not in the layout gates, and the brand-page bar is the one that
+            # must not punish a coloured studio wash.
+            print(f"  colour gate S16 for row '{title}' (colour word {colour_word!r}):")
+            from variant_terms import colour_word_conflict
+
+            # The pipeline's own carve-out, mirrored so this check cannot flatter a file:
+            # a file name that names a different colourway cancels the brand-page exemption.
+            name_conflict = colour_word_conflict(colour_word, path.name)
+            if name_conflict:
+                print("    note: the file name names a different colour - the brand-page "
+                      "exemption is off for this file")
+            for label, official in (("brand-official page", True), ("retailer page", False)):
+                ok, why = verify_image_color(
+                    image,
+                    colour_word,
+                    official=official,
+                    exempt_chroma_on_official=(
+                        config.color_gate_official_chroma_exempt and not name_conflict
+                    ),
+                    min_saturation=config.color_chroma_min_saturation,
+                    wash_max_value=config.color_chroma_max_value,
+                )
+                if ok:
+                    print(f"    {label:19s}: PUBLISH" + (f" - {why}" if why else ""))
+                else:
+                    exit_code = exit_code or 1
+                    print(f"    {label:19s}: STOP S16 {why}")
+        print(
+            "  files the run would write: "
+            f"raw {image.size[0]}x{image.size[1]}, square {square.size[0]}x{square.size[1]}"
+        )
+    return exit_code
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.check_image:
+        # This mode reads only local files: no sheet, no assets, no API key, no network.
+        return _check_local_images(
+            list(args.check_image), PipelineConfig(dry_run=True), str(args.check_title)
+        )
     # Secrets come from the environment; a .env file is only a convenience wrapper.
     # A real exported variable always wins, and the value itself is never logged.
     env_path = load_env_file(Path(args.env_file) if args.env_file else None)
