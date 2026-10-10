@@ -682,6 +682,40 @@ def studio_background_pass(image: Image.Image, config: PipelineConfig) -> bool:
     return corners >= config.studio_rescue_min_neutral_corners
 
 
+# --------------------------------------------------------------------------- #
+# S19 - branded template guard (Option 2)
+# --------------------------------------------------------------------------- #
+def branded_template_reason(image: Image.Image, config: PipelineConfig) -> str | None:
+    """Safeguard S19: a store's own themed template is not a product photo.
+
+    Shops such as iShopping serve "template" art - the product pasted onto the
+    shop's brand colours with its logo and design added.  Compositing those breaks
+    isolation and puts one shop's branding inside another shop's template, so they
+    must be skipped while clean product photos pass.
+
+    The evidence is the background only: the four corner patches, the same window
+    the S7 studio rescue trusts.  A product photo's corners are white or light
+    neutral (saturation ~0.01-0.05); a theme frame shows saturated brand colour in
+    its corners.  The product body is never measured - a colourful product on a
+    white sheet passes, and a product that fills the frame is judged by the S7
+    corner bar exactly as in Option 1, never here.  Returns ``None`` when the
+    image passes, or a one-sentence reason a human can act on.
+    """
+    if not config.branded_template_guard_enabled:
+        return None
+    saturated = sum(
+        1
+        for _value, saturation in corner_patch_stats(image, config.corner_patch_ratio)
+        if saturation >= config.branded_corner_min_saturation
+    )
+    if saturated < config.branded_min_saturated_corners:
+        return None
+    return (
+        f"store template: {saturated} of 4 corners are saturated brand colour "
+        f"(themed shop background, not a clean product photo)"
+    )
+
+
 def run_quality_gates(
     image: Image.Image,
     config: PipelineConfig,
