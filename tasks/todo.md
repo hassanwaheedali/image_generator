@@ -140,3 +140,14 @@ python main.py --input sample_input.csv --dry-run --workers 4
   Electronics. The sheet URL still points at an alfamall.com listing (capacity conflict flagged),
   so the images came from the fallback chain - worth a human glance before importing.
 - Open Question 2 (accept Dawlance's black-background renders, or keep rejecting?) — affects Task 25.
+
+---
+
+# Option 2 — direct image URLs (2026-10-10)
+- [ ] Task O2-1: config fields (direct_mode, branded-template guard thresholds) + validation
+- [ ] Task O2-2: S19 branded-template guard in image_quality.py (TDD)
+- [ ] Task O2-3: BatchRunner processor seam (Option 1 default unchanged)
+- [ ] Task O2-4: direct_pipeline.py processor (TDD e2e with fakes)
+- [ ] Task O2-5: --direct CLI wiring in main.py
+- [ ] Task O2-6: real-image fixtures + loopback E2E + per-category results
+- [ ] Task O2-7: docs sync (AGENTS.md / README / PROJECT_MAP / CHANGELOG) + final gates

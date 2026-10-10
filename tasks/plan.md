@@ -538,3 +538,67 @@ centred** without touching the logo, and fix the empty Brand column.
 | Mixed appliance body (e.g. black door with gold trim) | Medium | Measure both dominant hue and chromatic fraction; multi-panel appliances still pass unless the primary body panel strongly contradicts the target family. |
 | Non-standard color terminology | Low | Grounded in existing `variant_terms.COLOUR_FAMILIES`. Unrecognized colors fail open safely. |
 
+
+---
+
+# Option 2 Implementation Plan — Direct Image URLs (no scraping) · 2026-10-10
+
+## Overview
+Option 2 replaces the scraper front half with direct input: each sheet row supplies the
+product's own image URLs. The flow per row is: download → validate → branded-template
+guard (new rule S19) → white-background gates → colour rule (S16) → dedup (S10) →
+isolate/square/sharpen → compose on both templates → upload (S14, banner last) →
+import CSVs with hosted links. Everything from the download onward **reuses the Option 1
+functions**; no forks. (Gate G10 of `docs/riper/option1-fix-plan.md`, owner-approved
+2026-10-10. Input confirmed: `Title,Images` sheet, pipe-separated direct image URLs.)
+
+## Architecture decisions
+- New module `direct_pipeline.py` with `process_direct_product()` carrying the same
+  contract as `process_product()`; `BatchRunner` gains an optional `processor` param
+  (default = Option 1, zero behaviour change).
+- New safeguard **S19 "branded template guard"**: background-only test. Store theme
+  templates (iShopping yellow, promo frames, logo bands) betray themselves through
+  *saturated corner patches*; white/light-grey studio corners never fire it. The check
+  never judges the product body, so a product that fills the frame is safe (that case is
+  already owned by S7 studio rescue). One function, three config fields, lenient defaults.
+- Skipped in direct mode (by design): page fetch/verification S1–S3, gallery extractors,
+  fallback chain S15, URL heuristics S4/S5/S12, salvage. Kept: S13 bytes, S8/S6 size,
+  S9, S14 emblem, S7 (+studio rescue, +S18 crop closure inside isolation), S16 colour,
+  S10 dedup, S14 upload contract.
+- Titles without a model code are fine in direct mode (no "4.1" rejection): there is no
+  page to prove; `build_model_keys` is still called to extract the colour word for S16.
+
+## Task list (TDD, one commit per task, gates green before every commit)
+
+### Phase 1 — foundation
+- [ ] Task O2-1: config — `direct_mode` + S19 fields + `__post_init__` validation (`config.py`)
+- [ ] Task O2-2: S19 gate `branded_template_reason()` (`image_quality.py`), RED tests first
+
+### Checkpoint — Option 1 regression: full suite green (seam not touched yet)
+
+### Phase 2 — seam + processor
+- [ ] Task O2-3: `BatchRunner` optional `processor` seam (`pipeline.py`, ≤5 lines)
+- [ ] Task O2-4: `direct_pipeline.py` processor, RED e2e tests first (fakes)
+
+### Checkpoint — direct flow publishes a clean white product with links; blocks a yellow template
+
+### Phase 3 — CLI + real pixels
+- [ ] Task O2-5: `--direct` CLI wiring (`main.py`), no SourceChain in direct mode
+- [ ] Task O2-6: real-image fixtures (AC / refrigerator / other / branded template) via
+      web tooling; fixture tests + loopback-HTTP `--dry-run` end-to-end
+
+### Phase 4 — docs + review
+- [ ] Task O2-7: docs sync (AGENTS.md registry, README rule table, PROJECT_MAP, CHANGELOG)
+
+### Checkpoint — complete
+- [ ] ruff + mypy --strict + pytest green; per-category results table recorded
+
+## Risks & mitigations
+| Risk | Impact | Mitigation |
+|---|---|---|
+| S19 over-fires on warm-white/neutral studio shots | High (owner's red line) | corner-only evidence, saturation bar 0.30, warm-grey has ~0.03; direct accept tests included |
+| S19 misses templates with white corners | Medium | those still hit the S7 white-background gate; S19 is additive, not sole defence |
+| Direct URL with no image extension rejected | High (stupid filter) | S5 URL heuristics deliberately NOT applied in direct mode; bytes decide |
+| Product filling frame rejected | High | S7 studio rescue + S18 crop closure reused unchanged |
+| Option 1 regression via the seam | High | processor defaults to `process_product`; full 330+ suite re-run at every checkpoint |
+
