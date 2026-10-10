@@ -7,6 +7,8 @@ All tests are offline: fakes from ``conftest.py`` and synthetic images only.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from config import ConfigError, PipelineConfig
@@ -113,3 +115,65 @@ def test_s19_ignores_the_product_body_itself() -> None:
     draw.rounded_rectangle([150, 140, 450, 500], radius=20, fill=(210, 30, 30))
     draw.rectangle([180, 180, 420, 260], fill=(30, 90, 200))
     assert branded_template_reason(image, PipelineConfig(dry_run=True)) is None
+
+
+# --------------------------------------------------------------------------- #
+# Task O2-3: BatchRunner processor seam (Option 1 stays the default)
+# --------------------------------------------------------------------------- #
+import threading  # noqa: E402
+
+from models import (  # noqa: E402
+    AcceptedImage,
+    ProductResult,
+    ProductTask,
+    Status,
+)
+from pipeline import BatchRunner, PipelineDeps, process_product  # noqa: E402
+
+
+def test_batch_runner_defaults_to_the_option_1_processor() -> None:
+    config = PipelineConfig(dry_run=True)
+    runner = BatchRunner(config, None, [], {})  # type: ignore[arg-type]
+    assert runner._processor is process_product
+
+
+def test_batch_runner_uses_the_injected_processor(tmp_path: Path) -> None:
+    """The seam: Option 2 swaps the per-row processor without touching Option 1."""
+    from conftest import FakeImageFetcher, FakeImageHost, FakePageFetcher
+
+    from decisions import DecisionLog
+
+    config = PipelineConfig(
+        dry_run=True,
+        assets_dir=Path("assets"),
+        output_dir=tmp_path / "out",
+        state_dir=tmp_path / "state",
+    )
+    deps = PipelineDeps(
+        page_fetcher=FakePageFetcher({}),
+        image_fetcher=FakeImageFetcher({}),
+        image_host=FakeImageHost(),
+        decisions=DecisionLog(tmp_path / "decisions.jsonl"),
+        banner_cache={},
+        banner_cache_lock=threading.Lock(),
+        source_searcher=None,
+    )
+    calls: list[int] = []
+
+    def fake_processor(
+        task: ProductTask,
+        deps_: PipelineDeps,
+        config_: PipelineConfig,
+        cancel_event: threading.Event | None = None,
+    ) -> tuple[ProductResult, list[AcceptedImage]]:
+        calls.append(task.index)
+        return (
+            ProductResult(task_index=task.index, title=task.title, status=Status.OK),
+            [],
+        )
+
+    tasks = [ProductTask(index=0, title="Direct AC 1", source_urls=("http://x/a.jpg",))]
+    runner = BatchRunner(config, deps, tasks, {}, processor=fake_processor)
+    results = runner.run()
+    assert calls == [0]
+    assert results[0].status is Status.OK
