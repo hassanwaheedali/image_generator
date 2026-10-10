@@ -721,3 +721,66 @@ def test_s4_capacity_code_stays_quiet_when_no_code_is_comparable() -> None:
         assert not url_names_other_capacity_code(url, keys), url
     blank = build_model_keys("Orient Split AC Super Dc Inverter")
     assert not url_names_other_capacity_code(_WRONG, blank)
+
+
+# --------------------------------------------------------------------------- #
+# S4, third limb - a sibling product's series word in the file name
+# --------------------------------------------------------------------------- #
+_PULSE_ROW = "Orient Inverter AC Pulse 19C Ultra White T3 1.5 Ton"
+_INNOVA_ROW = "Orient DC Inverter AC Innova 19C Ultra White T3 1.5 Ton"
+_PULSE_PNG = (
+    "https://orient.com.pk/assets/products-images-2026/air-conditioners/"
+    "15-ton-pulse-ultra-white-dc-inverter.png"
+)
+_INNOVA_PNG = (
+    "https://orient.com.pk/assets/products-images-2026/air-conditioners/"
+    "15-ton-innova-ultra-white-dc-inverter.png"
+)
+
+
+def test_sibling_terms_name_the_other_rows_series_word() -> None:
+    """The Orient run of 2026-10-10: the Pulse row published the Innova file because
+    neither URL carries the ``19C`` key and the page hosted both series.  The sheet
+    itself names the difference - ``innova`` appears on exactly one other row."""
+    from model_matching import sibling_series_terms
+
+    pulse_terms, innova_terms = sibling_series_terms([_PULSE_ROW, _INNOVA_ROW])
+    assert pulse_terms == frozenset({"innova"})
+    assert innova_terms == frozenset({"pulse"})
+
+
+def test_sibling_terms_drop_shared_modifiers_and_brands() -> None:
+    """``ultra`` and ``orient`` sit on both rows, so they can never name *another*
+    product; a single-row sheet has no siblings at all."""
+    from model_matching import sibling_series_terms
+
+    pulse_terms, _ = sibling_series_terms([_PULSE_ROW, _INNOVA_ROW])
+    assert "ultra" not in pulse_terms and "orient" not in pulse_terms
+    (alone,) = sibling_series_terms([_PULSE_ROW])
+    assert alone == frozenset()
+
+
+def test_sibling_terms_ignore_code_only_rows() -> None:
+    """Code rows (HRF-538 IFGA) identify by token, not by a series word: they neither
+    give nor take sibling terms, so the variant-tail flow is untouched."""
+    from model_matching import sibling_series_terms
+
+    titles = ["Haier Refrigerator HRF-538 IFGA Golden", "Haier Refrigerator HRF-538 IFPA Golden"]
+    a, b = sibling_series_terms(titles)
+    assert a == frozenset() and b == frozenset()
+
+
+def test_s4_flags_a_url_naming_a_sibling_product() -> None:
+    from model_matching import url_names_sibling_product
+
+    assert url_names_sibling_product(_INNOVA_PNG, frozenset({"innova"}))
+    assert not url_names_sibling_product(_PULSE_PNG, frozenset({"innova"}))
+    assert not url_names_sibling_product(_INNOVA_PNG, frozenset())  # no siblings, no verdict
+
+
+def test_s4_sibling_check_reads_the_file_name_not_the_folders() -> None:
+    """A category folder (``air-conditioners``) is not a product statement."""
+    from model_matching import url_names_sibling_product
+
+    url = "https://cdn.x.com/assets/air-conditioners/generic-white-unit.png"
+    assert not url_names_sibling_product(url, frozenset({"conditioners"}))

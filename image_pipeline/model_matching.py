@@ -19,11 +19,13 @@ No I/O, everything cached and unit-testable.
 from __future__ import annotations
 
 import re
+from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from urllib.parse import unquote, urlsplit
 
-from models import ModelKeys
+from models import ModelKeys, ProductTask
 from similarity import similar
 from textnorm import WHITESPACE_RE, normalize_key, normalize_text
 from variant_terms import (
@@ -834,6 +836,86 @@ def url_names_other_capacity_code(url: str, keys: ModelKeys) -> bool:
     if not theirs:
         return False
     return not (ours & theirs)
+
+
+#: The shortest a word may be to name a product line: ``mega``, ``frost``, ``ifga``
+#: qualify; ``ac``, ``t3``, ``pro`` are too short to carry that meaning on their own.
+_SIBLING_WORD_MIN_LENGTH = 4
+
+
+def _series_words(title: str) -> frozenset[str]:
+    """The words a title uses to *name* its product (see ``ModelKeys.name_words``).
+
+    Codes do not count here: rows like ``HRF-538 IFGA`` are identified by their tokens,
+    and two variants of one model (``IFGA`` / ``IFPA``) already sit under S4's code
+    limbs and the variant-tail flow - a glued identity ending in the word (``hrf538ifga``
+    ends in ``ifga``) proves the word is a variant tail, not a series name, and the
+    tolerated-variant flow must keep publishing those pages' photos.  Only free words
+    stay - the series names a catalogue writes into its file names.
+    """
+    keys = build_model_keys(title)
+    return frozenset(
+        word
+        for word in keys.name_words
+        if word.isalpha()
+        and len(word) >= _SIBLING_WORD_MIN_LENGTH
+        and not any(identity.endswith(word) for identity in keys.identities)
+    )
+
+
+def sibling_series_terms(titles: Sequence[str]) -> tuple[frozenset[str], ...]:
+    """Sheet knowledge for S4: for each row, the series words of the *other* rows.
+
+    The Orient run of 2026-10-10 is the lesson: the Pulse row's tolerated page carried
+    the Innova file too, and no limb of S4 could see the difference - neither URL
+    prints the ``19C`` key, and ``pulse`` / ``innova`` are words, not codes.  The sheet
+    itself names the difference: a word appearing in exactly one row's title is that
+    row's name, and from every other row it names *another product*.
+
+    Only such single-row words can count; a word on two or more rows (``ultra``,
+    ``orient``) is a shared modifier, never an identity.  One frozenset per input
+    title, in order; a single-row sheet yields empty sets and the limb stays silent.
+    """
+    per_row = [_series_words(title) for title in titles]
+    counts: Counter[str] = Counter()
+    for words in per_row:
+        counts.update(words)
+    unique = {word for word, count in counts.items() if count == 1}
+    return tuple(
+        frozenset(unique - own) for own in per_row
+    )
+
+
+def url_names_sibling_product(url: str, sibling_terms: frozenset[str]) -> bool:
+    """Safeguard S4, third limb: the file name names another product of this sheet.
+
+    ``True`` -> reject.  The file name is read as plain words (``15-ton-innova-…`` ->
+    ``ton``, ``innova``, …); folders are not evidence, a category path like
+    ``/air-conditioners/`` must never speak about the product.  With no sibling terms
+    (single-row sheet, code-only catalogue) the limb is silent.
+    """
+    if not sibling_terms:
+        return False
+    filename = urlsplit(unquote(url)).path.rsplit("/", 1)[-1]
+    filename = filename.rsplit(".", 1)[0]
+    words = {
+        segment
+        for segment in re.split(r"[^a-z]+", filename.lower())
+        if len(segment) >= _SIBLING_WORD_MIN_LENGTH
+    }
+    return bool(words & sibling_terms)
+
+
+def annotate_sibling_terms(tasks: Sequence[ProductTask]) -> list[ProductTask]:
+    """Give every sheet row the series words of the *other* rows (S4's third limb).
+
+    The Orient run of 2026-10-10: the Pulse row published the Innova file from a
+    tolerated page because neither URL prints the ``19C`` key.  The sheet itself names
+    the difference, so the sheet is threaded into the per-row decision.  A single-row
+    sheet (or any code-only catalogue) yields empty sets and the limb stays silent.
+    """
+    terms = sibling_series_terms([task.title for task in tasks])
+    return [replace(task, sibling_terms=own) for task, own in zip(tasks, terms, strict=True)]
 
 
 def is_display_product(title: str) -> bool:

@@ -1150,6 +1150,9 @@ _LAYOUT_FULL_BLEED_SPAN = 0.98
 #: close to white.  A lifestyle photo of a room fills its frame too, but it is not an
 #: emblem on studio white - S7 (or its official-gallery rescue) owns that case.
 _LAYOUT_WHITE_GROUND_MIN = 0.90
+#: S7.panel: how close a band's pixel must sit to the band's median shade to count as
+#: flat background.  Badges and captions are artwork *on* the panel, not the panel.
+_PANEL_BG_TOLERANCE = 35.0
 
 
 def layout_metrics(image: Image.Image) -> tuple[float, float, float]:
@@ -1324,8 +1327,11 @@ def marketing_panel_split(
     ==========================  ==========  ==============  ======  ==========
 
     All five conditions have to hold, and a scan of the owner's 72 published files with these
-    thresholds finds **no other image to cut**.  Returns ``(image, None)`` when there is no
-    panel, else ``(cropped, (side, pixels))``.
+    thresholds finds **no other image to cut**.  The calm-rows condition is a disjunction since
+    LOW_11 (2026-10-10): badges, captions and a warranty block make the rows uneven, but they
+    sit on one flat black background, so a band mostly made of its own median shade qualifies
+    too - a dark *product* never is.  Returns ``(image, None)`` when there is no panel, else
+    ``(cropped, (side, pixels))``.
     """
     if not config.marketing_panel_split_enabled:
         return image, None
@@ -1355,7 +1361,13 @@ def marketing_panel_split(
     if float(band.mean()) > config.panel_band_max_mean:
         return image, None      # a dark *product* is not a flat black panel
     if float(band.mean(axis=1).std()) > config.panel_max_row_std:
-        return image, None      # highlights and shadows: a photograph, not pasted artwork
+        # The rows of a panel carrying real artwork (badges, captions, a warranty block)
+        # are not calm - LOW_11 measured 53 where the flat replica measured 24.  The
+        # artwork sits on one dead-flat background, though, while a photograph is body
+        # and gradient, so a band whose pixels mostly sit on one flat shade still counts.
+        background = float(np.mean(np.abs(band - np.median(band)) <= _PANEL_BG_TOLERANCE))
+        if background < config.panel_bg_flat_min:
+            return image, None  # highlights and shadows: a photograph, not pasted artwork
     if rest.size == 0 or float(rest.mean()) < config.panel_side_min_mean:
         return image, None      # what is kept must be a bright studio area
     inner, outer = (y - 1, y) if downward else (y, y - 1)

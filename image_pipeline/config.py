@@ -215,12 +215,23 @@ class PipelineConfig:
     #: S7.panel - cut a *pasted* marketing panel (badges, capacity pill, warranty block)
     #: off the top or bottom of an image.  Only a dead-flat dark block with a hard straight
     #: edge qualifies, so a dark product on a dark ground is left alone (measured on the
-    #: owner's run: 3 accepted photos are that shape and none of them qualifies).
+    #: owner's run: 3 accepted photos are that shape and none of them qualifies - their
+    #: band means run 163-181, far above ``panel_band_max_mean``).
+    #:
+    #: 2026-10-10, LOW_11: the real panel carries four badges, captions, a pill and a
+    #: warranty block, and that artwork pushed the band's row-mean variance past the old
+    #: flat bar (measured 53 on the fixture, the old bar was 45), so the detector refused
+    #: the very file it was written for.  What separates pasted artwork from a dark
+    #: product is not the variance of the rows but the *background*: badges sit on a dead
+    #: black ground, a photograph is body and gradient.  A band now qualifies when its
+    #: rows are calm **or** most of its pixels sit on one flat background shade
+    #: (``panel_bg_flat_min`` of them within ``_PANEL_BG_TOLERANCE`` of the band median).
     marketing_panel_split_enabled: bool = True
-    panel_band_max_mean: float = 70.0
+    panel_band_max_mean: float = 95.0
     panel_side_min_mean: float = 170.0
     panel_min_jump: float = 150.0
     panel_max_row_std: float = 45.0
+    panel_bg_flat_min: float = 0.55
     panel_min_ratio: float = 0.12
     panel_max_ratio: float = 0.72
     panel_edge_flat_min: float = 0.95
@@ -493,13 +504,18 @@ class PipelineConfig:
     #: skipped it because it only fires on a grey ground.  A full-bleed frame is judged
     #: by what covers it: a poster paints most of the canvas, an emblem is dense line
     #: art.  Measured on the 72 accepted raws of that run, real product photos sit at
-    #: ink 0.22-0.44 and texture 3-10, so both thresholds are set far outside them.
+    #: ink 0.22-0.44 and texture 3-10 (a full-bleed Midea shot reaches 10.3), and an
+    #: AC wearing a strip of feature badges sits at texture 23-26 - the owner's own
+    #: LOW_1 measured 25.9.  Emblems and line art start at 37 and reach 55.  The
+    #: texture bar therefore sits in the gap between the two bands (32.0), not inside
+    #: the product band: the original 18.0 rejected the owner's clean LOW_1 photo on
+    #: 2026-10-10 ("S20 rejected … texture 25.9"), the same night S20 was born.
     #: S4 half: reject a file whose capacity code contradicts the row's (row "18X" vs
     #: file "18G").  Only runs when both sides carry such a code and they share none.
     capacity_code_gate_enabled: bool = True
     marketing_layout_enabled: bool = True
     marketing_max_ink_fraction: float = 0.75
-    marketing_max_texture: float = 18.0
+    marketing_max_texture: float = 32.0
 
     # ----- visual color verification (S16) --------------------------------
     #: Owner decision 2026-10-08: keep it narrow.  It false-rejected a white Dawlance

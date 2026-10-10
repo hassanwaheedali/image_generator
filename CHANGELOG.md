@@ -23,6 +23,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refrigerator, washing machine, yellow sale template) and over a loopback-HTTP `--dry-run`.
 
 ### Fixed
+- **S20 no longer rejects clean full-bleed product photos (LOW_1, Mega T3 Pro).** The
+  line-art branch fired at `texture >= marketing_max_texture`, and that bar was 18.0 —
+  *inside* the measured band of real badge-strip photos (23-26; the owner's LOW_1 measured
+  25.9), below where any line art starts (37-55). The bar now sits in the measured gap
+  (`marketing_max_texture` 32.0); emblem sheets (texture 37+) still die on S20, and the
+  painted-poster branch is unchanged.
+- **The panel cut works on panels that carry real artwork (LOW_11).** `marketing_panel_split`
+  vetoed any band whose row variance exceeded `panel_max_row_std`, but a published panel
+  carries badges, captions and a warranty block, and that artwork pushed the variance past
+  the bar — so the owner's black badge panel was accepted uncut. A band now also qualifies
+  when most of its pixels sit on one flat background shade (`panel_bg_flat_min`,
+  `_PANEL_BG_TOLERANCE`), which a dark *product* never does (the three measured
+  dark-product files are excluded by band mean alone); `panel_band_max_mean` rises 70 -> 95
+  for panels that are bright with white text. The flat replica, the dark-product guard and
+  the "no cut, no exemption" rule all stay exactly as they were.
+- **A wrong product is never downloaded to top a row up (Orient Pulse / Innova).** The
+  Pulse row's tolerated page also carried the Innova file, and no limb of S4 could see the
+  difference — neither URL prints the `19C` key. S4 gains a third limb fed by the sheet
+  itself: `sibling_series_terms` collects each row's unique series words (words on exactly
+  one row, never variant tails or shared modifiers), and `url_names_sibling_product`
+  rejects any candidate whose file name carries another row's word, whatever the page's
+  status. The correct pulse image stays; a single-row or code-only sheet leaves the limb
+  silent, and the tolerated DW-7500 / IFPA flows are untouched.
 - **`--direct` now reads the `Images` / `image_urls` column, never `Source URL`.** Sheets that
   carry both columns (Source URL for Option 1 scraping, Images for Option 2) previously fed the
   page links into the direct downloader. `read_input(direct=True)` prefers image-column headers

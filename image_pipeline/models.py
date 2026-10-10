@@ -42,6 +42,12 @@ class ProductTask:
     index: int
     title: str
     source_urls: tuple[str, ...]
+    #: Series words that name *other rows* of the same sheet (see
+    #: ``model_matching.sibling_series_terms``).  A file whose name carries one of
+    #: these belongs to another product in the catalog, whatever the page's status -
+    #: the Orient run of 2026-10-10 published the Innova file on the Pulse row because
+    #: neither URL carried the ``19C`` key.  Empty for a single-row sheet.
+    sibling_terms: frozenset[str] = frozenset()
 
 @dataclass(frozen=True)
 class ModelKeys:

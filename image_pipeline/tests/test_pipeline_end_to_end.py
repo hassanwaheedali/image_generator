@@ -1592,6 +1592,47 @@ def test_a_page_printing_another_variant_suffix_is_a_last_resort_not_proof(
     assert "deferred as last resort" in decisions
 
 
+def test_a_tolerated_page_never_publishes_a_sibling_products_image(tmp_path: Path) -> None:
+    """Orient run of 2026-10-10: the Pulse row's tolerated page also carries the Innova
+    file.  Neither URL prints the ``19C`` key, so S4's two existing limbs are silent -
+    the sheet itself is the proof: ``innova`` names *another row's* product, and a wrong
+    product must never be downloaded, whatever the page's status is."""
+    config = live_config(tmp_path)
+    sheet_url = "https://newglacier.example/orient-pulse-19c-ultra-white"
+    pulse_png = (
+        "https://orient.com.pk/assets/products-images-2026/air-conditioners/"
+        "15-ton-pulse-ultra-white-dc-inverter.png"
+    )
+    innova_png = (
+        "https://orient.com.pk/assets/products-images-2026/air-conditioners/"
+        "15-ton-innova-ultra-white-dc-inverter.png"
+    )
+    html = (
+        "<html><head><title>Orient Pulse 19C</title></head>"
+        "<body><h1>Orient Pulse 19C</h1>"
+        f"<div class='product-gallery'><img src=\"{pulse_png}\">"
+        f"<img src=\"{innova_png}\"></div></body></html>"
+    )
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {sheet_url: html},
+        {pulse_png: png_bytes(_gallery_image(1)), innova_png: png_bytes(_gallery_image(2))},
+    )
+    row = ProductTask(
+        index=0,
+        title="Orient Inverter AC Pulse 19C Ultra White T3 1.5 Ton",
+        source_urls=(sheet_url,),
+        sibling_terms=frozenset({"innova"}),
+    )
+    result, accepted = process_product(row, deps, config)
+
+    assert len(accepted) == 1                                  # the Pulse photo, nothing else
+    assert "pulse" in accepted[0].source_url
+    assert not any("innova" in image.source_url for image in accepted)
+    decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
+    assert "names another product from this sheet" in decisions
+
+
 def test_a_row_with_one_exact_image_is_never_topped_up_by_the_tolerated_page(
     tmp_path: Path,
 ) -> None:

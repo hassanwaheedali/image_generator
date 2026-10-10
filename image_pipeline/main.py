@@ -436,6 +436,15 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     for warning in warnings:
         LOG.warning("%s", warning)
+
+    # Sheet knowledge for S4's third limb: a file whose name carries another row's
+    # series word belongs to another product, whatever the page's status (Orient run
+    # 2026-10-10: the Pulse row published the Innova file).  Computed over the whole
+    # sheet before ``--limit`` trims the view.
+    from model_matching import annotate_sibling_terms
+
+    tasks = annotate_sibling_terms(tasks)
+
     if config.limit is not None:
         tasks = tasks[: config.limit]
     LOG.info("rows to process: %d", len(tasks))

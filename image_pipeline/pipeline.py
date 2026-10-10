@@ -74,6 +74,7 @@ from model_matching import (
     relaxed_page_match,
     url_belongs_to_other_model,
     url_names_other_capacity_code,
+    url_names_sibling_product,
 )
 from models import (
     AcceptedImage,
@@ -1466,6 +1467,16 @@ def _consume_candidates(
             verdict = (
                 "S4",
                 "image URL names another capacity code than this row (different model)",
+            )
+        if verdict is None and url_names_sibling_product(candidate.url, task.sibling_terms):
+            # S4's third limb, sheet knowledge (Orient run 2026-10-10): the Pulse row's
+            # tolerated page also carried the Innova file, and neither URL prints the
+            # row's key - but the sheet itself names the difference.  A word that names
+            # exactly one *other* row of this sheet names another product, whatever the
+            # page's status is; a wrong product must never be downloaded.
+            verdict = (
+                "S4",
+                "image URL names another product from this sheet",
             )
         if verdict is not None:
             rule, detail = verdict

@@ -1364,6 +1364,114 @@ def test_marketing_panel_split_can_be_switched_off(config: PipelineConfig) -> No
     assert marketing_panel_split(_unit_with_badge_panel(), off)[1] is None
 
 
+def _full_bleed_ac_with_badge_strip(size: int = 700) -> Image.Image:
+    """The owner's LOW_1 file of 2026-10-10 (Dawlance Inspire Pro T3), drawn as a fixture.
+
+    A clean studio photo of the indoor unit that bleeds to all four edges - the pipe
+    touches the top edge, the floor shadow the bottom - wearing a strip of feature
+    badges.  Its measured verdict before tonight's fix was ``S20 rejected … texture
+    25.9``: the line-art branch fired, because the texture bar (18.0 then) sat *inside*
+    the measured band of real badge-strip photos (23-26), below where any line art
+    starts (37-55).  This fixture reproduces the shape: white corners, ink below the
+    poster floor, span 1.0, and a texture in that same gap between 18 and 32.
+    """
+    image = Image.new("RGB", (size, size), (251, 252, 253))
+    draw = ImageDraw.Draw(image)
+    w = h = size
+    top, bottom = int(h * 0.26), int(h * 0.74)
+    draw.rounded_rectangle((0, top, w - 1, bottom), radius=30, fill=(240, 241, 243))
+    draw.rectangle((w // 3, 0, w // 3 + 14, top), fill=(150, 152, 156))        # pipe, top edge
+    draw.rectangle((int(w * 0.04), bottom, int(w * 0.96), h - 1), fill=(240, 241, 242))
+    draw.rectangle((int(w * 0.04), bottom, int(w * 0.96), bottom + 5), fill=(168, 170, 174))
+    x, flip = 16, False
+    while x < w - 16:                                    # louver detail at the metered scale
+        shade = 150 if flip else 244
+        draw.rectangle((x, top + 24, min(x + 30, w - 16), bottom - 60), fill=(shade, shade, shade + 2))
+        flip = not flip
+        x += 30
+    draw.rectangle((20, bottom - 52, w - 20, bottom - 20), fill=(96, 100, 108))   # grille
+    draw.rectangle((20, bottom - 24, w - 20, bottom - 8), fill=(150, 154, 160))   # display
+    for i in range(4):
+        cx = w // 5 + i * w // 5
+        draw.ellipse((cx - 12, bottom - 48, cx + 12, bottom - 24), fill=(66, 108, 196))
+    return image
+
+
+def test_s20_leaves_a_full_bleed_badge_strip_product_photo_alone(config: PipelineConfig) -> None:
+    """LOW_1 (2026-10-10): a clean product photo must not die on the line-art branch.
+
+    The fixture's texture sits in the measured gap - above the old 18.0 bar, below the
+    37-55 band where real emblems and line art live - so it proves the bar sits in the
+    gap, not inside the product band.
+    """
+    image = _full_bleed_ac_with_badge_strip()
+    ink_fraction, span, texture = layout_metrics(image)
+    assert span >= 0.98 and ink_fraction < config.marketing_max_ink_fraction
+    assert 18.0 < texture < 32.0, "fixture must sit between the old bar and the line-art band"
+    assert not is_marketing_layout(image, config)
+    assert run_quality_gates(image, config)[0] != "S20"
+
+
+def _unit_with_badged_art_panel(size: int = 600) -> Image.Image:
+    """The owner's LOW_11 file of 2026-10-10, drawn heavier than the flat replica.
+
+    Same studio shot on top, pasted black panel underneath - but the panel carries the
+    artwork a published file really has: four bright badges with white captions, a blue
+    capacity pill and a warranty block with text lines.  The badges push the band's
+    row-mean variance past the old flatness bar (> 45) even though the panel's
+    *background* is still dead black - which is exactly why the old detector refused
+    the real file while the flat replica passed.
+    """
+    image = Image.new("RGB", (size, size * 3 // 5), (246, 247, 249))
+    draw = ImageDraw.Draw(image)
+    w, h = image.size
+    band = int(h * 0.55)
+    draw.rounded_rectangle(
+        (w // 16, h // 20, 15 * w // 16, int(h * 0.50)), radius=12, fill=(232, 233, 236)
+    )
+    draw.rectangle((w // 16, int(h * 0.45), 15 * w // 16, int(h * 0.50)), fill=(58, 60, 64))
+    draw.rectangle((0, band, w, h), fill=(8, 9, 12))
+    for i in range(4):
+        cx = w // 8 + i * w // 6
+        radius = w // 20
+        ty = band + h // 10
+        draw.ellipse((cx - radius, ty, cx + radius, ty + 2 * radius),
+                     fill=(46, 96, 190), outline=(235, 238, 244), width=2)
+        draw.rectangle((cx - radius - 6, ty + 2 * radius + 4,
+                        cx + radius + 6, ty + 2 * radius + 10), fill=(238, 240, 244))
+    draw.rounded_rectangle((w // 2 - w // 10, band + h // 30, w // 2 + w // 10, band + h // 12),
+                           radius=8, fill=(40, 70, 170))
+    draw.rectangle((w // 2 - w // 14, band + h // 30 + 5,
+                    w // 2 + w // 14, band + h // 30 + 9), fill=(250, 250, 252))
+    for y_fraction in (0.62, 0.72):                       # wide white caption rows
+        y = band + int((h - band) * (y_fraction - 0.55) / 0.45)
+        draw.rectangle((w // 12, y, 11 * w // 12, y + 6), fill=(226, 229, 236))
+    bx0, by0 = 13 * w // 16, band + (h - band) // 8       # warranty block with text lines
+    draw.rectangle((bx0, by0, 15 * w // 16, by0 + 44), outline=(190, 196, 208), width=2)
+    for j in range(3):
+        y = by0 + 8 + j * 12
+        draw.rectangle((bx0 + 5, y, 15 * w // 16 - 5, y + 4), fill=(222, 226, 234))
+    return image
+
+
+def test_marketing_panel_split_cuts_a_panel_full_of_badges(config: PipelineConfig) -> None:
+    """LOW_11 (2026-10-10): the cut must work on the artwork the real panel carries."""
+    image = _unit_with_badged_art_panel()
+    crop, panel = marketing_panel_split(image, config)
+    assert panel is not None
+    side, pixels = panel
+    assert side == "bottom" and pixels > 0
+    assert crop.size == (image.size[0], image.size[1] - pixels)
+
+
+def test_the_badged_panel_is_still_rejected_uncut(config: PipelineConfig) -> None:
+    """Cutting is the only rescue: judged whole, the badged file is still artwork."""
+    assert run_quality_gates(_unit_with_badged_art_panel(), config)[0] == "S20"
+    crop, panel = marketing_panel_split(_unit_with_badged_art_panel(), config)
+    assert panel is not None
+    assert run_quality_gates(crop, config, panel_cut=panel) == ("ok", "")
+
+
 # --------------------------------------------------------------------------- #
 # S16 - a studio wash is not a colour, and a brand page is never judged on one
 # --------------------------------------------------------------------------- #
