@@ -351,3 +351,65 @@ def test_a_code_less_row_is_verified_by_its_keywords() -> None:
     )
     result = verify_page("https://dawlance.com.pk/mega-t3-pro-1-ton", page, keys, brand="dawlance")
     assert result.accepted and result.match_rule == "keyword"
+
+
+MEGATRON_TITLE = (
+    "Orient Megatron Titanium 12X Olive Black 1 Ton Inverter AC\u2013T3 Tropical Wind "
+    "Puff Heat &amp; Cool 4D Air Throw"
+)
+
+
+def _orient_page(model: str) -> str:
+    return (
+        "<html><head>"
+        f"<title>Orient {model} | Orient Electronics Pakistan</title>"
+        f"<meta name='description' content='Orient {model} inverter split air conditioner'>"
+        "</head><body>"
+        f"<h1>{model}</h1>"
+        "<p>Tropical Wind Puff, 4D Air Throw, DC Inverter, heat and cool.</p>"
+        "</body></html>"
+    )
+
+
+def test_the_official_page_is_believed_when_it_only_differs_in_the_capacity_letter() -> None:
+    """Orient writes ``Titanium 12S`` where the sheet writes ``Titanium 12X``, and S1 was
+    discarding the brand's own page for that one letter while a retailer's page carrying the
+    sheet's spelling was accepted at strength 2 (owner: "why here not go to brand official").
+    A page on the brand's own domain that names the line is now enough to look at its pictures."""
+    keys = build_model_keys(MEGATRON_TITLE)
+    result = verify_page(
+        "https://www.orient.com.pk/products/titanium-12s-olive-black-t3-plus.html",
+        _orient_page("Titanium 12S Olive Black T3+"),
+        keys,
+        brand="orient",
+    )
+    assert result.strength == 1
+    assert result.match_rule == "fuzzy_identity"
+    assert "capacity letter" in result.detail
+
+
+def test_the_tolerance_is_for_the_brand_own_domain_only() -> None:
+    """Same page text on a shop's domain stays refused: the shop that writes ``12S`` too
+    might be selling the 12U, and a retailer has no such obligation to be exact."""
+    keys = build_model_keys(MEGATRON_TITLE)
+    result = verify_page(
+        "https://www.aysonline.pk/products/titanium-12s-olive-black-t3-plus/",
+        _orient_page("Titanium 12S Olive Black T3+"),
+        keys,
+        brand="orient",
+    )
+    assert result.strength == 0
+    assert result.match_rule == "none"
+
+
+def test_the_tolerance_does_not_accept_the_sibling_capacity() -> None:
+    """The other end of the same guard: the brand's 18U page is still not a match for a 12X
+    row, so ``fuzzy`` means one wrong letter, not "any page in the shop"."""
+    keys = build_model_keys(MEGATRON_TITLE)
+    result = verify_page(
+        "https://www.orient.com.pk/products/titanium-18u-olive-black-t3-plus.html",
+        _orient_page("Titanium 18U Olive Black T3+"),
+        keys,
+        brand="orient",
+    )
+    assert result.strength == 0
