@@ -191,6 +191,25 @@ class PipelineConfig:
     # *target* still stops the search after 3 images; this is only the hard ceiling on
     # how many may be published.  `--max-images` overrides it per run.
     max_images_per_product: int = 10
+    #: A page that carries its own curated gallery (the brand's ``.sd_imgs`` / swiper
+    #: slides, JSON-LD product payload, Shopify/Woo/Magento product payload) is read to
+    #: the end instead of stopping at ``target_images_per_product``.  Reason, from the
+    #: owner's review of 2026-10-10: Haier shows 6 views and Dawlance 11 slides whose
+    #: good photos come AFTER two manual sheets in DOM order, so "stop at 3 accepted"
+    #: published the manuals and never reached the product.  Bounded by
+    #: ``max_images_per_product``, and only pages offering at least
+    #: ``gallery_publishes_all_min`` curated images qualify, so a retailer page with one
+    #: stray ``<img>`` cannot bulk-publish.
+    #: S21 - reject caption sheets (in-box contents, manual and how-to pages).  Dawlance
+    #: publishes them inside the *product* gallery, and they are flat black-on-white like a
+    #: white appliance photo, so only the layout tells: many comparable parts, no leader.
+    #: Measured on the owner's run: the two live sheets form 9 parts with the largest at 12 %
+    #: of the ink, while the most a real photo forms is 3 parts with one at 94 %.
+    diagram_sheet_enabled: bool = True
+    diagram_min_parts: int = 4
+    diagram_max_dominant_share: float = 0.20
+    gallery_publishes_all: bool = True
+    gallery_publishes_all_min: int = 4
     allow_title_only_verification: bool = False
     unbalanced_bracket_keeps_text: bool = True
     use_bracketed_keys_as_fallback: bool = True
@@ -634,6 +653,12 @@ class PipelineConfig:
         return self.source_platforms.get(host, "none")
 
     def _validate_quotas(self) -> None:
+        if not 0.0 < self.diagram_max_dominant_share < 1.0:
+            raise ConfigError("diagram_max_dominant_share must be in (0, 1)")
+        if self.diagram_min_parts < 2:
+            raise ConfigError("diagram_min_parts must be >= 2")
+        if self.gallery_publishes_all_min < 1:
+            raise ConfigError("gallery_publishes_all_min must be >= 1")
         if self.min_required_images < 1:
             raise ConfigError("min_required_images must be >= 1")
         if self.max_images_per_product < self.min_required_images:

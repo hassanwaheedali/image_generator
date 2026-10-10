@@ -713,6 +713,9 @@ def run_quality_gates(
         return "S14", "monochrome logo/emblem on a grey ground - not a product photo"
     if is_marketing_layout(image, config):
         return "S20", marketing_layout_reason(image, config)
+    diagram = diagram_sheet_reason(image, config)
+    if diagram:
+        return "S21", diagram
     ring_clean = border_is_clean(
         image,
         ring_ratio=config.border_ring_ratio,
@@ -1143,4 +1146,48 @@ def marketing_layout_reason(image: Image.Image, config: PipelineConfig) -> str:
     return (
         f"line art of texture {texture:.1f} reaches every edge of a full-bleed frame "
         "(logo/emblem/badge sheet, not a product photo)"
+    )
+
+# --------------------------------------------------------------------------- #
+# S21 - caption-sheet diagrams (in-box contents, manual pages, how-to pages)
+# --------------------------------------------------------------------------- #
+def body_layout(image: Image.Image, *, min_part_share: float = 0.02) -> tuple[int, float]:
+    """Return ``(how many disconnected parts the ink forms, the largest one's share)``.
+
+    A photograph of a product is one body: even "unit + remote + copper roll" leaves one
+    part clearly dominant.  A contents sheet - "Indoor Unit / Outdoor Unit / AAA battery /
+    Remote Control / User Manual / Copper Piping" with a caption under each icon - is a
+    grid of comparable small parts with no leader at all.  Both are flat black on white,
+    so colour and sharpness say nothing; the *arrangement* does.
+
+    ``min_part_share`` ignores specks (dust, an antialiased letter) so a photo is not
+    turned into a "many-part" image by its own text.
+    """
+    try:
+        from scipy import ndimage
+    except Exception:                                       # pragma: no cover - optional dep
+        return 0, 1.0
+    rgb = np.asarray(image.convert("RGB"), dtype=float)
+    ink = np.abs(rgb - 255.0).max(axis=2) > _LAYOUT_INK_TOLERANCE
+    if not ink.any():
+        return 0, 1.0
+    labels, count = ndimage.label(ink, structure=np.ones((3, 3)))
+    if count <= 0:
+        return 0, 1.0
+    sizes = np.bincount(labels.ravel(), minlength=count + 1)[1:].astype(float)
+    total = float(sizes.sum())
+    parts = int((sizes / total >= min_part_share).sum())
+    return parts, float(sizes.max() / total)
+
+
+def diagram_sheet_reason(image: Image.Image, config: PipelineConfig) -> str:
+    """Say why this image is a caption-sheet diagram rather than a photo of the product."""
+    if not config.diagram_sheet_enabled:
+        return ""
+    parts, dominant = body_layout(image)
+    if parts < config.diagram_min_parts or dominant > config.diagram_max_dominant_share:
+        return ""
+    return (
+        f"layout of {parts} comparable parts with no dominant body (largest covers "
+        f"{dominant:.0%} of the artwork) - an in-box/manual caption sheet, not the product"
     )

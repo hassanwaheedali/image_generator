@@ -945,6 +945,32 @@ def _row_is_done(accepted: list[AcceptedImage], config: PipelineConfig) -> bool:
     return len(accepted) >= max(1, goal)
 
 
+def _page_publish_goal(candidates: list[ImageCandidate], config: PipelineConfig) -> int:
+    """How many images this one page may fill.
+
+    Normally the row target (3): the customer asks for three pictures per product, and
+    every extra download is run time.  A page carrying its **own curated gallery** is a
+    different thing, and the owner's two reviews of 2026-10-10 showed why the target must
+    not be a hard stop there: Haier publishes 6 views of a unit, and Dawlance publishes 11
+    slides whose good photos sit *after* the manual sheets in DOM order (their markup runs
+    ``_1, _10, _11, _2, _3, …``).  Stopping at the 3rd accept therefore published the
+    in-box/manual sheets and never reached the product, which is exactly the complaint -
+    "showing 6 images but script download only 1 … remove this hardcoded concept".
+
+    So for such a page the whole gallery is published, bounded by the row's hard cap
+    ``max_images_per_product``.  Other pages (a retailer's stray ``<img>`` set) keep the
+    target, and :func:`_row_is_done` still decides whether more *pages* are visited, so a
+    full official gallery does not invite a retailer top-up.
+    """
+    goal = min(config.target_images_per_product, config.max_images_per_product)
+    if not config.gallery_publishes_all:
+        return goal
+    curated = sum(1 for candidate in candidates if candidate.source in GALLERY_IMAGE_SOURCES)
+    if curated >= config.gallery_publishes_all_min:
+        return config.max_images_per_product
+    return goal
+
+
 def _page_download_allowance(
     candidates: list[ImageCandidate],
     config: PipelineConfig,
@@ -1349,7 +1375,9 @@ def _consume_candidates(
         # downloading 9-11 images per page when 3 publish was the single biggest
         # per-row time sink (owner run 2026-10-08: ~2 min per product).  Rows that
         # need more pictures raise ``target_images_per_product`` instead.
-        if _row_is_done(accepted, config):
+        if len(accepted) >= _page_publish_goal(candidates, config):
+            # Not `_row_is_done`: this page's own gallery is read to the end (see
+            # ``_page_publish_goal``), so a third manual sheet cannot spend the last slot.
             break
         verdict = _decide_candidate(candidate, keys, seen_keys)
         if (

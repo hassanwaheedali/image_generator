@@ -31,7 +31,9 @@ from compositing import (
 from config import PipelineConfig
 from image_quality import (
     ImageValidationError,
+    body_layout,
     border_is_clean,
+    diagram_sheet_reason,
     has_extreme_aspect,
     is_large_enough,
     is_marketing_layout,
@@ -1229,3 +1231,52 @@ def test_s20_does_not_speak_about_a_lifestyle_scene(config: PipelineConfig) -> N
 def test_s20_can_be_switched_off(config: PipelineConfig) -> None:
     relaxed = replace(config, marketing_layout_enabled=False)
     assert run_quality_gates(_white_ground_emblem(), relaxed)[0] != "S20"
+
+
+# --------------------------------------------------------------------------- #
+# S21 - in-box / manual caption sheets inside a product gallery
+# --------------------------------------------------------------------------- #
+def _caption_sheet(size: int = 1000) -> Image.Image:
+    """Dawlance's "In-box items" slide: six line icons, a caption under each, flat on white.
+
+    The owner's live complaint (2026-10-10): "It downloads the inbox items pictures and
+    remote manual please fix".  Structurally this is not a photograph of anything: it is a
+    grid of comparable parts with nothing leading.
+    """
+    image = Image.new("RGB", (size, size), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    cell = size // 3
+    for row in range(2):
+        for col in range(3):
+            x0 = col * cell + cell // 6
+            y0 = row * cell + cell // 5
+            draw.rectangle((x0, y0, x0 + cell // 2, y0 + cell // 3), outline=(20, 20, 20), width=6)
+            caption_y = y0 + cell // 3 + cell // 12
+            draw.rectangle((x0 - 10, caption_y, x0 + cell // 2 + 10, caption_y + 22), fill=(30, 30, 30))
+    return image
+
+
+def test_s21_rejects_a_caption_sheet_of_comparable_parts(config: PipelineConfig) -> None:
+    image = _caption_sheet()
+    parts, dominant = body_layout(image)
+    assert parts >= config.diagram_min_parts and dominant <= config.diagram_max_dominant_share
+    assert run_quality_gates(image, config)[0] == "S21"
+
+
+def test_s21_keeps_a_product_with_its_accessories(config: PipelineConfig) -> None:
+    """A unit photographed next to its remote is two parts with one clearly leading - a
+    real product shot, and the live corpus backs the cut-off (real photos: at most 3 parts,
+    the leader covering 94 % of the ink)."""
+    image = Image.new("RGB", (900, 900), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((60, 300, 700, 520), fill=(206, 208, 212))      # the unit
+    draw.rectangle((760, 340, 840, 520), fill=(120, 122, 126))     # the remote
+    parts, dominant = body_layout(image)
+    assert dominant > config.diagram_max_dominant_share
+    assert not diagram_sheet_reason(image, config)
+
+
+def test_s21_can_be_switched_off(config: PipelineConfig) -> None:
+    from dataclasses import replace
+
+    assert diagram_sheet_reason(_caption_sheet(), replace(config, diagram_sheet_enabled=False)) == ""

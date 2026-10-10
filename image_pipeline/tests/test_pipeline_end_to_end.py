@@ -1772,8 +1772,10 @@ def test_excluded_host_sheet_url_is_never_fetched(tmp_path: Path) -> None:
     assert result.status is Status.FAILED
 
 
-def test_page_downloads_stop_at_the_target_not_the_maximum(tmp_path: Path) -> None:
-    """A six-image gallery must cost three downloads (the target), not six."""
+def _six_image_gallery(
+    tmp_path: Path, **overrides: object
+) -> tuple[PipelineConfig, PipelineDeps, FakeImageFetcher]:
+    """A Haier-style page whose own gallery carries six images, three of them repeats."""
     alt1 = "https://cdn.haier.com/p/alt/hsu-12hfpaa-1b.jpg"
     alt2 = "https://cdn.haier.com/p/alt/hsu-12hfpaa-2b.jpg"
     alt3 = "https://cdn.haier.com/p/alt/hsu-12hfpaa-3b.jpg"
@@ -1785,14 +1787,67 @@ def test_page_downloads_stop_at_the_target_not_the_maximum(tmp_path: Path) -> No
     )
     images = gallery_images()
     images[alt1], images[alt2], images[alt3] = images[IMG1], images[IMG2], images[IMG3]
-    config = live_config(tmp_path)
+    config = live_config(tmp_path, **overrides)
     deps, _, image_fetcher, _ = build_deps(tmp_path, {HAIER_PAGE: page}, images)
+    return config, deps, image_fetcher
+
+
+def test_a_curated_gallery_is_read_to_the_end(tmp_path: Path) -> None:
+    """Owner decision, 2026-10-10: "download all product images, not 3 - remove this
+    hardcoded concept".  Their Dawlance row is the proof it was needed: the brand's own
+    gallery lists its slides as ``_1, _10, _11, _2, _3 …``, so stopping at the 3rd accept
+    published two manuals plus an in-box sheet and never reached the seven product photos.
+    A page carrying its own gallery is therefore scanned to the end - the published count
+    is still bounded by ``max_images_per_product``, and repeats still fold at S10.
+    """
+    config, deps, image_fetcher = _six_image_gallery(tmp_path)
     result, accepted = process_product(
         task(0, "Haier HSU-12HFPAA Inverter AC", (HAIER_PAGE,)), deps, config
     )
     assert result.status is Status.OK
-    assert len(accepted) == config.target_images_per_product
+    assert len(image_fetcher.requested) == 6              # every gallery image got a chance
+    assert len(accepted) == config.target_images_per_product  # 3 repeats folded at S10
+    assert config.gallery_publishes_all is True
+
+
+def test_the_whole_gallery_rule_can_be_switched_off(tmp_path: Path) -> None:
+    """The cost guarantee the old test protected is still a guarantee - it just belongs to
+    the flag now: with ``gallery_publishes_all=False`` a six-image gallery costs the target
+    (3 downloads), which is what the run budget was tuned on."""
+    config, deps, image_fetcher = _six_image_gallery(tmp_path, gallery_publishes_all=False)
+    result, accepted = process_product(
+        task(0, "Haier HSU-12HFPAA Inverter AC", (HAIER_PAGE,)), deps, config
+    )
+    assert result.status is Status.OK
     assert len(image_fetcher.requested) == config.target_images_per_product
+    assert len(accepted) == config.target_images_per_product
+
+
+def test_a_stray_image_page_keeps_the_row_target(tmp_path: Path) -> None:
+    """Only pages offering a real gallery get the wide reading; three gallery images is
+    below ``gallery_publishes_all_min`` and a retailer's ``<img>`` soup stays targeted."""
+    from pipeline import _page_publish_goal
+
+    config = live_config(tmp_path)
+    goal = _page_publish_goal
+    small = [
+        ImageCandidate(
+            url=f"u{i}", page_url=HAIER_PAGE, order=i, source="gallery_container",
+            matches_model=True,
+        )
+        for i in range(3)
+    ]
+    big = [
+        ImageCandidate(
+            url=f"u{i}", page_url=HAIER_PAGE, order=i, source="gallery_container",
+            matches_model=True,
+        )
+        for i in range(6)
+    ]
+    assert goal(small, config) == min(
+        config.target_images_per_product, config.max_images_per_product
+    )
+    assert goal(big, config) == config.max_images_per_product
 
 
 def test_color_gate_is_on_by_default(tmp_path: Path) -> None:

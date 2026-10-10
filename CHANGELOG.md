@@ -8,6 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **A brand's own gallery is no longer truncated at 3 images** (`pipeline._page_publish_goal`,
+  owner: "download all product only images … remove this hardcoded concept").  The candidate
+  loop broke on `_row_is_done`, i.e. at `target_images_per_product` (3) - which was fine until
+  a page's gallery turned out to be *ordered by junk*: Dawlance's own markup lists its slides as
+  `_1, _10, _11, _2, _3, …`, so the row filled its 3 slots with an in-box sheet and two manual
+  pages and never reached the seven real photos behind them (`_3` to `_9`).  Same shape as the
+  Haier row of the same day: 6 views on the page, 1 published.  A page offering at least
+  `gallery_publishes_all_min` (4) curated gallery images is now read to the end, bounded by the
+  row's hard cap `max_images_per_product` (10); retailer pages with stray `<img>`s keep the
+  target, and `_row_is_done` still decides whether *more pages* are visited, so a full official
+  gallery is never topped up with marketplace junk.  Measured end to end: the same fixture that
+  the old test pinned at "3 downloads for a six-image gallery" now requests all 6 and publishes 3
+  (the repeats still fold at S10).  Rollback: `gallery_publishes_all=False` restores the old
+  cost guarantee, which the renamed test now asserts.
+- **S21 - in-box and manual caption sheets are rejected on layout**
+  (`image_quality.body_layout`).  The owner's Dawlance review: "It downloads the inbox items
+  pictures and remote manual please fix".  Those sheets are flat black-on-white line art, so
+  colour, sharpness and the border ring all look like a white appliance photo, and only some of
+  them are full-bleed enough for S20.  What does identify them is *arrangement*: a photograph has
+  one dominant body, a caption sheet is a grid of comparable parts.  Measured on the owner's 72
+  published files - the two live sheets form **9 parts with the largest covering 12 %** of the
+  ink (saturation 0.0), while the most a real photo forms is 3 parts with its leader at 94 % -
+  so `diagram_min_parts=4` with `diagram_max_dominant_share=0.20` sits in the gap and rejects
+  exactly those 2 files of 72.  Rollback: `diagram_sheet_enabled=False`.
 - **Haier's crisp gallery file was being ignored, and the run published a blur instead**
   (`gallery_extractors/_ATTR_PRIORITY`). Haier's markup is
   `<img src="…_60.png" data-imgurl="…_1200.png">`: the thumbnail sits in `src` and the page

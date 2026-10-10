@@ -262,3 +262,33 @@ replicated from the owner's own pasted `.sd_imgs` markup and run through the rea
 * Deliberately NOT changed: the default target stays 3, because every extra slot is also an extra
   slot a retailer's junk can fill, and downloads per row drive the run's wall time.
 
+## 8. "download all images, not 3" + the manual sheets (owner, 2026-10-10, night)
+
+Their log lines told the whole story in one place.  For `Inspire Pro T3 Inverter 1 Ton`:
+`_1` was rejected by S20 (in-box sheet), while `_10`, `_11` and `_2` were **accepted** - two
+manual pages and one contents sheet - and the row then stopped, because the loop broke at the
+3-image target.  The gallery's own DOM order is the reason those three came first: Dawlance
+lists its slides `1, 10, 11, 2, 3, 4, … 11`, so the good product photos (`_3`-`_9`) sat behind
+the junk and were never downloaded.
+
+1. **Cap removed for curated galleries** (`_page_publish_goal`): a page offering >= 4 curated
+   gallery images is published up to `max_images_per_product` (10) instead of the row target.
+   The target still governs whether *other pages* are visited, so the official gallery cannot be
+   topped up with retailer images.  Flag: `gallery_publishes_all` (True).
+2. **S21 added** so "publish all" does not mean "publish all the junk": caption sheets are
+   identified by arrangement (many comparable parts, no dominant body), which is the one thing a
+   white-appliance photograph does not have.  On their 72 published files it rejects exactly the
+   2 in-box sheets.  Flag: `diagram_sheet_enabled`.
+3. Where a rejection is visible, since the owner asked: `output/decisions.jsonl` carries one line
+   per image with `rule_id` and the sentence (their own paste is that line), and
+   `run_report.csv` carries the per-row counters (`images rejected: S20 x1`).  Rejected files are
+   not written to disk, so a row's `raw/` folder only ever shows what was published.  A
+   `rejected/` debug folder is a separate decision.
+4. The `_1` request "download it and crop the bottom labels, publish only the product" was NOT
+   implemented, on purpose: for that file the artwork is six line-drawn icons, so cutting the
+   captions leaves a drawing of an indoor unit on the product page.  The mechanism they described
+   does exist and runs - `strip_promo_band` plus `isolate_main_product` is what produced
+   `degraded_isolation=True` on two of the accepted files.  If a specific Dawlance file is a real
+   photo with a label strip, I need the bytes to gate it correctly: `www.dawlance.com.pk` is
+   blocked from this sandbox (`SSL_ERROR_SYSCALL`), so I cannot fetch it myself.
+
