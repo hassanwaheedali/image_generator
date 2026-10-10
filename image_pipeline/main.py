@@ -291,6 +291,7 @@ def _check_local_images(
         official_gallery_pass,
         run_quality_gates,
         strip_promo_band,
+        to_rgb,
         trim_edge_seams,
         verify_image_color,
     )
@@ -304,7 +305,12 @@ def _check_local_images(
         path = Path(raw)
         try:
             with Image.open(path) as opened:
-                image = opened.convert("RGB")
+                # load() first: to_rgb hands back the same object for an RGB file, and the
+                # `with` closes the handle the lazy image still reads from.
+                opened.load()
+                # to_rgb, not convert("RGB"): a cut-out PNG must be judged on the white
+                # ground the customer sees, not on the black PIL fills transparency with.
+                image = to_rgb(opened)
         except (OSError, ValueError) as exc:
             print(f"{path.name}: cannot open ({exc})")
             exit_code = 2

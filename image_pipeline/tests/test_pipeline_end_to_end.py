@@ -7,6 +7,7 @@ import json
 import threading
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
 import pytest
 from conftest import (
@@ -2357,3 +2358,38 @@ def test_a_tinted_studio_wash_cannot_cost_the_row_the_brands_own_hero(tmp_path: 
         line["rule_id"] == "S16" and "saturated colour" in line["detail"]
         for line in retail_lines
     ), [line["rule_id"] for line in retail_lines]
+
+
+def test_a_cut_out_brand_png_publishes_with_a_white_ground(tmp_path: Path) -> None:
+    """The Orient rows kept dying on one thing: their PNGs are cut-outs, the plate colour is
+    CSS (``#e5e5e5``), and the decoder handed the gates the transparency as **black** - so
+    S16 called a Matt White unit "dark" and rejected the brand's own hero.  This drives the
+    real path and then opens the file the customer would get.
+    """
+    from PIL import Image as PILImage
+    from test_image_quality import _cut_out_unit_png
+
+    images = {IMG1: _cut_out_unit_png()}
+    config = live_config(tmp_path, min_short_side=120, min_long_side=200)
+    deps, _, _, _ = build_deps(tmp_path, {HAIER_PAGE: load_fixture("product_ok")}, images)
+    result, accepted = process_product(
+        task(0, "Haier HSU-12HFPAA White Inverter AC", (HAIER_PAGE,)), deps, config
+    )
+    assert accepted, "a cut-out PNG must not be lost to its own transparency"
+    lines = [
+        json.loads(line) for line in (tmp_path / "out" / "decisions.jsonl").read_text().splitlines()
+    ]
+    assert not [line for line in lines if line["rule_id"].startswith("S16")], lines
+
+    saved = sorted((config.output_dir / "images" / safe_slug(result.title) / "raw").glob("*.jpg"))
+    assert saved, result.title
+    with PILImage.open(saved[0]) as published:
+        spots = (
+            (3, 3),
+            (published.size[0] - 4, 3),
+            (3, published.size[1] - 4),
+            (published.size[0] - 4, published.size[1] - 4),
+        )
+        corners = [cast("tuple[int, int, int]", published.convert("RGB").getpixel(xy)) for xy in spots]
+    assert all(sum(px) > 3 * 240 for px in corners), corners
+    assert result.status in (Status.OK, Status.PARTIAL)

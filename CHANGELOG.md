@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **A cut-out PNG/WEBP is no longer judged against a black ground** (`validate_image_bytes` now flattens
+  through `to_rgb`, and the eight pixel readers in `image_quality` that called `image.convert("RGB")` use
+  that same helper).  Orient's assets are cut-outs and their plate colour (``#e5e5e5``) lives in the page's
+  CSS, so PIL's transparency-to-black fill invented a ground the brand never published: a white
+  "Platinium Matt White" unit measured `centre mean 0.42` and S16 rejected it as
+  "product area is dark - conflicts with target 'white'".  One hole, four kinds of damage, all measured on a
+  faithful replica of their file (2000x1873 cut-out webp): S16 rejected (0.54 -> 0.98 after), S7's ring test
+  rejected ("border ring is not a clean background"), `strip_promo_band` **invented a 489 px crop off the
+  bottom of a picture that has no band**, and S14/S20/S21 - which require a white ground before they will
+  say anything - went silent, i.e. marketing artwork on a cut-out could not be seen.  Fixing it at the
+  decode is what the other eleven call sites (`compositing`, `dedup`) already did; no threshold moved, so
+  every correct colour reject stays, and no new knob was added because "judge the ground PIL invented" is
+  not a state worth preserving.  Proof: 3 unit tests + an end-to-end row that opens the saved JPG and
+  checks its corners are light; their 72 published files are alpha-free RGB and re-measure identical
+  (111 publish, S20 28, S21 4, 0 cuts) - `docs/riper/option1-fix-plan.md` section 12.
 - **S16 no longer mistakes a studio wash for a coloured product, and does not judge brand pages on it at
   all.**  The owner's Orient `Frost 18W Classic White` row of 2026-10-10 *found* the brand's own hero and
   then threw it away: `S16 product area is a saturated colour (60% chromatic) - conflicts with target

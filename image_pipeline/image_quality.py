@@ -112,7 +112,11 @@ def validate_image_bytes(
                             f"(bpp={bpp:.4f} < {min_lossy_bytes_per_pixel:.4f})"
                         )
             probe.load()
-            image = ImageOps.exif_transpose(probe)
+            # Flattened here, once, because `RGBA.convert("RGB")` composites transparency onto
+            # BLACK and every studio gate then reads the page's CSS plate as a dark product body.
+            # Brand cut-outs (Orient, Haier, Dawlance PNGs) were judged against the wrong ground -
+            # see to_rgb's note.
+            image = to_rgb(ImageOps.exif_transpose(probe))
             if (
                 lossy_detail
                 and blur_sharpness_floor > 0.0
@@ -218,7 +222,15 @@ def probe_verdict(
 
 
 def to_rgb(image: Image.Image) -> Image.Image:
-    """Flatten onto white and return an RGB image."""
+    """Flatten onto white and return an RGB image.
+
+    The only correct way to drop a mode for the studio gates.  ``RGBA.convert("RGB")``
+    composites transparency onto **black**, and a brand cut-out PNG (Orient's
+    ``15-ton-platinium-matt-white-dc-inverter-230fb832.png`` of 2026-10-10, whose plate colour
+    ``#e5e5e5`` lives in the page's CSS) then measures as "product area is dark (mean 0.33) -
+    conflicts with target 'white'": S16 rejected the right picture, and the same mistake fed
+    black edges into S14/S20/S21, the promo-band trim and the marketing-panel cut.
+    """
     if image.mode == "RGB":
         return image
     if image.mode in ("RGBA", "LA", "P"):
@@ -347,7 +359,7 @@ def is_monochrome_emblem(image: Image.Image, config: PipelineConfig) -> bool:
     """
     if not config.logo_gate_enabled:
         return False
-    thumb = image.convert("RGB").resize((128, 128), Image.Resampling.BOX)
+    thumb = to_rgb(image).resize((128, 128), Image.Resampling.BOX)
     arr = np.asarray(thumb, dtype=np.float32) / 255.0
     maximum = arr.max(axis=-1)
     delta = maximum - arr.min(axis=-1)
@@ -533,7 +545,7 @@ def strip_promo_band(
     width, height = image.size
     if height < 4 * config.promo_band_min_height_px:
         return image, None
-    array = np.asarray(image.convert("RGB"), dtype=np.uint8)
+    array = np.asarray(to_rgb(image), dtype=np.uint8)
     found = _scan_promo_band(array, config)
     if found is None:
         return image, None
@@ -610,7 +622,7 @@ def trim_edge_seams(
 
     for _ in range(config.seam_max_passes):
         width, height = current.size
-        array = np.asarray(current.convert("RGB"), dtype=np.uint8)
+        array = np.asarray(to_rgb(current), dtype=np.uint8)
         non_white = array.min(axis=2) < config.promo_band_white_level
         found = _scan_seam(non_white, config, "vertical") or _scan_seam(
             non_white, config, "horizontal"
@@ -771,7 +783,7 @@ class ForegroundColorProfile:
 def extract_foreground_color_profile(image: Image.Image) -> ForegroundColorProfile:
     """Sample foreground chromaticity in < 2ms using a 96x96 downsample and vectorized HSV."""
     thumb = image.resize((96, 96), Image.Resampling.BOX)
-    arr = np.asarray(thumb.convert("RGB"), dtype=np.float32) / 255.0
+    arr = np.asarray(to_rgb(thumb), dtype=np.float32) / 255.0
 
     max_c = arr.max(axis=-1)
     min_c = arr.min(axis=-1)
@@ -987,7 +999,7 @@ def verify_image_color(
     # row).  A small accent (blue control panel on a white dispenser) covers
     # too little of the centre to fire either rule.
     if target_family in ("black", "white", "grey"):
-        thumb = image.convert("RGB").resize((64, 64), Image.Resampling.BOX)
+        thumb = to_rgb(image).resize((64, 64), Image.Resampling.BOX)
         arr = np.asarray(thumb, dtype=np.float32) / 255.0
         central = arr[7:57, 7:57]
         if central.size == 0:
@@ -1123,7 +1135,7 @@ def layout_metrics(image: Image.Image) -> tuple[float, float, float]:
       emblem sheet is dense line art (37-55); an AC wearing a strip of feature badges
       sits at 23-26.
     """
-    rgb = np.asarray(image.convert("RGB"), dtype=float)
+    rgb = np.asarray(to_rgb(image), dtype=float)
     grey = np.asarray(image.convert("L").resize((64, 64)), dtype=float)
     ink = np.abs(rgb - 255.0).max(axis=2) > _LAYOUT_INK_TOLERANCE
     rows = np.flatnonzero(ink.any(axis=1))
@@ -1174,7 +1186,7 @@ def is_marketing_layout(
         # posters back in, since their wash is the same light grey.  The line-art branch and
         # S21 stay in force here: they describe the product area itself, not the panel.
         return texture >= config.marketing_max_texture
-    rgb = np.asarray(image.convert("RGB").resize((128, 128), Image.Resampling.BOX), dtype=float)
+    rgb = np.asarray(to_rgb(image).resize((128, 128), Image.Resampling.BOX), dtype=float)
     corner = max(
         float(rgb[:16, :16].max(axis=2).mean()),
         float(rgb[:16, -16:].max(axis=2).mean()),
@@ -1221,7 +1233,7 @@ def body_layout(image: Image.Image, *, min_part_share: float = 0.02) -> tuple[in
         from scipy import ndimage
     except Exception:                                       # pragma: no cover - optional dep
         return 0, 1.0
-    rgb = np.asarray(image.convert("RGB"), dtype=float)
+    rgb = np.asarray(to_rgb(image), dtype=float)
     ink = np.abs(rgb - 255.0).max(axis=2) > _LAYOUT_INK_TOLERANCE
     if not ink.any():
         return 0, 1.0
