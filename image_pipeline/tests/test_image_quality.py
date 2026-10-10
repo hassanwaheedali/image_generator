@@ -31,7 +31,9 @@ from compositing import (
 from config import PipelineConfig
 from image_quality import (
     ImageValidationError,
+    body_layout,
     border_is_clean,
+    diagram_sheet_reason,
     has_extreme_aspect,
     is_large_enough,
     is_marketing_layout,
@@ -39,6 +41,7 @@ from image_quality import (
     is_qr_or_barcode,
     layout_metrics,
     marketing_layout_reason,
+    marketing_panel_split,
     neutral_corner_count,
     run_quality_gates,
     strip_promo_band,
@@ -1229,3 +1232,223 @@ def test_s20_does_not_speak_about_a_lifestyle_scene(config: PipelineConfig) -> N
 def test_s20_can_be_switched_off(config: PipelineConfig) -> None:
     relaxed = replace(config, marketing_layout_enabled=False)
     assert run_quality_gates(_white_ground_emblem(), relaxed)[0] != "S20"
+
+
+# --------------------------------------------------------------------------- #
+# S21 - in-box / manual caption sheets inside a product gallery
+# --------------------------------------------------------------------------- #
+def _caption_sheet(size: int = 1000) -> Image.Image:
+    """Dawlance's "In-box items" slide: six line icons, a caption under each, flat on white.
+
+    The owner's live complaint (2026-10-10): "It downloads the inbox items pictures and
+    remote manual please fix".  Structurally this is not a photograph of anything: it is a
+    grid of comparable parts with nothing leading.
+    """
+    image = Image.new("RGB", (size, size), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    cell = size // 3
+    for row in range(2):
+        for col in range(3):
+            x0 = col * cell + cell // 6
+            y0 = row * cell + cell // 5
+            draw.rectangle((x0, y0, x0 + cell // 2, y0 + cell // 3), outline=(20, 20, 20), width=6)
+            caption_y = y0 + cell // 3 + cell // 12
+            draw.rectangle((x0 - 10, caption_y, x0 + cell // 2 + 10, caption_y + 22), fill=(30, 30, 30))
+    return image
+
+
+def test_s21_rejects_a_caption_sheet_of_comparable_parts(config: PipelineConfig) -> None:
+    image = _caption_sheet()
+    parts, dominant = body_layout(image)
+    assert parts >= config.diagram_min_parts and dominant <= config.diagram_max_dominant_share
+    assert run_quality_gates(image, config)[0] == "S21"
+
+
+def test_s21_keeps_a_product_with_its_accessories(config: PipelineConfig) -> None:
+    """A unit photographed next to its remote is two parts with one clearly leading - a
+    real product shot, and the live corpus backs the cut-off (real photos: at most 3 parts,
+    the leader covering 94 % of the ink)."""
+    image = Image.new("RGB", (900, 900), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((60, 300, 700, 520), fill=(206, 208, 212))      # the unit
+    draw.rectangle((760, 340, 840, 520), fill=(120, 122, 126))     # the remote
+    parts, dominant = body_layout(image)
+    assert dominant > config.diagram_max_dominant_share
+    assert not diagram_sheet_reason(image, config)
+
+
+def test_s21_can_be_switched_off(config: PipelineConfig) -> None:
+    from dataclasses import replace
+
+    assert diagram_sheet_reason(_caption_sheet(), replace(config, diagram_sheet_enabled=False)) == ""
+
+
+# --------------------------------------------------------------------------- #
+# S7.panel - a pasted marketing panel is cut, a dark product is not
+# --------------------------------------------------------------------------- #
+def _unit_with_badge_panel(size: int = 600) -> Image.Image:
+    """The owner's Dawlance file of 2026-10-10, drawn as a fixture.
+
+    A studio shot of the indoor unit on a light grey plate, with a **flat black panel**
+    glued underneath it carrying feature badges, a capacity pill and a warranty block.
+    The panel is pasted artwork: dead flat, full width, and its top edge is one hard
+    straight line - which is what the split keys on.
+    """
+    image = Image.new("RGB", (size, size * 3 // 5), (246, 247, 249))
+    draw = ImageDraw.Draw(image)
+    w, h = image.size
+    band = int(h * 0.55)
+    draw.rounded_rectangle(
+        (w // 16, h // 20, 15 * w // 16, int(h * 0.50)), radius=12, fill=(232, 233, 236)
+    )
+    draw.rectangle((w // 16, int(h * 0.45), 15 * w // 16, int(h * 0.50)), fill=(58, 60, 64))
+    draw.rectangle((0, band, w, h), fill=(8, 9, 12))
+    for i in range(4):
+        cx = w // 8 + i * w // 6
+        draw.ellipse((cx - w // 20, band + h // 8, cx + w // 20, band + h // 3), fill=(28, 60, 150))
+        draw.rectangle((cx - w // 20, band + h // 3, cx + w // 20, band + h // 3 + 8), fill=(238, 240, 244))
+    draw.rounded_rectangle((w // 2 - w // 10, band + h // 20, w // 2 + w // 10, band + h // 8),
+                           radius=8, fill=(40, 70, 170))
+    return image
+
+
+def _dark_product_on_dark_ground(size: int = 600) -> Image.Image:
+    """A black appliance on a grey studio ground - the shape a naive "cut the dark bottom"
+    rule destroys, and the reason the split demands a flat panel and a hard edge."""
+    image = Image.new("RGB", (size, size), (198, 200, 204))
+    draw = ImageDraw.Draw(image)
+    for y in range(size):                       # a real gradient, not a pasted block
+        shade = 198 - int(120 * (y / size))
+        draw.line((0, y, size, y), fill=(shade, shade, shade + 4))
+    draw.rectangle((size // 6, size // 4, 5 * size // 6, 13 * size // 16), fill=(24, 25, 28))
+    draw.rectangle((size // 6, size // 3, 5 * size // 6, size // 3 + 10), fill=(150, 152, 158))
+    return image
+
+
+def test_marketing_panel_split_cuts_the_pasted_panel(config: PipelineConfig) -> None:
+    image = _unit_with_badge_panel()
+    crop, panel = marketing_panel_split(image, config)
+    assert panel is not None
+    side, pixels = panel
+    assert side == "bottom" and pixels > 0
+    assert crop.size == (image.size[0], image.size[1] - pixels)
+    assert crop.size[1] > config.min_short_side          # the product area is still a photo
+
+
+def test_the_cut_product_passes_the_gates(config: PipelineConfig) -> None:
+    """"only products gets at end": the panel is gone and the unit is accepted."""
+    image = _unit_with_badge_panel()
+    assert run_quality_gates(image, config)[0] == "S20"  # as published before tonight
+    crop, panel = marketing_panel_split(image, config)
+    assert panel is not None
+    assert run_quality_gates(crop, config, panel_cut=panel) == ("ok", "")
+    # without the detector's verdict the same crop is still read as artwork
+    assert run_quality_gates(crop, config)[0] == "S20"
+
+
+def test_marketing_panel_split_leaves_a_dark_product_alone(config: PipelineConfig) -> None:
+    assert marketing_panel_split(_dark_product_on_dark_ground(), config)[1] is None
+
+
+def test_the_wash_exemption_is_only_reachable_through_a_real_cut(config: PipelineConfig) -> None:
+    """The exemption must not become a way back for an ad render: a full-bleed light wash is
+    still rejected whenever nothing was cut, and the poster shape is never cut."""
+    image = _full_bleed_poster()
+    assert marketing_panel_split(image, config)[1] is None
+    assert run_quality_gates(image, config)[0] == "S20"
+    assert run_quality_gates(image, config, panel_cut=marketing_panel_split(image, config)[1])[0] == "S20"
+
+
+def test_marketing_panel_split_can_be_switched_off(config: PipelineConfig) -> None:
+    off = replace(config, marketing_panel_split_enabled=False)
+    assert marketing_panel_split(_unit_with_badge_panel(), off)[1] is None
+
+
+# --------------------------------------------------------------------------- #
+# S16 - a studio wash is not a colour, and a brand page is never judged on one
+# --------------------------------------------------------------------------- #
+
+
+def _unit_on_a_tinted_plate(plate: tuple[int, int, int], size: int = 700) -> Image.Image:
+    """The owner's Orient Frost hero of 2026-10-10, drawn as a fixture: a white indoor unit
+    centred on a coloured studio plate that stops short of the corners, so S7 and S20 stay
+    quiet and the only voice left in the run is the colour gate.  With a pale plate the old
+    measure reads 0.55 "chromatic" and the new one 0.00; with a strongly tinted plate both
+    read 0.55, which is what the brand-page exemption then has to say something about.
+    """
+    image = Image.new("RGB", (size, size), (252, 252, 252))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle(
+        (size // 10, 3 * size // 10, 9 * size // 10, 4 * size // 5), radius=24, fill=plate
+    )
+    draw.rounded_rectangle(
+        (size // 4, size // 2 - 34, 3 * size // 4, size // 2 + 44), radius=14, fill=(250, 251, 253)
+    )
+    draw.rectangle(
+        (size // 4 + 16, size // 2 - 12, 3 * size // 4 - 16, size // 2 + 6), fill=(74, 80, 92)
+    )
+    return image
+
+
+def _chroma_spread_share(image: Image.Image) -> float:
+    """The pre-fix S16 measure: share of the product area with channel spread > 0.10."""
+    arr = np.asarray(
+        image.convert("RGB").resize((64, 64), Image.Resampling.BOX), dtype=np.float32
+    ) / 255.0
+    centre = arr[7:57, 7:57]
+    high = centre.max(axis=-1)
+    delta = high - centre.min(axis=-1)
+    product = ~((high > 0.90) & (delta < 0.08))
+    return float(np.mean((delta > 0.10) & product))
+
+
+def test_s16_does_not_call_a_cool_studio_plate_a_saturated_product() -> None:
+    """The hole that ate the Orient row: a light blue-grey plate around a white unit measured
+    as "saturated colour", so the brand's own hero was rejected for contradicting "white".
+    A wash is bright and weakly saturated; a colour is neither."""
+    from image_quality import verify_image_color
+
+    image = _unit_on_a_tinted_plate((201, 217, 242))
+    assert _chroma_spread_share(image) >= 0.45  # the old measure condemns this exact file
+    ok, reason = verify_image_color(image, "white")
+    assert ok, reason
+    assert reason == ""
+
+
+def test_s16_still_calls_a_golden_body_a_conflict_with_a_white_row() -> None:
+    """The bar had to stay low (0.22): a golden body sits at saturation 0.24, and a 0.30 bar
+    re-opened the gold-on-white hole this gate exists for."""
+    from image_quality import verify_image_color
+
+    ok, reason = verify_image_color(_create_synthetic_appliance((210, 195, 160)), "white")
+    assert not ok
+    assert "saturated colour" in reason
+
+
+def test_s16_wash_conflict_is_logged_but_not_enforced_on_a_brand_page() -> None:
+    """Owner instruction of 2026-10-10: "don't force this in brand official, only in retailer -
+    but this safeguard should work correctly".  So the retailer bar keeps the reject, the brand
+    bar records the measurement as a keep, and the flag rolls the whole thing back."""
+    from image_quality import verify_image_color
+
+    image = _unit_on_a_tinted_plate((150, 190, 240))  # strongly tinted: the new metric fires too
+    assert not verify_image_color(image, "white")[0]
+    ok, reason = verify_image_color(image, "white", official=True)
+    assert ok
+    assert "not enforced" in reason
+    strict = verify_image_color(image, "white", official=True, exempt_chroma_on_official=False)
+    assert not strict[0]
+
+
+def test_s16_wrong_colour_sibling_is_still_rejected_on_a_brand_page() -> None:
+    """The exemption is one branch, not a switch-off.  A near-black body on a white row - the
+    official-Haier-CDN catch of 2026-10-09 - is an identity signal and still rejects, on the
+    brand's own page, with the brand's own URL."""
+    from image_quality import verify_image_color
+
+    image = Image.new("RGB", (700, 700), (250, 250, 250))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((120, 220, 580, 520), radius=18, fill=(22, 24, 28))
+    ok, reason = verify_image_color(image, "white", official=True)
+    assert not ok
+    assert "dark body" in reason

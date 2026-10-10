@@ -191,6 +191,45 @@ class PipelineConfig:
     # *target* still stops the search after 3 images; this is only the hard ceiling on
     # how many may be published.  `--max-images` overrides it per run.
     max_images_per_product: int = 10
+    #: A page that carries its own curated gallery (the brand's ``.sd_imgs`` / swiper
+    #: slides, JSON-LD product payload, Shopify/Woo/Magento product payload) is read to
+    #: the end instead of stopping at ``target_images_per_product``.  Reason, from the
+    #: owner's review of 2026-10-10: Haier shows 6 views and Dawlance 11 slides whose
+    #: good photos come AFTER two manual sheets in DOM order, so "stop at 3 accepted"
+    #: published the manuals and never reached the product.  Bounded by
+    #: ``max_images_per_product``, and only pages offering at least
+    #: ``gallery_publishes_all_min`` curated images qualify, so a retailer page with one
+    #: stray ``<img>`` cannot bulk-publish.
+    #: S21 - reject caption sheets (in-box contents, manual and how-to pages).  Dawlance
+    #: publishes them inside the *product* gallery, and they are flat black-on-white like a
+    #: white appliance photo, so only the layout tells: many comparable parts, no leader.
+    #: Measured on the owner's run: the two live sheets form 9 parts with the largest at 12 %
+    #: of the ink, while the most a real photo forms is 3 parts with one at 94 %.
+    diagram_sheet_enabled: bool = True
+    diagram_min_parts: int = 4
+    diagram_max_dominant_share: float = 0.20
+    #: On an *official* product page, a full-bleed layout (S20) or a caption-sheet layout
+    #: (S21) is not fatal on its own: the pipeline isolates the product inside the artwork
+    #: and re-runs every gate on that crop, publishing the crop.  Owner rule of 2026-10-10:
+    #: "cut the bottom labels, advertisement marketing labels, and add only product".
+    #: S7.panel - cut a *pasted* marketing panel (badges, capacity pill, warranty block)
+    #: off the top or bottom of an image.  Only a dead-flat dark block with a hard straight
+    #: edge qualifies, so a dark product on a dark ground is left alone (measured on the
+    #: owner's run: 3 accepted photos are that shape and none of them qualifies).
+    marketing_panel_split_enabled: bool = True
+    panel_band_max_mean: float = 70.0
+    panel_side_min_mean: float = 170.0
+    panel_min_jump: float = 150.0
+    panel_max_row_std: float = 45.0
+    panel_min_ratio: float = 0.12
+    panel_max_ratio: float = 0.72
+    panel_edge_flat_min: float = 0.95
+    official_layout_rescue: bool = True
+    #: Write rejected pixels to ``<product>/rejected/<rule>-<hash>.jpg`` so a refusal can be
+    #: inspected instead of argued about.  Debugging aid; off by default.
+    keep_rejected_images: bool = False
+    gallery_publishes_all: bool = True
+    gallery_publishes_all_min: int = 4
     allow_title_only_verification: bool = False
     unbalanced_bracket_keeps_text: bool = True
     use_bracketed_keys_as_fallback: bool = True
@@ -461,13 +500,31 @@ class PipelineConfig:
     marketing_max_texture: float = 18.0
 
     # ----- visual color verification (S16) --------------------------------
-    #: Owner decision 2026-10-08: the pixel-colour gate is a *rare-condition* tool,
-    #: off by default.  It false-rejected a white Dawlance WD-1051 dispenser whose
-    #: blue accent panel read as hue 213 deg ("conflicts with target 'white'"), and
-    #: on LED TVs the screen shows arbitrary content, so a picture-based colour check
-    #: can never be trusted there.  Flip on manually for a run that really needs it
-    #: (e.g. a colourway-mixing brand page); display products stay exempt regardless.
+    #: Owner decision 2026-10-08: keep it narrow.  It false-rejected a white Dawlance
+    #: WD-1051 dispenser whose blue accent panel read as hue 213 deg ("conflicts with
+    #: target 'white'"), and on LED TVs the screen shows arbitrary content, so a
+    #: picture-based colour check can never be trusted there; display products stay exempt
+    #: regardless.  The switch has been on since the base commit (the comment used to claim
+    #: otherwise), which is why it also ate the owner's Orient Frost hero on 2026-10-10.
+    #: What S16 does now: on a *retailer* page it may reject a wrong colour, on the brand's
+    #: own page only the two identity-strength signals run (see
+    #: ``color_gate_official_chroma_exempt``), and the "is it a colour or is it a wash"
+    #: test is saturation-based instead of raw channel spread.
     color_gate_enabled: bool = True
+    #: Skip the chromatic-dominance branch on a brand-owned page.  The brand's hero *is*
+    #: the definitive picture of that variant, and a coloured studio plate around a white
+    #: unit is not a colour conflict; a dark body on a white row is, and that branch stays
+    #: in force on every page.  Set False to restore the pre-2026-10-10 behaviour.
+    color_gate_official_chroma_exempt: bool = True
+    #: A product-area pixel counts as "a colour" only above this HSV saturation *and* below
+    #: this value, because a studio wash is bright and low-saturation while a coloured body
+    #: is neither.  Measured on 64x64 centre crops, share of the product area: pale cool plate
+    #: #e9eefb 0.01, mid cool plate #c9d9f2 0.01 (the old channel-spread test said 0.45 -
+    #: that is the number that ate the owner's Orient hero), purple/red/blue/green bodies
+    #: 0.61-0.62, a **golden** body 0.61 (a 0.30 or 0.35 bar drops gold to 0.00 and re-opens
+    #: the gold-on-white hole the tests guard), white/black/silver bodies 0.00.
+    color_chroma_min_saturation: float = 0.22
+    color_chroma_max_value: float = 0.95
 
     # ----- last-resort salvage --------------------------------------------
     #: Owner decision 2026-10-08 ("jab kuch na bachey toh kam quality wali hi le lon"):
@@ -634,6 +691,12 @@ class PipelineConfig:
         return self.source_platforms.get(host, "none")
 
     def _validate_quotas(self) -> None:
+        if not 0.0 < self.diagram_max_dominant_share < 1.0:
+            raise ConfigError("diagram_max_dominant_share must be in (0, 1)")
+        if self.diagram_min_parts < 2:
+            raise ConfigError("diagram_min_parts must be >= 2")
+        if self.gallery_publishes_all_min < 1:
+            raise ConfigError("gallery_publishes_all_min must be >= 1")
         if self.min_required_images < 1:
             raise ConfigError("min_required_images must be >= 1")
         if self.max_images_per_product < self.min_required_images:

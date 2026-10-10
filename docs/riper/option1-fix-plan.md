@@ -262,3 +262,140 @@ replicated from the owner's own pasted `.sd_imgs` markup and run through the rea
 * Deliberately NOT changed: the default target stays 3, because every extra slot is also an extra
   slot a retailer's junk can fill, and downloads per row drive the run's wall time.
 
+## 8. "download all images, not 3" + the manual sheets (owner, 2026-10-10, night)
+
+Their log lines told the whole story in one place.  For `Inspire Pro T3 Inverter 1 Ton`:
+`_1` was rejected by S20 (in-box sheet), while `_10`, `_11` and `_2` were **accepted** - two
+manual pages and one contents sheet - and the row then stopped, because the loop broke at the
+3-image target.  The gallery's own DOM order is the reason those three came first: Dawlance
+lists its slides `1, 10, 11, 2, 3, 4, … 11`, so the good product photos (`_3`-`_9`) sat behind
+the junk and were never downloaded.
+
+1. **Cap removed for curated galleries** (`_page_publish_goal`): a page offering >= 4 curated
+   gallery images is published up to `max_images_per_product` (10) instead of the row target.
+   The target still governs whether *other pages* are visited, so the official gallery cannot be
+   topped up with retailer images.  Flag: `gallery_publishes_all` (True).
+2. **S21 added** so "publish all" does not mean "publish all the junk": caption sheets are
+   identified by arrangement (many comparable parts, no dominant body), which is the one thing a
+   white-appliance photograph does not have.  On their 72 published files it rejects exactly the
+   2 in-box sheets.  Flag: `diagram_sheet_enabled`.
+3. Where a rejection is visible, since the owner asked: `output/decisions.jsonl` carries one line
+   per image with `rule_id` and the sentence (their own paste is that line), and
+   `run_report.csv` carries the per-row counters (`images rejected: S20 x1`).  Rejected files are
+   not written to disk, so a row's `raw/` folder only ever shows what was published.  A
+   `rejected/` debug folder is a separate decision.
+4. The `_1` request "download it and crop the bottom labels, publish only the product" was NOT
+   implemented, on purpose: for that file the artwork is six line-drawn icons, so cutting the
+   captions leaves a drawing of an indoor unit on the product page.  The mechanism they described
+   does exist and runs - `strip_promo_band` plus `isolate_main_product` is what produced
+   `degraded_isolation=True` on two of the accepted files.  If a specific Dawlance file is a real
+   photo with a label strip, I need the bytes to gate it correctly: `www.dawlance.com.pk` is
+   blocked from this sandbox (`SSL_ERROR_SYSCALL`), so I cannot fetch it myself.
+
+## 9. The Dawlance badge-panel file: cut it, do not reject it (owner's screenshot, 2026-10-10 night)
+
+The file they sent is a studio shot of the unit with a **flat black panel** pasted under it
+(4 feature badges, a "1.5 Ton" pill, a 6/12-year warranty block).  S20 called the layout artwork -
+correctly - and the whole image was lost.  The instruction was the same one given for Orient's
+hero: cut the labels, keep the product.
+
+1. First idea, killed by measurement: "if the bottom band is dark, cut it".  Three of their own
+   accepted photos are dark products on dark grounds (Orient Titanium olive-black 78 % band,
+   EcoStar Duke 67 %/56 %), so that rule would truncate real photographs.
+2. What actually separates them is *flatness*, not darkness - a pasted panel has one hard straight
+   edge and uniform rows, a product has highlights.  Five conditions, all required: boundary jump
+   >= 150, band mean <= 70, band row-mean std <= 45, kept side mean >= 170, edge flat across >= 95 %
+   of the width.  Their panel measures 238 / 28.5 / 23.7 / 222 / 1.00; the three real photos
+   56-82 / 164-181 / 89-106 / 236-255 / 0.67-0.88.  Scan of all 72 published files: **0 cut**.
+3. The kept area is a *light grey plate*, so S20 still called it full-bleed ink (>6 from white
+   everywhere).  Raising that threshold globally would re-admit all four Orient posters (same
+   light wash) - so the exemption is bound to the cut itself: `panel_cut` is the detector's
+   `("bottom", 270)` verdict, the line-art branch and S21 stay in force, and the crop is then
+   judged as a product and passes.
+4. Also caught while doing this: `_layout_rescue_verdict` had a stale call signature after the
+   refactor (would have raised `TypeError` for any official gallery image hitting S20/S21).  It
+   is now covered by an end-to-end test, which fails without the fix.
+5. The rescue stays narrow for the same reason: judging the *padded canvas* rather than the tight
+   crop rescued 12 of their 16 junk files.  Measured first, so it is not in the tree; 0 rescues on
+   their corpus with the shipped rule.
+6. Not done, on purpose: the attachment did not reach this sandbox (`/home/user/uploads` does not
+   exist) and `www.dawlance.com.pk` is blocked at TLS, so the panel numbers were calibrated on a
+   faithful replica of their screenshot plus their own run's badge files.  If their real file's
+   boundary is soft (a gradient into the panel rather than one row), the flatness test will refuse
+   the cut and the row loses the image again - `--keep-rejected` will show exactly that in one run.
+
+
+## 10. "Is brand-official Orient working now?" - answered from their own log (2026-10-10, late night)
+
+The owner's Orient row is *Frost 18W Classic White* (`.../air-conditioners/15-ton-frost-classic-white-dc-inverter.png`,
+served with a `<picture><source type="image/webp" srcset="...png.webp">` in front of the `<img src>`).
+Their question was whether the fix means the official hero is now published.  I did not guess; I replayed
+their captured page and read their own `decisions.jsonl`.
+
+1. **The root cause of the missing image was the collector, not the pixel gates, and it is already closed.**
+   On their Orient page the hero sits in `div.pdp-hero__image > picture` - no anchor, so no S3.  The captured
+   page yields the hero as a `gallery_container` candidate with `dom_flags=[]`, `order=0`, and
+   `_decide_candidate` says GO ON.  Before `d082bce` the `pdp-hero` container was not in
+   `GALLERY_CONTAINER_SELECTORS`, so the official page produced only the 7 cross-sell `ac/ultron*` tiles
+   (correctly rejected as S3, they belong to other product pages) plus the `og-images` render - hence the
+   old row: `failed, 4 candidates, 1 published, 0 wanted`, `images rejected: S3 x7, S1 x1`.
+   Their run was cut from `31ae576`, which predates that fix: the numbers they saw cannot be used to judge
+   today's tree, and no new code was needed for the Orient half.
+2. **Two of my own hypotheses were tested and thrown out** (writing them down so no one re-chases them):
+   * *WEBP is refused somewhere* - no.  `validate_image_bytes` accepts PNG, WEBP and JPEG payloads alike, and
+     `has_image_extension("...png.webp")` is already True.  `url_rewrite_cross_extension_enabled` stays False:
+     the `<img src>` gives the lossless `.png` directly, so chasing the webp twin would only add risk.
+   * *The blur floor kills soft official renders* - no.  The floor on the download path is
+     `blur_sharpness_floor=salvage_min_sharpness=0.02` on a normalised scale; **0 of their 72 published files**
+     fall under it, and 0 fall under it after re-encoding to WEBP.
+3. **The one part I still cannot certify from this sandbox** is the pixels of that specific PNG, because
+   `www.orient.com.pk` is blocked at connect here.  The prediction is favourable and it is theirs, not mine:
+   the page's CSS paints the studio look (`.pdp-hero__image { background:#fafbfe; border:1px solid #e7eefc;
+   padding:40px }`), so the tint lives in CSS and not in the file - S20 reads pixels only, so a unit on a
+   white/transparent plate cannot trip the painted-artwork branch.  To keep me honest about it, `--check-image`
+   was added instead of a promise.
+4. **`python main.py --check-image FILE [FILE ...]`** runs the *pipeline's own* chain on a saved file - promo
+   band, edge seams, `marketing_panel_split`, `run_quality_gates` with the official rescues - and prints both
+   bars (brand page and retailer) plus the sizes the run would write.  No sheet, no assets, no API key, no
+   network.  Exit 0 publish / 1 a gate stops it / 2 unreadable.  Verified against their corpus: 72 files give
+   **56 PUBLISH on the official bar and 55 on the retailer bar** (1 extra S7 stop, the official studio-corner
+   rescue doing its job), S20 28 = 14+14, S21 4 = 2+2 - i.e. identical to the numbers in section 9.
+
+## 11. The Orient row's real killer: S16 called a studio wash a colour (owner's log line, 2026-10-10 late night)
+
+The owner's pasted `decisions.jsonl` line settled it - the hero was found and downloaded, then died here:
+
+    {"title":"Frost 18W Classic White | Orient Electronics Pakistan",
+     "url":".../15-ton-frost-classic-white-dc-inverter.png","decision":"reject","rule_id":"S16",
+     "detail":"product area is a saturated colour (60% chromatic) - conflicts with target 'white' (family white)"}
+
+Their instruction: "fix this ugly test and don't force this in brand official, only in retailer - but with working
+fix, this safeguard should work correctly, I strictly say, or remove it".  So it was fixed twice, not deleted:
+
+1. **The metric was measuring the wrong thing.** A pixel counted as "a colour" when its channel spread
+   exceeded 0.10 - which is true of a pale blue-grey studio plate (spread 0.16 at value 0.94) and is exactly
+   how a brand photographs a white unit.  Now a pixel is a colour only above saturation 0.22 *and* below value
+   0.95.  Measured on 64x64 centre crops (share of the product area): pale plate #e9eefb 0.01, mid cool plate
+   #c9d9f2 **0.45 -> 0.01** (that 0.45 is the trip line their hero fell over), purple/red/blue/green bodies
+   0.61-0.62 unchanged, **golden body 0.61**, white/black/silver bodies 0.00.  The bar is 0.22 and not 0.30+
+   because a golden body sits at saturation 0.24 - a higher bar re-opens the gold-on-white hole the existing
+   tests guard, which is how the first attempt failed here and was re-tuned by measurement.
+2. **The branch is scoped, per the owner's words.** On a brand-owned page the *chromatic-dominance* test no
+   longer rejects: the measurement is logged as `S16.official` and the picture is kept.  The two identity
+   signals stay in force on every page - bright-on-black and dark-body-on-white - so the official-Haier-CDN
+   dark-body catch of 2026-10-09 is untouched (unit test 4).  And the exemption cancels itself when the
+   brand's own file name names a different colourway ("...-gold-..." against a white row), because Orient-style
+   assets are per variant and a contradiction there is a real sibling mix-up.  Rollback:
+   `color_gate_official_chroma_exempt=False`.
+3. **Not applied to the salvage path on purpose.** `_salvage_row` still calls the gate with retailer
+   semantics; it inherits the metric fix but not the policy exemption, because that stage has no idea which
+   host an offer came from (threading it through `SalvageOffer` was not worth touching three working
+   functions for an edge case).  If it ever costs a row, `S16.salvage` in `decisions.jsonl` will say so.
+4. **Proof on the real code path** (`tests/test_pipeline_end_to_end.py::test_a_tinted_studio_wash_cannot_cost
+   _the_row_the_brands_own_hero`, with a fixture that measures 0.45 under the old rule): the same image, the
+   same model, two hosts - old behaviour **0 published / S16 reject on the brand page**, today **1 published
+   with an `S16.official` keep line**, while the retailer page still rejects with `S16`.  Their 72 published
+   files: the chromatic branch fires on **0 of 20** colour-worded rows either way, so nothing that used to
+   publish can now be lost to this gate.
+5. **`--check-image FILE --check-title "TITLE"`** now runs S16 too (per bar, with the file-name carve-out
+   mirrored), so "will my official file survive?" is one command on their own machine and not a promise from me.

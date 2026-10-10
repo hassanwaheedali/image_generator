@@ -57,6 +57,7 @@ from gallery_extractors import ExtractionContext, extract_candidates, shopify_js
 from image_quality import (
     ImageValidationError,
     dimensions_from_header,
+    marketing_panel_split,
     official_gallery_pass,
     probe_verdict,
     run_quality_gates,
@@ -107,7 +108,7 @@ from url_filters import (
     upscale_candidates,
     url_filename,
 )
-from variant_terms import identity_alpha_tail
+from variant_terms import colour_word_conflict, identity_alpha_tail
 
 LOG = logging.getLogger("pipeline")
 
@@ -169,6 +170,79 @@ GALLERY_IMAGE_SOURCES: frozenset[str] = CURATED_GALLERY_SOURCES - {"dom_audit"}
 # --------------------------------------------------------------------------- #
 def _image_dir(config: PipelineConfig, title: str, role: ImageRole) -> Path:
     return config.images_dir / safe_slug(title) / role.value
+
+
+def _layout_rescue_verdict(
+    image: Image.Image, config: PipelineConfig, rule_id: str, detail: str
+) -> tuple[bool, str]:
+    """Can this S20/S21 layout be published as the product *inside* it?
+
+    Returns ``(rescued, why)``.  The rescue is deliberately indirect: the pipeline does not
+    decide that a full-bleed layout is fine (it is not - on a retailer page it stays
+    rejected), it asks whether the picture contains one clean product body, isolates it, and
+    then lets **every gate re-judge that crop**.  An emblem or an in-box caption sheet answers
+    "no": isolation is degraded, or the crop is still full-bleed line art and trips S20/S21
+    again.  A photograph of the unit that merely wears a promo strip or a tinted marketing
+    panel answers "yes", and what gets published is the crop, not the panel - the owner's rule
+    of 2026-10-10: "cut the bottom labels, advertisement marketing labels, and add only product".
+
+    Two safeguards keep this from being a loophole: the trigger is limited to the painted-panel
+    branch (line art and caption sheets are refused outright, so the Haier emblem class can
+    never come back through here), and S20, S21, S14, S8, S6 and S9 all have to pass again on
+    the isolated body.  Only S7 - the border ring - is forgiven, because that ring is the
+    marketing panel compose paints over with studio white anyway.
+
+    Measured on the owner's 16 published junk files (2026-10-10 run): **all 16 stay rejected**,
+    because every one of them is line art, a caption sheet, or an ad whose isolated body is
+    still artwork.  A tinted hero card with a real photograph inside it is the case this exists
+    for, and it is rescued.
+
+    """
+    if not config.official_layout_rescue:
+        return False, ""
+    # Only the "painted artwork around the product" branch may be rescued.  S20 fires for two
+    # different things and they need opposite answers: a marketing *panel* with a real photo
+    # inside it (crop the panel, publish the unit) versus line art - an emblem, a badge sheet
+    # - where the artwork IS the whole picture and there is nothing to cut.  S21's caption
+    # sheets are in the second group by definition.
+    if rule_id != "S20" or not detail.startswith("painted artwork"):
+        return False, ""
+    isolated, degraded = isolate_main_product(image, config)
+    if degraded:
+        return False, ""
+    # The crop, not the padded canvas, is judged.  The canvas measurement is what taught
+    # this the hard way: `to_square_canvas` pads the body out to 1200px with 6px of white,
+    # which drops the ink span under S20's full-bleed threshold and rescued 12 of the owner's
+    # 16 junk files (every Haier emblem among them).  On the tight crop the content rules keep
+    # their teeth - line art stays line art, a caption sheet stays a caption sheet - and the
+    # only verdict allowed to be forgiven is S7, the border-ring test, because the ring there
+    # is the marketing panel that compose paints over with studio white anyway.
+    # No `panel_cut` here: nothing was cut in this path, so S20's painted-artwork branch stays
+    # in force - which is what keeps a full-bleed ad render from being rescued.
+    rule, _detail = run_quality_gates(isolated, config, official_gallery=True)
+    if rule not in ("ok", "S7"):
+        return False, ""
+    return True, (
+        f"official gallery: the {rule_id} layout is marketing artwork around the product, "
+        "so the isolated product was judged instead and it passes every gate"
+    )
+
+
+def _dump_rejected(
+    image: Image.Image, config: PipelineConfig, title: str, url: str, rule_id: str
+) -> None:
+    """Keep the bytes of a pixel-gate reject, named after the rule that killed it.
+
+    Owner request, 2026-10-10 - "if rejected, where can we find [it]": a candidate that a
+    pixel gate refuses leaves nothing on disk, so "the official product image was never
+    scraped" cannot be checked by eye and the argument turns into reasoning about code.
+    Written to ``output/images/<product>/rejected/<rule>-<hash>.jpg``.  Off by default:
+    this is a debugging aid, never delivery output.
+    """
+    folder = _image_dir(config, title, ImageRole.RAW).parent / "rejected"
+    folder.mkdir(parents=True, exist_ok=True)
+    name = f"{rule_id}-{dedup_key(url)[:10]}.jpg"
+    save_image_atomic(image, folder / name, jpeg_quality=config.jpeg_quality)
 
 
 def _save_local(image: Image.Image, config: PipelineConfig, title: str, role: ImageRole, name: str) -> Path:
@@ -945,6 +1019,32 @@ def _row_is_done(accepted: list[AcceptedImage], config: PipelineConfig) -> bool:
     return len(accepted) >= max(1, goal)
 
 
+def _page_publish_goal(candidates: list[ImageCandidate], config: PipelineConfig) -> int:
+    """How many images this one page may fill.
+
+    Normally the row target (3): the customer asks for three pictures per product, and
+    every extra download is run time.  A page carrying its **own curated gallery** is a
+    different thing, and the owner's two reviews of 2026-10-10 showed why the target must
+    not be a hard stop there: Haier publishes 6 views of a unit, and Dawlance publishes 11
+    slides whose good photos sit *after* the manual sheets in DOM order (their markup runs
+    ``_1, _10, _11, _2, _3, …``).  Stopping at the 3rd accept therefore published the
+    in-box/manual sheets and never reached the product, which is exactly the complaint -
+    "showing 6 images but script download only 1 … remove this hardcoded concept".
+
+    So for such a page the whole gallery is published, bounded by the row's hard cap
+    ``max_images_per_product``.  Other pages (a retailer's stray ``<img>`` set) keep the
+    target, and :func:`_row_is_done` still decides whether more *pages* are visited, so a
+    full official gallery does not invite a retailer top-up.
+    """
+    goal = min(config.target_images_per_product, config.max_images_per_product)
+    if not config.gallery_publishes_all:
+        return goal
+    curated = sum(1 for candidate in candidates if candidate.source in GALLERY_IMAGE_SOURCES)
+    if curated >= config.gallery_publishes_all_min:
+        return config.max_images_per_product
+    return goal
+
+
 def _page_download_allowance(
     candidates: list[ImageCandidate],
     config: PipelineConfig,
@@ -1349,7 +1449,9 @@ def _consume_candidates(
         # downloading 9-11 images per page when 3 publish was the single biggest
         # per-row time sink (owner run 2026-10-08: ~2 min per product).  Rows that
         # need more pictures raise ``target_images_per_product`` instead.
-        if _row_is_done(accepted, config):
+        if len(accepted) >= _page_publish_goal(candidates, config):
+            # Not `_row_is_done`: this page's own gallery is read to the end (see
+            # ``_page_publish_goal``), so a third manual sheet cannot spend the last slot.
             break
         verdict = _decide_candidate(candidate, keys, seen_keys)
         if (
@@ -1503,6 +1605,24 @@ def _consume_candidates(
                 rule_id="S7.seam",
                 detail=f"trimmed a {pixels}px {kind} layout seam before the S7 ring test",
             )
+        image, panel = marketing_panel_split(image, config)
+        if panel is not None:
+            # The owner's Dawlance file of 2026-10-10 - a studio shot of the unit with a pasted
+            # black badge/warranty panel below it - was rejected outright, and they asked for the
+            # opposite treatment: "it should download but on isolated it cuts bottom labels
+            # advertisement marketing labels and add only product".  Cutting happens here, before
+            # the gates, so the picture the gates judge (and the customer receives) is the product
+            # alone; S20/S21 then still run on it, so cutting a panel cannot smuggle in an ad.
+            side, pixels = panel
+            deps.decisions.keep(
+                title=task.title,
+                url=used_url,
+                rule_id="S7.panel",
+                detail=(
+                    f"cut a {pixels}px flat marketing panel off the {side} edge; the product "
+                    "area was kept and re-judged by every gate"
+                ),
+            )
 
         # Brand-owned pages get the calmer studio bar on every gallery source, not
         # just the curated ones (owner 2026-10-09: "picture verification should not
@@ -1510,7 +1630,9 @@ def _consume_candidates(
         # Kenwood studio shot died on the retail corner bar).  The acceptance still
         # demands neutral corners, and S1 already proved the model on the page.
         official_gallery = official_page
-        rule_id, detail = run_quality_gates(image, config, official_gallery=official_gallery)
+        rule_id, detail = run_quality_gates(
+            image, config, official_gallery=official_gallery, panel_cut=panel
+        )
         if rule_id == "S7" and official_gallery and official_gallery_pass(image, config):
             deps.decisions.keep(
                 title=task.title,
@@ -1522,11 +1644,20 @@ def _consume_candidates(
                 ),
             )
             rule_id = "ok"
+        if rule_id in ("S20", "S21") and official_gallery:
+            rescued, reason = _layout_rescue_verdict(image, config, rule_id, detail)
+            if rescued:
+                deps.decisions.keep(
+                    title=task.title, url=used_url, rule_id=f"{rule_id}.official", detail=reason
+                )
+                rule_id = "ok"
         if rule_id != "ok":
             rejections[rule_id] += 1
             deps.decisions.reject(
                 title=task.title, url=used_url, rule_id=rule_id, detail=detail
             )
+            if config.keep_rejected_images:
+                _dump_rejected(image, config, task.title, used_url, rule_id)
             continue
         if (
             config.variant_separation_enabled
@@ -1534,13 +1665,33 @@ def _consume_candidates(
             and keys.colour_word
             and not is_display_product(task.title)
         ):
-            color_ok, color_detail = verify_image_color(image, keys.colour_word)
+            # The brand-page exemption yields when the brand's *own file name* names a
+            # different colourway.  Orient-style assets are per variant
+            # ("...classic-white-dc-inverter.png"), so a contradiction there is a real
+            # sibling mix-up and S16 keeps its teeth even on the official page.
+            exempt_chroma = config.color_gate_official_chroma_exempt and not colour_word_conflict(
+                keys.colour_word, used_url.rsplit("/", 1)[-1]
+            )
+            color_ok, color_detail = verify_image_color(
+                image,
+                keys.colour_word,
+                official=official_gallery,
+                exempt_chroma_on_official=exempt_chroma,
+                min_saturation=config.color_chroma_min_saturation,
+                wash_max_value=config.color_chroma_max_value,
+            )
             if not color_ok:
                 rejections["S16"] += 1
                 deps.decisions.reject(
                     title=task.title, url=used_url, rule_id="S16", detail=color_detail
                 )
                 continue
+            if color_detail:
+                # Exempted, not silent: the owner reads this folder to find out why a
+                # picture was or was not used, so the measurement stays on the record.
+                deps.decisions.keep(
+                    title=task.title, url=used_url, rule_id="S16.official", detail=color_detail
+                )
         # One fingerprint per candidate, reused by the gate and by the bookkeeping after
         # compose - the same 32x32 resample of the same 1200px image, once instead of twice.
         fingerprint = compute_fingerprint(image)

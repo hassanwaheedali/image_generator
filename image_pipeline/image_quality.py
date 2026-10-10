@@ -687,12 +687,15 @@ def run_quality_gates(
     config: PipelineConfig,
     *,
     official_gallery: bool = False,
+    panel_cut: tuple[str, int] | None = None,
 ) -> tuple[str, str]:
     """Run the geometric gates in the required order; stop at the first failure.
 
     Order (spec 7.2): S13 (already done on the bytes) -> S8 -> S6 -> S9 -> S7.
     ``official_gallery`` relaxes **only** the S7 border-ring test, and only through
-    :func:`official_gallery_pass`; every other gate is unchanged.  Returns
+    :func:`official_gallery_pass`; every other gate is unchanged.  ``after_panel_cut`` skips
+    only S20's painted-artwork branch, for an image whose marketing panel this pipeline itself
+    just cut off (see :func:`is_marketing_layout`).  Returns
     ``("ok", "")`` or ``(rule_id, detail)``.
     """
     if not is_large_enough(
@@ -711,8 +714,11 @@ def run_quality_gates(
         return "S9", "QR/barcode detected"
     if is_monochrome_emblem(image, config):
         return "S14", "monochrome logo/emblem on a grey ground - not a product photo"
-    if is_marketing_layout(image, config):
+    if is_marketing_layout(image, config, panel_cut=panel_cut):
         return "S20", marketing_layout_reason(image, config)
+    diagram = diagram_sheet_reason(image, config)
+    if diagram:
+        return "S21", diagram
     ring_clean = border_is_clean(
         image,
         ring_ratio=config.border_ring_ratio,
@@ -938,11 +944,25 @@ def sharpness_score(image: Image.Image) -> float:
 def verify_image_color(
     image: Image.Image,
     target_color_word: str,
+    *,
+    official: bool = False,
+    exempt_chroma_on_official: bool = True,
+    min_saturation: float = 0.22,
+    wash_max_value: float = 0.95,
 ) -> tuple[bool, str]:
     """Safeguard S16: does the image's foreground chromaticity contradict the target colour?
 
     Fails open (returns True) when target_color_word is empty or not a known colour.
     Returns (False, reason) when a strong chromatic foreground contradicts the target.
+
+    ``official`` marks a page owned by the brand itself (``host_is_official``).  A brand's
+    own hero is the definitive picture of that exact variant, so on such a page S16 keeps
+    the two signals that actually catch a wrong-colour sibling - the brightness conflict
+    and the dark-body conflict, both measured on the product area - and gives up only the
+    third one, *chromatic dominance*, which cannot tell a coloured product from a coloured
+    studio wash.  ``exempt_chroma_on_official=False`` restores the old, stricter behaviour.
+    A non-empty detail paired with ``True`` means "would have been rejected, exempted
+    because this is the brand's page" - so the run can log it instead of going silent.
     """
     if not target_color_word or not target_color_word.strip():
         return True, ""
@@ -980,7 +1000,18 @@ def verify_image_color(
         product_frac = float(np.mean(product))
         product_mean = float(c_max[product].mean()) if product.any() else 1.0
         dark_frac = float(np.mean(c_max < 0.45))
-        chromatic_coverage = float(np.mean((c_delta > 0.10) & product))
+        # A colour, not a tint.  The old test was "channel spread > 0.10", which cannot
+        # separate a coloured product from a coloured studio background: the owner's Orient
+        # Frost hero of 2026-10-10 - a white unit on a cool plate - measured 60 %
+        # "chromatic" and the brand's own picture was thrown away.  Saturation (spread /
+        # value) plus a brightness cap is what separates them: a studio wash is bright and
+        # weakly saturated (0.01 of the product area on a #c9d9f2 plate, where the old test
+        # said 0.45), a coloured body is neither (0.61-0.62 for purple/red/blue/green/gold).
+        # The bar is 0.22 and not higher because a golden body sits at saturation 0.24 - a
+        # 0.30 bar re-opens the gold-on-white hole this gate was written for.
+        saturation = np.divide(c_delta, np.maximum(c_max, 1e-6))
+        chromatic = (saturation > min_saturation) & (c_max < wash_max_value)
+        chromatic_coverage = float(np.mean(chromatic & product))
         if target_family == "black" and central_mean > 0.75 and dark_frac < 0.08:
             # No dark body anywhere in the product area - a white/bright unit on a
             # black row.  The dark_frac guard keeps a *correct* small black unit
@@ -1006,11 +1037,22 @@ def verify_image_color(
                     f"conflicts with target '{target_color_word}' (family white)"
                 )
         if chromatic_coverage >= 0.45:
-            return False, (
-                f"product area is a saturated colour "
-                f"({chromatic_coverage:.0%} chromatic) - "
-                f"conflicts with target '{target_color_word}' (family {target_family})"
+            reason = (
+                f"product area is a saturated colour ({chromatic_coverage:.0%} of it at "
+                f"saturation > {min_saturation:.2f}) - conflicts with target "
+                f"'{target_color_word}' (family {target_family})"
             )
+            if official and exempt_chroma_on_official:
+                # Only this branch.  A dark body on a white row, or a bright body on a
+                # black row, is a wrong *product* and still rejects on a brand page too -
+                # that is how the Haier official-CDN dark-body catch of 2026-10-09 stays
+                # alive.  What a brand page is never judged on is wash dominance, because
+                # the tint lives in the brand's own studio setup, not in the variant.
+                return True, (
+                    f"{reason}; not enforced - this is the brand's own page, whose hero "
+                    "defines the variant's colour"
+                )
+            return False, reason
         return True, ""
 
     profile = extract_foreground_color_profile(image)
@@ -1095,7 +1137,12 @@ def layout_metrics(image: Image.Image) -> tuple[float, float, float]:
     return float(ink.mean()), span, texture
 
 
-def is_marketing_layout(image: Image.Image, config: PipelineConfig) -> bool:
+def is_marketing_layout(
+    image: Image.Image,
+    config: PipelineConfig,
+    *,
+    panel_cut: tuple[str, int] | None = None,
+) -> bool:
     """Safeguard **S20**: artwork that fills its canvas edge to edge is not a photo.
 
     This is the hole the owner caught twice (2026-10-10, Haier): "this link clearly
@@ -1117,6 +1164,16 @@ def is_marketing_layout(image: Image.Image, config: PipelineConfig) -> bool:
     ink_fraction, span, texture = layout_metrics(image)
     if span < _LAYOUT_FULL_BLEED_SPAN:
         return False
+    if panel_cut is not None and panel_cut[1] >= 8:
+        # The "painted artwork around the product" verdict was already acted on: the flat
+        # marketing panel has been cut off this exact image by ``marketing_panel_split``, so
+        # what is left is the studio area, and its near-white wash still measures as ink (the
+        # Dawlance file's remaining area reads 100 % faint-ink because Orient and Dawlance
+        # shoot on a light grey plate, not pure white).  Raising the tolerance globally is not
+        # the answer - measured on the owner's run, that would let all four Orient marketing
+        # posters back in, since their wash is the same light grey.  The line-art branch and
+        # S21 stay in force here: they describe the product area itself, not the panel.
+        return texture >= config.marketing_max_texture
     rgb = np.asarray(image.convert("RGB").resize((128, 128), Image.Resampling.BOX), dtype=float)
     corner = max(
         float(rgb[:16, :16].max(axis=2).mean()),
@@ -1144,3 +1201,126 @@ def marketing_layout_reason(image: Image.Image, config: PipelineConfig) -> str:
         f"line art of texture {texture:.1f} reaches every edge of a full-bleed frame "
         "(logo/emblem/badge sheet, not a product photo)"
     )
+
+# --------------------------------------------------------------------------- #
+# S21 - caption-sheet diagrams (in-box contents, manual pages, how-to pages)
+# --------------------------------------------------------------------------- #
+def body_layout(image: Image.Image, *, min_part_share: float = 0.02) -> tuple[int, float]:
+    """Return ``(how many disconnected parts the ink forms, the largest one's share)``.
+
+    A photograph of a product is one body: even "unit + remote + copper roll" leaves one
+    part clearly dominant.  A contents sheet - "Indoor Unit / Outdoor Unit / AAA battery /
+    Remote Control / User Manual / Copper Piping" with a caption under each icon - is a
+    grid of comparable small parts with no leader at all.  Both are flat black on white,
+    so colour and sharpness say nothing; the *arrangement* does.
+
+    ``min_part_share`` ignores specks (dust, an antialiased letter) so a photo is not
+    turned into a "many-part" image by its own text.
+    """
+    try:
+        from scipy import ndimage
+    except Exception:                                       # pragma: no cover - optional dep
+        return 0, 1.0
+    rgb = np.asarray(image.convert("RGB"), dtype=float)
+    ink = np.abs(rgb - 255.0).max(axis=2) > _LAYOUT_INK_TOLERANCE
+    if not ink.any():
+        return 0, 1.0
+    labels, count = ndimage.label(ink, structure=np.ones((3, 3)))
+    if count <= 0:
+        return 0, 1.0
+    sizes = np.bincount(labels.ravel(), minlength=count + 1)[1:].astype(float)
+    total = float(sizes.sum())
+    parts = int((sizes / total >= min_part_share).sum())
+    return parts, float(sizes.max() / total)
+
+
+def diagram_sheet_reason(image: Image.Image, config: PipelineConfig) -> str:
+    """Say why this image is a caption-sheet diagram rather than a photo of the product."""
+    if not config.diagram_sheet_enabled:
+        return ""
+    parts, dominant = body_layout(image)
+    if parts < config.diagram_min_parts or dominant > config.diagram_max_dominant_share:
+        return ""
+    return (
+        f"layout of {parts} comparable parts with no dominant body (largest covers "
+        f"{dominant:.0%} of the artwork) - an in-box/manual caption sheet, not the product"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# S7.panel - a pasted marketing panel below (or above) the product
+# --------------------------------------------------------------------------- #
+def marketing_panel_split(
+    image: Image.Image, config: PipelineConfig
+) -> tuple[Image.Image, tuple[str, int] | None]:
+    """Cut a flat marketing panel off the edge of an image, keeping the product.
+
+    The owner's Dawlance file of 2026-10-10 is the case: the top half is a normal studio
+    shot of the indoor unit, and the bottom half is a **pasted black panel** carrying feature
+    badges, a "1.5 Ton" pill and a warranty block.  Their instruction was explicit and it is
+    the same rule they gave for Orient's hero - "it should download but on isolated it cuts
+    bottom labels, advertisement marketing labels, and add only product".
+
+    ``strip_promo_band`` cannot see this: it caps a promo strip at ``promo_band_max_ratio`` and
+    demands a bright gap row on the inner side, while this panel covers ~45 % of the frame and
+    sits directly under the unit's dark lip.  Refusing to widen that rule was measured, not
+    assumed - a "cut any dark bottom band" rule truncates real photographs, because 3 of the
+    owner's own accepted files are exactly that shape (Orient Titanium olive-black, EcoStar
+    Duke x2).  What separates a *pasted panel* from a *dark product* is that a panel is dead
+    flat and its edge is a hard line across the whole width:
+
+    ==========================  ==========  ==============  ======  ==========
+                                band mean   band row std    jump    edge flatness
+    ==========================  ==========  ==============  ======  ==========
+    pasted black panel              28.5          23.7       238       1.00
+    Orient Titanium olive-black    178.7          91.2        56       0.88
+    EcoStar Duke (x2)          163.8 / 181.4   105.7 / 88.9   79 / 82  0.67 / 0.72
+    ==========================  ==========  ==============  ======  ==========
+
+    All five conditions have to hold, and a scan of the owner's 72 published files with these
+    thresholds finds **no other image to cut**.  Returns ``(image, None)`` when there is no
+    panel, else ``(cropped, (side, pixels))``.
+    """
+    if not config.marketing_panel_split_enabled:
+        return image, None
+    grey = np.asarray(image.convert("L"), dtype=float)
+    height, width = grey.shape[0], grey.shape[1]
+    if height < 64 or width < 64:
+        return image, None
+    row_mean = grey.mean(axis=1)
+    # The panel's border is the single hardest horizontal line in the picture: search for it
+    # rather than walking in from the edge, because a panel is black *with bright badges in it*,
+    # so its individual rows are not all dark.
+    lo = max(int(0.28 * height), 1)
+    hi = min(int(0.90 * height), height - 1)
+    if hi <= lo:
+        return image, None
+    jump, y = max(
+        (abs(float(row_mean[i] - row_mean[i - 1])), i) for i in range(lo, hi)
+    )
+    if jump < config.panel_min_jump:
+        return image, None
+    downward = float(row_mean[y]) < float(row_mean[y - 1])
+    band = grey[y:] if downward else grey[:y]
+    rest = row_mean[:y] if downward else row_mean[y + 1 :]
+    ratio = band.shape[0] / height
+    if not config.panel_min_ratio <= ratio <= config.panel_max_ratio:
+        return image, None
+    if float(band.mean()) > config.panel_band_max_mean:
+        return image, None      # a dark *product* is not a flat black panel
+    if float(band.mean(axis=1).std()) > config.panel_max_row_std:
+        return image, None      # highlights and shadows: a photograph, not pasted artwork
+    if rest.size == 0 or float(rest.mean()) < config.panel_side_min_mean:
+        return image, None      # what is kept must be a bright studio area
+    inner, outer = (y - 1, y) if downward else (y, y - 1)
+    flat = float(np.mean(np.abs(grey[inner] - grey[outer]) > 0.5 * jump))
+    if flat < config.panel_edge_flat_min:
+        return image, None      # the seam must run straight across the whole width
+    edge = y
+    cropped = image.crop((0, 0, width, edge)) if downward else image.crop(
+        (0, edge, width, height)
+    )
+    if cropped.size[1] == height:
+        return image, None
+    side = "bottom" if downward else "top"
+    return cropped, (side, int(band.shape[0]))

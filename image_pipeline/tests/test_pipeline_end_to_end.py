@@ -48,6 +48,8 @@ from pipeline import (
     BatchRunner,
     DryRunHost,
     PipelineDeps,
+    _dump_rejected,
+    _layout_rescue_verdict,
     _page_download_allowance,
     ensure_banner_url,
     finalize_and_upload,
@@ -1772,8 +1774,10 @@ def test_excluded_host_sheet_url_is_never_fetched(tmp_path: Path) -> None:
     assert result.status is Status.FAILED
 
 
-def test_page_downloads_stop_at_the_target_not_the_maximum(tmp_path: Path) -> None:
-    """A six-image gallery must cost three downloads (the target), not six."""
+def _six_image_gallery(
+    tmp_path: Path, **overrides: object
+) -> tuple[PipelineConfig, PipelineDeps, FakeImageFetcher]:
+    """A Haier-style page whose own gallery carries six images, three of them repeats."""
     alt1 = "https://cdn.haier.com/p/alt/hsu-12hfpaa-1b.jpg"
     alt2 = "https://cdn.haier.com/p/alt/hsu-12hfpaa-2b.jpg"
     alt3 = "https://cdn.haier.com/p/alt/hsu-12hfpaa-3b.jpg"
@@ -1785,14 +1789,67 @@ def test_page_downloads_stop_at_the_target_not_the_maximum(tmp_path: Path) -> No
     )
     images = gallery_images()
     images[alt1], images[alt2], images[alt3] = images[IMG1], images[IMG2], images[IMG3]
-    config = live_config(tmp_path)
+    config = live_config(tmp_path, **overrides)
     deps, _, image_fetcher, _ = build_deps(tmp_path, {HAIER_PAGE: page}, images)
+    return config, deps, image_fetcher
+
+
+def test_a_curated_gallery_is_read_to_the_end(tmp_path: Path) -> None:
+    """Owner decision, 2026-10-10: "download all product images, not 3 - remove this
+    hardcoded concept".  Their Dawlance row is the proof it was needed: the brand's own
+    gallery lists its slides as ``_1, _10, _11, _2, _3 …``, so stopping at the 3rd accept
+    published two manuals plus an in-box sheet and never reached the seven product photos.
+    A page carrying its own gallery is therefore scanned to the end - the published count
+    is still bounded by ``max_images_per_product``, and repeats still fold at S10.
+    """
+    config, deps, image_fetcher = _six_image_gallery(tmp_path)
     result, accepted = process_product(
         task(0, "Haier HSU-12HFPAA Inverter AC", (HAIER_PAGE,)), deps, config
     )
     assert result.status is Status.OK
-    assert len(accepted) == config.target_images_per_product
+    assert len(image_fetcher.requested) == 6              # every gallery image got a chance
+    assert len(accepted) == config.target_images_per_product  # 3 repeats folded at S10
+    assert config.gallery_publishes_all is True
+
+
+def test_the_whole_gallery_rule_can_be_switched_off(tmp_path: Path) -> None:
+    """The cost guarantee the old test protected is still a guarantee - it just belongs to
+    the flag now: with ``gallery_publishes_all=False`` a six-image gallery costs the target
+    (3 downloads), which is what the run budget was tuned on."""
+    config, deps, image_fetcher = _six_image_gallery(tmp_path, gallery_publishes_all=False)
+    result, accepted = process_product(
+        task(0, "Haier HSU-12HFPAA Inverter AC", (HAIER_PAGE,)), deps, config
+    )
+    assert result.status is Status.OK
     assert len(image_fetcher.requested) == config.target_images_per_product
+    assert len(accepted) == config.target_images_per_product
+
+
+def test_a_stray_image_page_keeps_the_row_target(tmp_path: Path) -> None:
+    """Only pages offering a real gallery get the wide reading; three gallery images is
+    below ``gallery_publishes_all_min`` and a retailer's ``<img>`` soup stays targeted."""
+    from pipeline import _page_publish_goal
+
+    config = live_config(tmp_path)
+    goal = _page_publish_goal
+    small = [
+        ImageCandidate(
+            url=f"u{i}", page_url=HAIER_PAGE, order=i, source="gallery_container",
+            matches_model=True,
+        )
+        for i in range(3)
+    ]
+    big = [
+        ImageCandidate(
+            url=f"u{i}", page_url=HAIER_PAGE, order=i, source="gallery_container",
+            matches_model=True,
+        )
+        for i in range(6)
+    ]
+    assert goal(small, config) == min(
+        config.target_images_per_product, config.max_images_per_product
+    )
+    assert goal(big, config) == config.max_images_per_product
 
 
 def test_color_gate_is_on_by_default(tmp_path: Path) -> None:
@@ -2126,3 +2183,177 @@ def test_a_row_without_any_model_code_gets_a_note_and_not_a_crash() -> None:
     assert not keys.tokens and not keys.identities              # the shape that used to crash
     reason = _tolerated_spelling_reason("Orient Cooltron Frost 18W", keys)
     assert reason.startswith("page shows ") and "sheet model" in reason
+
+
+# --------------------------------------------------------------------------- #
+# official-gallery layout rescue (S20/S21) + --keep-rejected evidence dump
+# --------------------------------------------------------------------------- #
+def _product_wearing_a_marketing_panel(size: int = 1600) -> Image.Image:
+    """A real product photo sitting on a marketing panel that bleeds off all four edges.
+
+    Orient's hero is this shape: a tinted card painted edge to edge, the appliance in the
+    middle.  S20 names the layout correctly - it *is* artwork - and the owner's rule of
+    2026-10-10 says what to do about it: "cut the bottom labels, advertisement marketing
+    labels, and add only product".  The body under the panel is a genuine accepted photo, so
+    the crop the rescue publishes passes every gate on its own.
+    """
+    image = Image.new("RGB", (size, size), (226, 236, 248))
+    unit = size // 2
+    image.paste(clean_product_image(unit, unit, "#2f5fa8"), ((size - unit) // 2, (size - unit) // 2))
+    return image
+
+
+def _emblem_sheet(size: int = 1600) -> Image.Image:
+    """Line art filling the frame - the S20 branch the rescue must never touch.
+
+    Same construction as the emblem fixture in ``test_image_quality``: dense blocky marks
+    reaching all four edges with studio-white corner boxes, so S7 and S14 stay quiet and only
+    the layout sees it.  Its S20 reason is the *line art* branch, and that branch has nothing
+    to crop - the artwork is the whole picture.
+    """
+    image = Image.new("RGB", (size, size), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    margin = size // 8
+    shades = (35, 120, 255, 60, 255)
+    cell = 40
+    for y in range(0, size, cell):
+        for x in range(0, size, cell):
+            in_mark = (margin <= x <= size - margin - 1) or (margin <= y <= size - margin - 1)
+            inside = not (x < margin or y < margin or x >= size - margin or y >= size - margin)
+            if in_mark and inside:
+                shade = shades[(x // cell + 3 * (y // cell)) % len(shades)]
+                if shade != 255:
+                    draw.rectangle((x, y, x + cell - 1, y + cell - 1), fill=(shade,) * 3)
+    for edge in (0, size - 1):
+        draw.point((edge, size // 2), fill=(35, 35, 35))
+        draw.point((size // 2, edge), fill=(35, 35, 35))
+    return image
+
+
+def test_official_gallery_rescues_a_product_inside_marketing_artwork(tmp_path: Path) -> None:
+    """Owner 2026-10-10: "marketing link easily scrap[es] but this actual[ly] not" - the page's
+    own hero is marketing *artwork around* the product, so it must be cropped, not discarded."""
+    from image_quality import run_quality_gates
+
+    config = live_config(tmp_path)
+    image = _product_wearing_a_marketing_panel()
+    rule, detail = run_quality_gates(image, config)
+    assert rule == "S20" and detail.startswith("painted artwork"), detail
+    rescued, reason = _layout_rescue_verdict(image, config, rule, detail)
+    assert rescued, reason
+    assert "isolated product was judged instead" in reason
+
+
+def test_official_gallery_never_rescues_an_emblem_or_a_caption_sheet(tmp_path: Path) -> None:
+    """The rescue is limited to the painted-panel branch on purpose: line art has no product
+    inside it, and the corpus proves the limit works - all 16 junk files of the owner's run
+    (8 Haier emblem files, 2 in-box caption sheets, 6 ad renders) stay rejected."""
+    from image_quality import run_quality_gates
+
+    config = live_config(tmp_path)
+    image = _emblem_sheet()
+    rule, detail = run_quality_gates(image, config)
+    assert rule == "S20" and detail.startswith("line art"), detail
+    assert _layout_rescue_verdict(image, config, rule, detail) == (False, "")
+    # a switch-off returns the row to the plain S20/S21 behaviour
+    assert _layout_rescue_verdict(
+        _product_wearing_a_marketing_panel(),
+        replace(config, official_layout_rescue=False),
+        "S20",
+        "painted artwork covers 84% of the frame",
+    ) == (False, "")
+
+
+def test_keep_rejected_writes_the_pixels_that_died(tmp_path: Path) -> None:
+    """The owner asked where a rejection can be found: the log has the sentence, and with
+    ``--keep-rejected`` the bytes land next to the published folder, named by the rule."""
+    config = live_config(tmp_path, keep_rejected_images=True)
+    _dump_rejected(_emblem_sheet(), config, "Frost 18W Classic White", "https://x/a.png", "S20")
+    folder = config.output_dir / "images" / safe_slug("Frost 18W Classic White") / "rejected"
+    written = sorted(folder.glob("*.jpg"))
+    assert len(written) == 1
+    assert written[0].name.startswith("S20-")
+    assert Image.open(written[0]).size == _emblem_sheet().size
+
+
+def test_a_pasted_marketing_panel_is_cut_before_the_row_is_judged(tmp_path: Path) -> None:
+    """The owner's Dawlance file of 2026-10-10: a studio shot of the unit with a flat black
+    badge/warranty panel pasted underneath.  They asked for the panel to be cut and the
+    product published - "cut the bottom labels, advertisement marketing labels, and add only
+    product" - and this drives the whole path, including the rescue re-check that a unit test
+    cannot reach.
+    """
+    import io
+
+    from PIL import Image as PILImage
+    from test_image_quality import _unit_with_badge_panel
+
+    fixture = _unit_with_badge_panel(size=900)
+    buf = io.BytesIO()
+    fixture.save(buf, format="PNG")
+    images = {IMG1: buf.getvalue()}
+    config = live_config(tmp_path, min_short_side=120, min_long_side=200)
+    deps, _, _, _ = build_deps(tmp_path, {HAIER_PAGE: load_fixture("product_ok")}, images)
+    result, accepted = process_product(
+        task(0, "Haier HSU-12HFPAA Inverter AC", (HAIER_PAGE,)), deps, config
+    )
+    lines = [
+        json.loads(line) for line in (tmp_path / "out" / "decisions.jsonl").read_text().splitlines()
+    ]
+    assert any(line["rule_id"] == "S7.panel" for line in lines), lines
+    assert accepted, [line["detail"] for line in lines]
+    saved = sorted((config.output_dir / "images" / safe_slug(result.title) / "raw").glob("*.jpg"))
+    assert saved, result.title
+    with PILImage.open(saved[0]) as published:
+        assert published.size[1] < fixture.size[1]          # the panel is gone from the file too
+    assert result.status in (Status.OK, Status.PARTIAL)
+
+
+def test_a_tinted_studio_wash_cannot_cost_the_row_the_brands_own_hero(tmp_path: Path) -> None:
+    """The owner's Orient row of 2026-10-10: the hero was found and downloaded, then S16 said
+    "product area is a saturated colour (60% chromatic) - conflicts with target 'white'" and
+    the row lost the only correct picture.  Their instruction was to make the safeguard
+    correct rather than delete it: "don't force this in brand official, only in retailer".
+    So the same image must publish from the brand's page and still be refused from a retailer.
+    """
+    from test_image_quality import _chroma_spread_share, _unit_on_a_tinted_plate
+
+    strong = _unit_on_a_tinted_plate((150, 190, 240))  # tint the metric really calls a colour
+    assert _chroma_spread_share(strong) >= 0.45  # the pre-fix measure condemns this file
+    buf = io.BytesIO()
+    strong.save(buf, format="PNG")
+    images = {IMG1: buf.getvalue()}
+    title = "Haier HSU-12HFPAA White Inverter AC"
+
+    brand_deps, _, _, _ = build_deps(
+        tmp_path, {HAIER_PAGE: load_fixture("product_ok")}, images
+    )
+    brand_result, brand_accepted = process_product(task(0, title, (HAIER_PAGE,)), brand_deps, live_config(tmp_path))
+    assert brand_accepted, "the brand's own hero must not be lost to a studio wash"
+    lines = [
+        json.loads(line)
+        for line in (tmp_path / "out" / "decisions.jsonl").read_text().splitlines()
+    ]
+    exemption = [line for line in lines if line["rule_id"] == "S16.official"]
+    assert exemption, [line["rule_id"] for line in lines]
+    assert "not enforced" in exemption[0]["detail"]
+    assert brand_result.status in (Status.OK, Status.PARTIAL)
+
+    # Same pixels, same model, a retailer's page: the colour gate keeps its teeth.
+    retail_tmp = tmp_path / "retail"
+    retail_tmp.mkdir()
+    retail_deps, _, _, _ = build_deps(
+        retail_tmp, {SHOPIFY_PAGE: load_fixture("product_ok")}, images
+    )
+    _, retail_accepted = process_product(
+        task(0, title, (SHOPIFY_PAGE,)), retail_deps, live_config(retail_tmp)
+    )
+    assert not retail_accepted, "a wash-dominant picture from a retailer is still a colour conflict"
+    retail_lines = [
+        json.loads(line)
+        for line in (retail_tmp / "out" / "decisions.jsonl").read_text().splitlines()
+    ]
+    assert any(
+        line["rule_id"] == "S16" and "saturated colour" in line["detail"]
+        for line in retail_lines
+    ), [line["rule_id"] for line in retail_lines]
