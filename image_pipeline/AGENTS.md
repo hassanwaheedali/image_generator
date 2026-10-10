@@ -50,6 +50,11 @@ variable always wins. **Never print, log, commit or echo the key value.**
   `S15.fetch`, `S15.relaxed`, `S15.tolerated`, `S16` (Visual Color Gate), `S17` (Intra-Gallery Consistency)
   and `S18` (Crop Closure - the one guard that never rejects: it grows the isolation box so a crop
   cannot cut the product, and is switched off by `isolation_crop_closure = False`).
+  `S19` (Branded Template Guard, Option 2 `--direct` only): a store's own theme frame is not a
+  product photo - ≥3 of 4 saturated corner patches reject it; evidence is background-only, so
+  white/grey studios and colourful products on white never fire it.
+  Option 2 (`main.py --direct`) runs the sheet's direct image URLs with no scraping: the same
+  download/gates/compose/upload machinery via `direct_pipeline.process_direct_product`.
 - **One config field per threshold.** No magic numbers in stage functions - everything tunable lives in
   `config.PipelineConfig` and is validated in `__post_init__`.
 - `pipeline.py` never imports `requests` / `curl_cffi` / filesystem-network code directly: it talks to

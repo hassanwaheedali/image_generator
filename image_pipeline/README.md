@@ -94,6 +94,10 @@ python3 main.py --input sheet.xlsx --limit 5 --workers 4 --redo "Haier HSU-12 1.
 
 # ignore the checkpoint completely
 python3 main.py --input sheet.csv --no-resume
+
+# Option 2: the URL column holds DIRECT image URLs - download, template and
+# publish with no scraping (store theme templates are skipped by S19)
+python3 main.py --direct --input my_links.csv --dry-run
 ```
 
 | Flag | Meaning |
@@ -103,6 +107,7 @@ python3 main.py --input sheet.csv --no-resume
 | `--output-dir` | CSVs, images, logs (default `output`) |
 | `--state-dir` | checkpoint + banner-URL cache (default `state`) |
 | `--dry-run` | no uploads, no platform CSVs; everything else runs |
+| `--direct` | Option 2: the sheet's URL column holds direct image URLs; no pages are fetched, nothing is scraped; S19 skips store theme templates |
 | `--redo TITLE...` | force re-process these exact titles even if the checkpoint says `ok` |
 | `--limit N` | stop after N products (checkpoint still written) |
 | `--workers N` | parallel product workers (default 4; per-domain requests are still rate-limited) |
@@ -302,7 +307,7 @@ Editing the list is data, not code: `config.source_platforms`, `config.brand_sou
 
 ---
 
-## 4. Safeguards S1–S17 (each one a named function, a direct test and a rule ID)
+## 4. Safeguards S1–S19 (each one a named function, a direct test and a rule ID)
 
 Every decision is written to `output/decisions.jsonl` with its `rule_id`, so any image can be traced
 back to the rule that kept or rejected it.
@@ -330,6 +335,7 @@ back to the rule that kept or rejected it.
 | S15 | A page found by search is only a *candidate*: it must pass the same `verify_page` with the **sheet's** model before any image URL is read | `sources.SourceChain.find_candidates()` + `pipeline._visit_page()` | `test_fallback_candidate_is_verified_before_any_image_is_used`, `test_candidate_is_only_a_page_never_an_image`, `test_fallback_recovers_a_row_and_is_labelled_in_the_output` |
 | S16 | Visual Color Gate: Rejects images whose dominant foreground hue conflicts with the title colourway (e.g. Purple/Red images for a Golden refrigerator); display products (TVs/monitors) exempted via `is_display_product()` | `image_quality.verify_image_color()` + `model_matching.is_display_product()` | `test_verify_image_color_rejects_conflicting_hue`, `test_verify_image_color_accepts_matching_or_neutral`, `test_is_display_product` |
 | S17 | Intra-Gallery Color Consistency: Prevents mixing distinct chromatic color families within the same product gallery | `dedup.check_color_consistency()` | `test_check_color_consistency_blocks_mixed_chromatic`, `test_check_color_consistency_allows_same_or_neutral` |
+| S19 | Branded-template guard (Option 2 `--direct`): a store's own theme frame (yellow iShopping-style art, promo with the shop logo) is never composited; evidence is background-only — ≥3 of 4 saturated corner patches; white/grey studios and colourful products on white never fire it | `image_quality.branded_template_reason()` | `test_s19_rejects_the_yellow_theme_template`, `test_s19_blocks_a_real_yellow_store_template`, `test_s19_needs_three_corners_one_coloured_corner_passes` |
 
 **Zero-tolerance guarantees** (each proven by a test): no image from description/article content
 (S2), no image from a link to another page (S3), no image carried between products or threads (S10).

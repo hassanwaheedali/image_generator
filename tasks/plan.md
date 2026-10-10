@@ -571,24 +571,24 @@ functions**; no forks. (Gate G10 of `docs/riper/option1-fix-plan.md`, owner-appr
 ## Task list (TDD, one commit per task, gates green before every commit)
 
 ### Phase 1 — foundation
-- [ ] Task O2-1: config — `direct_mode` + S19 fields + `__post_init__` validation (`config.py`)
-- [ ] Task O2-2: S19 gate `branded_template_reason()` (`image_quality.py`), RED tests first
+- [x] Task O2-1: config — `direct_mode` + S19 fields + `__post_init__` validation (`config.py`)
+- [x] Task O2-2: S19 gate `branded_template_reason()` (`image_quality.py`), RED tests first
 
 ### Checkpoint — Option 1 regression: full suite green (seam not touched yet)
 
 ### Phase 2 — seam + processor
-- [ ] Task O2-3: `BatchRunner` optional `processor` seam (`pipeline.py`, ≤5 lines)
-- [ ] Task O2-4: `direct_pipeline.py` processor, RED e2e tests first (fakes)
+- [x] Task O2-3: `BatchRunner` optional `processor` seam (`pipeline.py`, ≤5 lines)
+- [x] Task O2-4: `direct_pipeline.py` processor, RED e2e tests first (fakes)
 
 ### Checkpoint — direct flow publishes a clean white product with links; blocks a yellow template
 
 ### Phase 3 — CLI + real pixels
-- [ ] Task O2-5: `--direct` CLI wiring (`main.py`), no SourceChain in direct mode
-- [ ] Task O2-6: real-image fixtures (AC / refrigerator / other / branded template) via
+- [x] Task O2-5: `--direct` CLI wiring (`main.py`), no SourceChain in direct mode
+- [x] Task O2-6: real-image fixtures (AC / refrigerator / other / branded template) via
       web tooling; fixture tests + loopback-HTTP `--dry-run` end-to-end
 
 ### Phase 4 — docs + review
-- [ ] Task O2-7: docs sync (AGENTS.md registry, README rule table, PROJECT_MAP, CHANGELOG)
+- [x] Task O2-7: docs sync (AGENTS.md registry, README rule table, PROJECT_MAP, CHANGELOG)
 
 ### Checkpoint — complete
 - [ ] ruff + mypy --strict + pytest green; per-category results table recorded
