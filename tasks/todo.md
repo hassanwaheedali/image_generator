@@ -143,7 +143,8 @@ python main.py --input sample_input.csv --dry-run --workers 4
 
 ---
 
-# Option 2 — direct image URLs (2026-10-10)
+
+# Option 2 — direct image URLs (2026-10-10) — COMPLETE
 - [x] Task O2-1: config fields (direct_mode, branded-template guard thresholds) + validation
 - [x] Task O2-2: S19 branded-template guard in image_quality.py (TDD)
 - [x] Task O2-3: BatchRunner processor seam (Option 1 default unchanged)
@@ -151,3 +152,6 @@ python main.py --input sample_input.csv --dry-run --workers 4
 - [x] Task O2-5: --direct CLI wiring in main.py
 - [x] Task O2-6: real-image fixtures + loopback E2E + per-category results
 - [x] Task O2-7: docs sync (AGENTS.md / README / PROJECT_MAP / CHANGELOG) + final gates
+- [x] Checkpoints: Foundation ✔ / seam+processor ✔ / CLI+real pixels ✔ / Complete ✔
+      (436 passed, 1 skipped pre-existing; ruff clean; mypy --strict clean; radon: no
+      existing function gained a grade)
