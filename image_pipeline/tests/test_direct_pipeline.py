@@ -65,6 +65,24 @@ def _white_product_photo(corner_colour: tuple[int, int, int] = (255, 255, 255)) 
     return image
 
 
+def _white_product_photo_alt(corner_colour: tuple[int, int, int] = (255, 255, 255)) -> Image.Image:
+    """A distinct angle (wide wall-unit silhouette) so S10 dedup keeps it."""
+    image = Image.new("RGB", (600, 600), corner_colour)
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle([90, 240, 510, 380], radius=22, fill=(70, 74, 80))
+    draw.rectangle([120, 300, 480, 330], fill=(110, 114, 120))  # vent detail
+    return image
+
+
+def _white_appliance_photo() -> Image.Image:
+    """A WHITE unit on a white sheet: bright body, no dark pixels anywhere."""
+    image = Image.new("RGB", (600, 600), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle([180, 150, 420, 490], radius=18, fill=(240, 240, 240))
+    draw.rectangle([200, 190, 400, 230], fill=(206, 208, 212))
+    return image
+
+
 def _themed_template(background: tuple[int, int, int]) -> Image.Image:
     """A store theme frame: saturated branded background + logo block + product."""
     image = Image.new("RGB", (600, 600), background)
@@ -139,10 +157,6 @@ def test_batch_runner_defaults_to_the_option_1_processor() -> None:
 
 def test_batch_runner_uses_the_injected_processor(tmp_path: Path) -> None:
     """The seam: Option 2 swaps the per-row processor without touching Option 1."""
-    from conftest import FakeImageFetcher, FakeImageHost, FakePageFetcher
-
-    from decisions import DecisionLog
-
     config = PipelineConfig(
         dry_run=True,
         assets_dir=Path("assets"),
@@ -177,3 +191,128 @@ def test_batch_runner_uses_the_injected_processor(tmp_path: Path) -> None:
     results = runner.run()
     assert calls == [0]
     assert results[0].status is Status.OK
+
+
+# --------------------------------------------------------------------------- #
+# Task O2-4: the direct processor, end to end on fakes
+# --------------------------------------------------------------------------- #
+import io  # noqa: E402
+
+from conftest import FakeImageFetcher, FakeImageHost, FakePageFetcher  # noqa: E402
+
+from decisions import DecisionLog  # noqa: E402
+from direct_pipeline import process_direct_product  # noqa: E402
+
+
+def _png_bytes(image: Image.Image) -> bytes:
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _direct_deps(tmp_path: Path, images: dict[str, bytes]) -> tuple[PipelineDeps, FakeImageFetcher]:
+    fetcher = FakeImageFetcher(images)
+    deps = PipelineDeps(
+        page_fetcher=FakePageFetcher({}),
+        image_fetcher=fetcher,
+        image_host=FakeImageHost(),
+        decisions=DecisionLog(tmp_path / "decisions.jsonl"),
+        banner_cache={},
+        banner_cache_lock=threading.Lock(),
+        source_searcher=None,
+    )
+    return deps, fetcher
+
+
+def _direct_config(tmp_path: Path, **overrides: object) -> PipelineConfig:
+    return PipelineConfig(
+        dry_run=True,
+        direct_mode=True,
+        assets_dir=Path("assets"),
+        output_dir=tmp_path / "out",
+        state_dir=tmp_path / "state",
+        **overrides,  # type: ignore[arg-type]
+    )
+
+
+def _decisions(tmp_path: Path) -> str:
+    path = tmp_path / "decisions.jsonl"
+    return path.read_text(encoding="utf-8") if path.exists() else ""
+
+
+def test_direct_publishes_white_product_photos_with_links(tmp_path: Path) -> None:
+    urls = ("http://cdn.test/ac-1.png", "http://cdn.test/ac-2.png")
+    images = {
+        urls[0]: _png_bytes(_white_product_photo()),
+        urls[1]: _png_bytes(_white_product_photo_alt()),
+    }
+    deps, fetcher = _direct_deps(tmp_path, images)
+    task = ProductTask(index=0, title="Cool Breeze 12X Inverter AC", source_urls=urls)
+    result, accepted = process_direct_product(task, deps, _direct_config(tmp_path))
+    assert result.status is Status.OK
+    assert len(accepted) == 2
+    assert len(result.digi_urls) == 3 and len(result.alfa_urls) == 3  # + closing banner
+    assert all(url.startswith(("https://", "http://", "file://")) for url in result.digi_urls)
+    assert fetcher.requested == list(urls)  # downloaded, no page fetches
+    assert '"rule_id": "accept"' in _decisions(tmp_path)
+
+
+def test_direct_rejects_the_yellow_theme_template_with_s19(tmp_path: Path) -> None:
+    url = "http://cdn.test/ishopping-template.png"
+    deps, _ = _direct_deps(tmp_path, {url: _png_bytes(_themed_template((248, 198, 0)))})
+    task = ProductTask(index=0, title="Cool Breeze 12X Inverter AC", source_urls=(url,))
+    result, accepted = process_direct_product(task, deps, _direct_config(tmp_path))
+    assert accepted == []
+    assert result.status is Status.FAILED
+    assert "S19" in _decisions(tmp_path)
+    assert result.reason  # a human can see why
+
+
+def test_direct_never_downloads_the_same_url_twice(tmp_path: Path) -> None:
+    url = "http://cdn.test/ac-1.png"
+    deps, fetcher = _direct_deps(tmp_path, {url: _png_bytes(_white_product_photo())})
+    task = ProductTask(index=0, title="Cool Breeze 12X Inverter AC", source_urls=(url, url))
+    result, accepted = process_direct_product(task, deps, _direct_config(tmp_path))
+    assert fetcher.requested == [url]           # one download, not two
+    assert len(accepted) == 1
+    assert result.status is Status.PARTIAL      # 1 image < min_required_images (2)
+    assert "same file already queued" in _decisions(tmp_path)
+
+
+def test_direct_reports_a_dead_link_loudly(tmp_path: Path) -> None:
+    deps, _ = _direct_deps(tmp_path, {})  # nothing served -> permanent 404
+    task = ProductTask(index=0, title="Cool Breeze 12X Inverter AC", source_urls=("http://cdn.test/gone.png",))
+    result, accepted = process_direct_product(task, deps, _direct_config(tmp_path))
+    assert accepted == []
+    assert result.status is Status.FAILED
+    assert "S13.fetch" in _decisions(tmp_path)
+
+
+def test_direct_applies_the_option_1_colour_rule(tmp_path: Path) -> None:
+    """Title says black: the white unit is rejected, the black unit publishes."""
+    white_url = "http://cdn.test/white-unit.png"
+    black_url = "http://cdn.test/black-unit.png"
+    black_product = Image.new("RGB", (600, 600), (255, 255, 255))
+    ImageDraw.Draw(black_product).rounded_rectangle([170, 150, 430, 490], radius=16, fill=(24, 24, 26))
+    # White unit = bright body, which conflicts with the "Black" title and must be
+    # rejected by the Option 1 colour rule; the black unit publishes.
+    images = {white_url: _png_bytes(_white_appliance_photo()), black_url: _png_bytes(black_product)}
+    deps, _ = _direct_deps(tmp_path, images)
+    task = ProductTask(
+        index=0, title="Cool Breeze 12X Inverter AC Black", source_urls=(white_url, black_url)
+    )
+    result, accepted = process_direct_product(task, deps, _direct_config(tmp_path))
+    assert len(accepted) == 1
+    assert accepted[0].source_url == black_url
+    assert "S16" in _decisions(tmp_path)
+    assert result.status is Status.PARTIAL
+
+
+def test_direct_processes_titles_without_a_model_code(tmp_path: Path) -> None:
+    """Option 2 trusts the link: no page to prove, so no '4.1' rejection exists."""
+    url = "http://cdn.test/fridge.png"
+    deps, _ = _direct_deps(tmp_path, {url: _png_bytes(_white_product_photo())})
+    task = ProductTask(index=0, title="Premium Frost Free Refrigerator", source_urls=(url,))
+    result, accepted = process_direct_product(task, deps, _direct_config(tmp_path))
+    assert len(accepted) == 1
+    assert result.status is Status.PARTIAL
