@@ -23,6 +23,7 @@ from csv_io import (
     read_input,
 )
 from decisions import DecisionLog
+from direct_pipeline import process_direct_product
 from fetch import (
     CurlCffiImageFetcher,
     CurlCffiJsonHttp,
@@ -80,6 +81,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", default="output", help="where the CSVs, images and logs go")
     parser.add_argument("--state-dir", default="state", help="checkpoint and banner cache folder")
     parser.add_argument("--dry-run", action="store_true", help="do everything except uploads and platform CSVs")
+    parser.add_argument(
+        "--direct",
+        action="store_true",
+        help="Option 2: the sheet's URL column holds direct image URLs - download, template "
+        "and publish them; no pages are fetched and nothing is scraped",
+    )
     parser.add_argument("--redo", nargs="*", default=[], help="exact titles to force re-process")
     parser.add_argument("--limit", type=int, default=None, help="process at most N products")
     parser.add_argument("--workers", type=int, default=4, help="parallel workers (default 4)")
@@ -133,6 +140,7 @@ def build_config(args: argparse.Namespace) -> PipelineConfig:
         state_dir=Path(args.state_dir),
         input_dir=Path(args.input_dir),
         dry_run=bool(args.dry_run),
+        direct_mode=bool(args.direct),
         workers=int(args.workers),
         limit=args.limit,
         redo_titles=tuple(args.redo or ()),
@@ -236,9 +244,10 @@ def build_deps(config: PipelineConfig, decisions: DecisionLog) -> PipelineDeps:
             max_delay_s=config.backoff_max_s,
         )
     )
+    # Direct mode (Option 2) never searches: the row supplies its own images.
     searcher = (
         SourceChain(config, CurlCffiJsonHttp(config, limiter))
-        if config.fallback_enabled
+        if config.fallback_enabled and not config.direct_mode
         else None
     )
     return PipelineDeps(
@@ -413,7 +422,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     LOG.info("input: %s", input_path.resolve())
-    LOG.info("dry-run: %s | workers: %d", config.dry_run, config.workers)
+    LOG.info(
+        "mode: %s | dry-run: %s | workers: %d",
+        "direct (user-supplied image URLs, no scraping)" if config.direct_mode else "scrape and verify",
+        config.dry_run,
+        config.workers,
+    )
 
     try:
         tasks, warnings = merge_duplicate_titles(read_input(input_path))
@@ -432,7 +446,13 @@ def main(argv: list[str] | None = None) -> int:
     checkpoint = {} if not config.resume else load_checkpoint(config.checkpoint_path)
     decisions = DecisionLog(config.decisions_path)
     deps = build_deps(config, decisions)
-    runner = BatchRunner(config, deps, good_rows, checkpoint)
+    runner = BatchRunner(
+        config,
+        deps,
+        good_rows,
+        checkpoint,
+        processor=process_direct_product if config.direct_mode else None,
+    )
     try:
         results = runner.run()
     except OSError as exc:

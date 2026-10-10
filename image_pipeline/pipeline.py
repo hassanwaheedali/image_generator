@@ -2022,11 +2022,19 @@ class BatchRunner:
         deps: PipelineDeps,
         tasks: list[ProductTask],
         checkpoint: dict[str, CheckpointEntry],
+        *,
+        processor: Callable[
+            [ProductTask, PipelineDeps, PipelineConfig, threading.Event | None],
+            tuple[ProductResult, list[AcceptedImage]],
+        ]
+        | None = None,
     ) -> None:
         self._config = config
         self._deps = deps
         self._tasks = tasks
         self._checkpoint = checkpoint
+        #: Option 2 swaps the per-row processor; the default keeps Option 1 exact.
+        self._processor = processor if processor is not None else process_product
         self._lock = threading.Lock()
         self._cancel = threading.Event()
         self._results: dict[int, ProductResult] = {}
@@ -2111,7 +2119,7 @@ class BatchRunner:
         return entry.is_resume_done(hash_source_urls(task.source_urls))
 
     def _run_one(self, task: ProductTask) -> tuple[ProductResult, list[AcceptedImage]]:
-        return process_product(task, self._deps, self._config, self._cancel)
+        return self._processor(task, self._deps, self._config, self._cancel)
 
     def _record(self, result: ProductResult) -> None:
         """One writer: checkpoint append + CSV regeneration, under the lock."""

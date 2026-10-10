@@ -528,6 +528,28 @@ class PipelineConfig:
     color_chroma_min_saturation: float = 0.22
     color_chroma_max_value: float = 0.95
 
+    # ----- Option 2: direct mode + branded template guard (S19) -----------
+    #: Option 2 run mode: the sheet's URL column holds direct image URLs.  No pages
+    #: are fetched, nothing is scraped or model-proven; the row trusts its links and
+    #: everything from the download onward reuses the Option 1 machinery.
+    direct_mode: bool = False
+
+    #: Safeguard S19: store theme templates (iShopping's yellow frame, promo art with
+    #: the shop's own logo and design) break isolation and must never be composited.
+    #: The evidence is the background only - the four corner patches.  A product
+    #: photo's corners are white or light neutral; a theme template's corners are
+    #: saturated brand colours.  The product body itself is never measured, so a
+    #: product that fills the frame stays safe (that case belongs to the S7 studio
+    #: rescue, exactly as in Option 1).
+    branded_template_guard_enabled: bool = True
+    #: A corner counts as "themed" when its mean-patch saturation exceeds this.
+    #: White studio corners sit at ~0.01-0.05, warm grey at ~0.03; brand yellows,
+    #: reds and blues sit above 0.4, so the bar is lenient by a wide margin.
+    branded_corner_min_saturation: float = 0.30
+    #: How many themed corners make the whole picture a store template.  3 of 4: one
+    #: accidental coloured corner (a cable, a shadow, a price tag) never fires S19.
+    branded_min_saturated_corners: int = 3
+
     # ----- last-resort salvage --------------------------------------------
     #: Owner decision 2026-10-08 ("jab kuch na bachey toh kam quality wali hi le lon"):
     #: when a row would otherwise end with 0 (or below ``min_required_images``) images,
@@ -778,6 +800,10 @@ class PipelineConfig:
             raise ConfigError("official_gallery_min_neutral_corners must be in [0, 4]")
         if not 0 <= self.studio_rescue_min_neutral_corners <= 4:
             raise ConfigError("studio_rescue_min_neutral_corners must be in [0, 4]")
+        if not 0.0 <= self.branded_corner_min_saturation <= 1.0:
+            raise ConfigError("branded_corner_min_saturation must be in [0, 1]")
+        if not 0 <= self.branded_min_saturated_corners <= 4:
+            raise ConfigError("branded_min_saturated_corners must be in [0, 4]")
         for name, value in (
             ("dedup_hamming_threshold", self.dedup_hamming_threshold),
             ("dedup_hamming_soft_threshold", self.dedup_hamming_soft_threshold),

@@ -538,3 +538,105 @@ centred** without touching the logo, and fix the empty Brand column.
 | Mixed appliance body (e.g. black door with gold trim) | Medium | Measure both dominant hue and chromatic fraction; multi-panel appliances still pass unless the primary body panel strongly contradicts the target family. |
 | Non-standard color terminology | Low | Grounded in existing `variant_terms.COLOUR_FAMILIES`. Unrecognized colors fail open safely. |
 
+
+---
+
+
+---
+
+# Implementation Plan: Option 2 — Direct Image URLs (no scraping) · 2026-10-10
+
+Method: `.agents/skills/planning-and-task-breakdown` (+ tdd / incremental / doubt-driven /
+code-review / git-workflow). Owner-approved 2026-10-10. Input confirmed: `Title,Images`
+sheet, pipe-separated **direct image URLs**. Status: **COMPLETE** (7/7 tasks, all
+checkpoints green, branch `arena/b16f9203-image-generator`).
+
+## Overview
+Option 2 replaces the scraper front half with direct input: each sheet row supplies the
+product's own image URLs and the row trusts them. Per row: URL-identity dedup -> download
+-> bytes validation -> promo/seam cleanup -> **S19 branded-template guard (new)** ->
+white-background gates -> colour rule (S16) -> pixel dedup (S10) -> isolate/square/sharpen
+-> compose on both templates -> upload (S14, banner last) -> import CSVs with hosted links.
+Everything from the download onward **reuses Option 1 functions**; nothing is forked.
+(Gate G10 of `docs/riper/option1-fix-plan.md`.)
+
+## Architecture decisions
+- New module `direct_pipeline.py`, `process_direct_product()` with the same contract as
+  `process_product()`; `BatchRunner` gains a keyword-only `processor` seam (default keeps
+  Option 1 byte-identical).
+- **S19** is background-only evidence: >=3 of 4 corner patches with mean saturation
+  >= 0.30 => store theme template. White/grey studios (~0.01-0.05) and colourful products
+  on white never fire it; a frame-filling product stays owned by the S7 corner bar.
+- Deliberately absent in direct mode: S1-S3 page proof, gallery extractors, S15 fallback,
+  S4/S5/S12 URL heuristics, salvage. Titles without a model code are fine (nothing to prove).
+
+## Task list
+
+### Phase 1 — Foundation
+- [x] **Task O2-1: config surface** — `direct_mode` + S19 fields, validated. *(XS, 2 files)*
+  - Acceptance: default off; switches on; defaults 0.30/3; out-of-range raises ConfigError.
+  - Verification: `pytest tests/test_direct_pipeline.py -k config`; ruff; mypy --strict.
+  - Dependencies: none.
+- [x] **Task O2-2: S19 gate** — `image_quality.branded_template_reason()`. *(S, 2 files)*
+  - Acceptance: yellow/red/navy theme rejected; white/warm-white/grey studios pass; one
+    coloured corner never fires; off-switch works; product body never measured; a REAL
+    yellow sale template is blocked.
+  - Verification: 8 synthetic unit tests + `test_s19_blocks_a_real_yellow_store_template`.
+  - Dependencies: O2-1.
+
+### Checkpoint — Foundation: suite green (344 passed), ruff + mypy clean. ✔ 2026-10-10
+
+### Phase 2 — Seam + processor
+- [x] **Task O2-3: BatchRunner processor seam** — keyword-only `processor` param. *(XS, 2 files)*
+  - Acceptance: injected processor runs per pending row; default is `process_product`;
+    every existing positional call site untouched; full Option 1 suite re-passes.
+  - Verification: 2 seam tests + full `pytest tests -q`.
+  - Dependencies: none.
+- [x] **Task O2-4: direct processor** — `direct_pipeline.process_direct_product()`. *(M, 2 files)*
+  - Acceptance: two white photos publish with digi+alfa links and closing banner last;
+    yellow template dies on S19 with a decision line; a repeated URL downloads exactly once
+    (S10-key); a dead link fails loudly (S13.fetch); "Black" title rejects the white unit
+    (S16) while the black unit publishes; model-less titles process; exactly one
+    decisions.jsonl line per considered image; radon: no existing function gains a grade.
+  - Verification: 6 fake e2e tests; doubt-cycle on `seen_keys` ordering (test proved the
+    pre-compose registration is load-bearing, as in Option 1).
+  - Dependencies: O2-1, O2-2, O2-3.
+
+### Checkpoint — direct flow publishes clean photos with links and blocks the template. ✔
+
+### Phase 3 — CLI + real pixels
+- [x] **Task O2-5: `--direct` CLI** — flag, config wiring, no SourceChain in direct mode. *(XS, 2 files)*
+  - Acceptance: `--direct` sets `direct_mode`; default stays Option 1; mode logged.
+  - Verification: 2 CLI tests + loopback E2E log.
+- [x] **Task O2-6: real-image verification** — fixtures + offline tests + loopback `--dry-run`. *(M, 2 files)*
+  - Acceptance: AC / refrigerator / washer photos pass all gates and publish with the full
+    product uncut; the yellow template is S19-rejected; frame-filling close-up stays S7;
+    CLI run over `http://127.0.0.1` reproduces the same verdicts and writes CSVs/decisions.
+  - Verification: `test_direct_end_to_end_on_real_photos` + measured loopback run
+    (3 partial + 1 failed(S19); 3 accept / 1 S7 / 1 S19 decision lines).
+  - Dependencies: O2-4, O2-5.
+
+### Phase 4 — Docs + review
+- [x] **Task O2-7: docs sync** — README rules table + run examples + flag, AGENTS.md registry,
+  PROJECT_MAP module/rule tables, CHANGELOG [Unreleased], this plan. *(S, 6 files, docs only)*
+
+### Checkpoint — Complete: 436 passed / 1 skipped (pre-existing); ruff clean; mypy --strict
+clean (49 files); radon C-or-worse 52→53 (only the new D-25 processor; Option 1's equivalent
+is F-55). Branch pushed. ✔
+
+## Risks & mitigations (as-built)
+| Risk | Impact | Mitigation (verified) |
+|---|---|---|
+| S19 over-fires on warm/neutral studios | High | corner-only evidence, 0.30 bar vs ~0.05 reality; accept tests incl. real photos |
+| S19 misses white-corner templates w/ logos | Medium | S7 ring/std + promo-band strip still run; S19 additive, not sole defence |
+| No-extension direct URLs rejected | High | S5 URL heuristics deliberately NOT applied in direct mode; bytes decide |
+| Frame-filling product cut/rejected | High | S7 studio rescue + S18 crop closure reused; fridge/AC composites visually checked |
+| Option 1 regression | High | processor default + full suite at every checkpoint (never < 330, now 436) |
+
+## Open questions (owner-side)
+- Live verification with your real sheet + `FREEIMAGE_API_KEY` (sandbox is firewalled):
+  `python3 main.py --direct --input your_links.csv` after a `--dry-run` probe.
+- Placeholder template art (standing Open Question 2) shows in composites until the final
+  DigiMall/AlfaMall artwork ships; affects Option 1 and Option 2 identically.
+- Send your sample iShopping template image — if its corners differ from the yellow sale
+  art tested, S19 has two config fields to tune without code changes.
