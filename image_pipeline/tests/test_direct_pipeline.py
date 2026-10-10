@@ -411,3 +411,36 @@ def test_direct_end_to_end_on_real_photos(tmp_path: Path) -> None:
     assert "S19" in (tmp_path / "decisions.jsonl").read_text(encoding="utf-8")
     # downloads only ever touched the image URLs - nothing else was fetched
     assert sorted(fetcher.requested) == sorted(urls)
+
+
+# --------------------------------------------------------------------------- #
+# Column selection: Source URL is Option 1's, Images is Option 2's
+# --------------------------------------------------------------------------- #
+from csv_io import read_input  # noqa: E402
+
+
+def _two_column_sheet(tmp_path: Path) -> Path:
+    sheet = tmp_path / "both.csv"
+    sheet.write_text(
+        "Title,Source URL,Images\n"
+        "Cool Breeze 12X Inverter AC,https://shop.example/ac-page,http://cdn.test/ac-1.png|http://cdn.test/ac-2.png\n",
+        encoding="utf-8",
+    )
+    return sheet
+
+
+def test_direct_reads_the_images_column_not_source_url(tmp_path: Path) -> None:
+    tasks = read_input(_two_column_sheet(tmp_path), direct=True)
+    assert tasks[0].source_urls == ("http://cdn.test/ac-1.png", "http://cdn.test/ac-2.png")
+
+
+def test_option1_still_reads_source_url_first(tmp_path: Path) -> None:
+    tasks = read_input(_two_column_sheet(tmp_path))
+    assert tasks[0].source_urls == ("https://shop.example/ac-page",)
+
+
+def test_direct_falls_back_when_only_a_url_column_exists(tmp_path: Path) -> None:
+    sheet = tmp_path / "one.csv"
+    sheet.write_text("Title,Image_URL\nX,http://cdn.test/x.png\n", encoding="utf-8")
+    tasks = read_input(sheet, direct=True)
+    assert tasks[0].source_urls == ("http://cdn.test/x.png",)

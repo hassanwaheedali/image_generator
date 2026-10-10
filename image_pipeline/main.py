@@ -291,7 +291,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     try:
-        tasks, warnings = merge_duplicate_titles(read_input(input_path))
+        tasks, warnings = merge_duplicate_titles(read_input(input_path, direct=config.direct_mode))
     except (OSError, ValueError) as exc:
         print(f"cannot read input sheet: {exc}", file=sys.stderr)
         return 2
