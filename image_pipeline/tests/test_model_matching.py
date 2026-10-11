@@ -876,3 +876,30 @@ def test_an_image_named_after_another_maker_is_foreign() -> None:
     assert url_names_foreign_brand(panasonic, None) is None
     rug = "https://x.pk/cdn/panasonic/oriental-rug.jpg"
     assert url_names_foreign_brand(rug, "orient") is None
+    # camel humps are separators here too; the row's own maker in the name is fine.
+    camel = "https://cdn.shopify.com/s/files/1/x/files/panasonicRender.jpg"
+    assert url_names_foreign_brand(camel, "orient") == "panasonic"
+    own_camel = "https://www.orient.com.pk/assets/orientMegatron18x.png"
+    assert url_names_foreign_brand(own_camel, "orient") is None
+
+
+def test_a_camel_case_own_file_is_not_another_product_line() -> None:
+    """Owner run 2026-10-12 (false positive): the ``E-Comfort Pro KEC-1267S`` row's own
+    hero ``eComfortPro.png`` was refused as "image URL names another product line",
+    because the plain split read the camel-case name as one glued word ``ecomfortpro``
+    that the row did not own.  Camel humps are word separators - the file spells the
+    row's own line word ``comfort`` - so it stays.  A truly foreign camel-case name is
+    still refused, and an editor-default export (``UntitledProject``) accuses nothing."""
+    from model_matching import url_names_other_product_line
+
+    ecomfort = build_model_keys("E-Comfort Pro KEC-1267S")
+    own_camel = "https://www.kenwoodpakistan.pk/cdn/shop/files/eComfortPro.png"
+    own_glued = "https://www.kenwoodpakistan.pk/cdn/shop/files/ecomfortpro.png"
+    assert not url_names_other_product_line(own_camel, ecomfort)
+    assert not url_names_other_product_line(own_glued, ecomfort)
+
+    pulse = build_model_keys("Pulse 19C Ultra White T3 | Orient Electronics Pakistan")
+    foreign_camel = "https://x.pk/media/InnovaUltra.png"
+    nameless = "https://cdn.shopify.com/files/UntitledProject-2024-04-29T104202.450.webp"
+    assert url_names_other_product_line(foreign_camel, pulse)
+    assert not url_names_other_product_line(nameless, pulse)

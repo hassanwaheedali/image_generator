@@ -23,6 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refrigerator, washing machine, yellow sale template) and over a loopback-HTTP `--dry-run`.
 
 ### Fixed
+- **A camel-case file of the row's own line is ours (owner run 2026-10-12 false
+  positive).** The `E-Comfort Pro KEC-1267S` row's own hero on kenwoodpakistan.pk is
+  `eComfortPro.png` - the line name glued into one camel hump. The wrong-product limb
+  read one unknown word (`ecomfortpro`), found nothing the row owns, and refused the
+  row's own picture. File-name words are now read with camel humps as separators
+  (`eComfortPro` → `comfort`), a glued word carrying an own line word is owned, and the
+  anchor errs on the keep side for the same reason. Editor-default exports
+  (`UntitledProject-…`) are noise, so they accuse nothing. Truly foreign names -
+  hyphenated or camel-case - are still refused.
 - **The shop search now asks for the row's own maker (owner run 2026-10-12).** The
   Megatron row's only key is the shared capacity code `18X`, and the unbranded query
   `_psq=18X` is exactly how a Panasonic `18XKF9` page surfaced on Surmawala. The brand

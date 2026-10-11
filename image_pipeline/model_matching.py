@@ -849,6 +849,28 @@ def url_names_other_capacity_code(url: str, keys: ModelKeys) -> bool:
 #: qualify; ``ac``, ``t3``, ``pro`` are too short to carry that meaning on their own.
 _SIBLING_WORD_MIN_LENGTH = 4
 
+#: The hump where a lower-case letter or digit meets an upper-case one: studios glue a
+#: line's own name into one camel-case token (``eComfortPro.png`` is ``E-Comfort Pro``),
+#: and reading the hump as a separator recovers the words instead of one unknown blob.
+_CAMEL_HUMP_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+
+
+def _filename_words(filename: str) -> set[str]:
+    """The words of a file name: separators *and* camel-case humps divide words.
+
+    ``15-ton-innova-ultra-white`` yields ``ton``, ``innova``, ``white`` - and
+    ``eComfortPro`` yields ``comfort`` (owner run 2026-10-12: the E-Comfort Pro row's
+    own hero was refused as "another product line" because the plain split saw one
+    glued word ``ecomfortpro`` that the row did not own).  Editor defaults such as
+    ``UntitledProject`` split too - and die as commerce noise, not as an accusation.
+    """
+    camel = _CAMEL_HUMP_RE.sub(" ", filename)
+    return {
+        segment
+        for segment in re.split(r"[^a-z]+", camel.lower())
+        if len(segment) >= _SIBLING_WORD_MIN_LENGTH
+    }
+
 
 def _series_words(title: str) -> frozenset[str]:
     """The words a title uses to *name* its product (see ``ModelKeys.name_words``).
@@ -905,12 +927,7 @@ def url_names_sibling_product(url: str, sibling_terms: frozenset[str]) -> bool:
         return False
     filename = urlsplit(unquote(url)).path.rsplit("/", 1)[-1]
     filename = filename.rsplit(".", 1)[0]
-    words = {
-        segment
-        for segment in re.split(r"[^a-z]+", filename.lower())
-        if len(segment) >= _SIBLING_WORD_MIN_LENGTH
-    }
-    return bool(words & sibling_terms)
+    return bool(_filename_words(filename) & sibling_terms)
 
 
 def annotate_sibling_terms(tasks: Sequence[ProductTask]) -> list[ProductTask]:
@@ -997,12 +1014,13 @@ def url_anchored_to_row(
     if usable:
         filename = urlsplit(unquote(url)).path.rsplit("/", 1)[-1]
         filename = filename.rsplit(".", 1)[0]
-        words = {
-            segment
-            for segment in re.split(r"[^a-z]+", filename.lower())
-            if len(segment) >= _SIBLING_WORD_MIN_LENGTH
-        }
+        words = _filename_words(filename)
         if words & usable:
+            return True
+        # A glued word that still carries an own line word ("pulseultra", no camel
+        # humps to split on) proves the file just as well - the anchor errs on the
+        # keep side, because refusing the row's own picture is the owner-visible bug.
+        if any(own_word in word for word in words for own_word in usable if len(own_word) >= 4):
             return True
     return False
 
@@ -1022,9 +1040,10 @@ _URL_COMMERCE_NOISE = frozenset((
     "small", "square",
     # file-name decorations a studio or CDN appends to the very same picture, and the
     # page furniture that names a graphic, never a product (S14 judges emblems itself).
+    # Editor-default exports (``UntitledProject-…``) name nothing, so they accuse nothing.
     "lowq", "highq", "hires", "lores", "orig", "copy", "final", "edited",
     "retouch", "render", "mockup", "emblem", "badge", "icon", "watermark",
-    "stamp", "seal",
+    "stamp", "seal", "untitled", "project", "artboard",
 ))
 
 
@@ -1044,11 +1063,7 @@ def url_names_other_product_line(url: str, keys: ModelKeys) -> bool:
         return False
     filename = urlsplit(unquote(url)).path.rsplit("/", 1)[-1]
     filename = filename.rsplit(".", 1)[0]
-    words = {
-        segment
-        for segment in re.split(r"[^a-z]+", filename.lower())
-        if len(segment) >= _SIBLING_WORD_MIN_LENGTH
-    }
+    words = _filename_words(filename)
     if not words:
         return False
     own = set(keys.name_words)
@@ -1056,6 +1071,9 @@ def url_names_other_product_line(url: str, keys: ModelKeys) -> bool:
         word
         for word in words
         if word not in own
+        and not any(
+            own_word in word for own_word in own if len(own_word) >= 4 and own_word not in KNOWN_BRANDS
+        )
         and word not in KNOWN_BRANDS
         and word not in _GENERIC_NAME_WORDS
         and word not in _KEYWORD_EXTRA_NOISE
@@ -1080,6 +1098,7 @@ def url_names_foreign_brand(url: str, brand: str | None) -> str | None:
         return None
     filename = urlsplit(unquote(url)).path.rsplit("/", 1)[-1]
     filename = filename.rsplit(".", 1)[0]
+    filename = _CAMEL_HUMP_RE.sub(" ", filename)
     shown = page_product_brand(re.sub(r"[^a-z0-9]+", " ", filename.lower()))
     if shown is not None and shown != brand.lower():
         return shown

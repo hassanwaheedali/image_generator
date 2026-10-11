@@ -2719,3 +2719,32 @@ def test_an_image_named_after_another_maker_dies_on_a_brandless_page(tmp_path: P
     assert foreign_jpg not in image_fetcher.requested
     decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
     assert "names another maker" in decisions
+
+
+def test_a_camel_case_file_of_the_rows_own_line_is_published(tmp_path: Path) -> None:
+    """Owner run 2026-10-12, the false positive: the ``E-Comfort Pro KEC-1267S`` row's
+    own hero on its own brand site is ``eComfortPro.png`` - the line name glued into one
+    camel hump.  The wrong-product limb read one unknown word and refused the row's own
+    picture.  Camel humps are separators, the file spells the row's own ``comfort``, and
+    the image publishes."""
+    config = live_config(tmp_path)
+    page_url = "https://www.kenwoodpakistan.pk/products/e-comfort-pro-kec-1267s"
+    own_png = "https://www.kenwoodpakistan.pk/cdn/shop/files/eComfortPro.png"
+    html = (
+        "<html><head><title>E-Comfort Pro KEC-1267S | Kenwood Pakistan</title></head>"
+        "<body><h1>Kenwood E-Comfort Pro KEC-1267S</h1>"
+        "<p>1.5 ton DC inverter air conditioner.</p>"
+        f"<div class='product-gallery'><img src=\"{own_png}\"></div></body></html>"
+    )
+    deps, _, image_fetcher, _ = build_deps(
+        tmp_path,
+        {page_url: html},
+        {own_png: png_bytes(clean_product_image(900, 900, "#f4f4f4"))},
+    )
+    result, images = process_product(
+        task(0, "E-Comfort Pro KEC-1267S", (page_url,)), deps, config
+    )
+    assert len(images) == 1
+    assert own_png in image_fetcher.requested
+    decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
+    assert "names another product line" not in decisions
