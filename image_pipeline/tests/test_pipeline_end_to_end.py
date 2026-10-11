@@ -2434,3 +2434,43 @@ def test_a_cut_out_brand_png_publishes_with_a_white_ground(tmp_path: Path) -> No
         corners = [cast("tuple[int, int, int]", published.convert("RGB").getpixel(xy)) for xy in spots]
     assert all(sum(px) > 3 * 240 for px in corners), corners
     assert result.status in (Status.OK, Status.PARTIAL)
+
+
+def test_the_sibling_limb_never_rejects_a_file_anchored_to_its_own_row(tmp_path: Path) -> None:
+    """Live 2026-10-11: the Hyper 18X row's own file ``…Hyper-18X-T3-Super-White-Turbo-Pro.webp``
+    was rejected because ``turbo`` names another row of the sheet.  A file that carries the
+    row's own key (or its own series words) is anchored to the row - the sibling word beside
+    it is decoration, not identity.  An unanchored file naming the sibling still dies."""
+    config = live_config(tmp_path)
+    sheet_url = "https://www.bijlibazar.com/orient-hyper-18x"
+    own_png = (
+        "https://www.bijlibazar.com/wp-content/uploads/2025/08/"
+        "Orient-Inverter-AC-1.5-Ton-Hyper-18X-T3-Super-White-Turbo-Pro.webp"
+    )
+    foreign_png = (
+        "https://www.bijlibazar.com/wp-content/uploads/2025/09/Gree-18PITH-Turbo-Pro.webp"
+    )
+    html = (
+        "<html><head><title>Orient Split AC Inverter Hyper 18X</title></head>"
+        "<body><h1>Orient Split AC Inverter Hyper 18X</h1>"
+        f"<div class='product-gallery'><img src=\"{own_png}\">"
+        f"<img src=\"{foreign_png}\"></div></body></html>"
+    )
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {sheet_url: html},
+        {own_png: png_bytes(_gallery_image(1)), foreign_png: png_bytes(_gallery_image(2))},
+    )
+    row = ProductTask(
+        index=0,
+        title="Orient Split AC Hyper 18X",
+        source_urls=(sheet_url,),
+        sibling_terms=frozenset({"turbo"}),
+        own_terms=frozenset({"hyper"}),
+    )
+    result, accepted = process_product(row, deps, config)
+
+    assert any("hyper-18x" in image.source_url.lower() for image in accepted), "the anchored file stays"
+    assert not any("gree-18pith" in image.source_url.lower() for image in accepted)
+    decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
+    assert "names another product from this sheet" in decisions

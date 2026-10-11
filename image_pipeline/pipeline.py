@@ -72,6 +72,7 @@ from model_matching import (
     is_display_product,
     near_miss_codes,
     relaxed_page_match,
+    url_anchored_to_row,
     url_belongs_to_other_model,
     url_names_other_capacity_code,
     url_names_sibling_product,
@@ -1228,6 +1229,7 @@ def _visit_page(
         page_url=resolved_url,
         candidates=candidates,
         keys=keys,
+        brand=brand,
         config=config,
         deps=deps,
         dedup=dedup,
@@ -1338,8 +1340,15 @@ def _relaxed_rescue_applies(match: PageMatchResult, is_fallback: bool) -> bool:
 
     Never for a colour rejection: another colourway is another product (owner decision
     2026-10-07), so the row must keep looking instead of publishing that gallery.
+    Never for a brand rejection either (owner 2026-10-11): a page that shows another
+    maker's product is another product, full stop - the relaxed "brand + number" route
+    must not bring a Panasonic page back for an Orient row.
     """
-    return not match.accepted and is_fallback and match.match_rule != "colour_conflict"
+    return (
+        not match.accepted
+        and is_fallback
+        and match.match_rule not in ("colour_conflict", "other_brand_product")
+    )
 
 
 def _variant_tails(identities: tuple[str, ...]) -> list[str]:
@@ -1423,6 +1432,7 @@ def _consume_candidates(
     page_url: str,
     candidates: list[ImageCandidate],
     keys: ModelKeys,
+    brand: str | None,
     config: PipelineConfig,
     deps: PipelineDeps,
     dedup: ProductDedup,
@@ -1468,12 +1478,21 @@ def _consume_candidates(
                 "S4",
                 "image URL names another capacity code than this row (different model)",
             )
-        if verdict is None and url_names_sibling_product(candidate.url, task.sibling_terms):
+        if (
+            verdict is None
+            and url_names_sibling_product(candidate.url, task.sibling_terms)
+            and not url_anchored_to_row(
+                candidate.url, keys, brand=brand, own_terms=task.own_terms
+            )
+        ):
             # S4's third limb, sheet knowledge (Orient run 2026-10-10): the Pulse row's
             # tolerated page also carried the Innova file, and neither URL prints the
             # row's key - but the sheet itself names the difference.  A word that names
             # exactly one *other* row of this sheet names another product, whatever the
-            # page's status is; a wrong product must never be downloaded.
+            # page's status is; a wrong product must never be downloaded.  The limb stands
+            # down when the file is anchored to *this* row (its own key or its own series
+            # word in the name): live 2026-10-11 the Hyper row's own "…Hyper-18X-T3-
+            # Super-White-Turbo-Pro.webp" was killed by the word "turbo" beside its key.
             verdict = (
                 "S4",
                 "image URL names another product from this sheet",

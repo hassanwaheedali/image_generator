@@ -15,7 +15,7 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup
 from soupsieve import match as css_match
@@ -33,6 +33,7 @@ from url_filters import (
     IMAGE_EXTENSIONS,
     host_is_official,
     host_is_other_manufacturer,
+    page_product_brand,
 )
 
 LOG = logging.getLogger("pipeline.page")
@@ -359,8 +360,14 @@ class MatchSettings:
 
 
 def _strong_fields(soup: BeautifulSoup, page_url: str) -> dict[str, str]:
-    """URL, title, og:title and every h1 - the fields that can certify a model."""
-    fields: dict[str, str] = {"url": page_url}
+    """URL, title, og:title and every h1 - the fields that can certify a model.
+
+    The URL is stripped to host + path: a search-result URL echoes the term we searched
+    for in its query string (``?_psq=18X``), and counting that echo is how a Panasonic
+    page "matched" an Orient row on the shared capacity code (owner run 2026-10-11).
+    """
+    parts = urlsplit(page_url)
+    fields: dict[str, str] = {"url": urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))}
     name = page_product_name(soup)
     if name:
         fields["page_name"] = name
@@ -411,6 +418,34 @@ def verify_page(
             (),
             f"page is on another manufacturer's domain ({host})",
             "other_brand_domain",
+            (),
+            page_name,
+        )
+
+    # Owner run 2026-10-11, non-negotiable: "it must check brand, must be Orient not
+    # Panasonic - brand must match at any ways".  A retail page hosts every brand, so a
+    # shared capacity code ("18X" inside Panasonic's UE-18XKF9, "18" inside a Gree) can
+    # never be allowed to pose as this row's product: when the page's own title/H1 names
+    # another known maker, the page is strength 0 outright - not a tolerated spelling,
+    # not a flagged last resort.  The judge is the page's *visible name* (title, og:title,
+    # h1), never the URL: retail slugs go stale and Shopify search URLs echo whatever,
+    # while a product's own heading is what the shopper reads.  A page naming no known
+    # maker still goes to the code rules below; a row without a detected brand has
+    # nothing to compare against.
+    name_text = " \n ".join(v for k, v in strong.items() if k != "url")
+    shown_brand = page_product_brand(name_text)
+    if (
+        options.brand_match_reject_other_brand_domain
+        and brand
+        and shown_brand is not None
+        and shown_brand != brand.lower()
+    ):
+        return PageMatchResult(
+            page_url,
+            0,
+            (),
+            f"page shows a {shown_brand} product (row brand is {brand})",
+            "other_brand_product",
             (),
             page_name,
         )

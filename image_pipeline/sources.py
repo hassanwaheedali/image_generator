@@ -38,7 +38,12 @@ from urllib.parse import quote_plus, urlsplit, urlunsplit
 
 from config import PipelineConfig
 from csv_io import atomic_write_text
-from model_matching import fuzzy_identity_match, truncation_variants
+from model_matching import (
+    capacity_codes,
+    fuzzy_identity_match,
+    has_series_name,
+    truncation_variants,
+)
 from models import ModelKeys, PageCandidate, SourceSearchReport
 from textnorm import normalize_key
 from url_filters import is_excluded_host
@@ -289,6 +294,16 @@ def model_tokens_in_url(url: str, keys: ModelKeys) -> bool:
     ``titanium-12s-olive-black-t3-plus.html``).  Without that, no URL on the brand's site is
     ever offered for such a row and the fallback ends up on Daraz and Lazada - which is what
     the owner saw on 2026-10-10 ("why did it not go to brand official").
+
+    Last, the bounded capacity code itself (owner run 2026-10-11, "why not going to brand
+    official strictly first"): ``Orient 18X White`` has the official page
+    ``platinium-18x-matt-white-t3-plus.html``, but ``18x`` is only three letters, so the
+    code loop above never carried it.  Two-or-three digits plus one letter (``18x``,
+    ``19c``) are shape-bounded enough to match on their own - a bare number never does,
+    and another letter (``18g``) stays out.  This route opens **only for a row that has
+    nothing but the code** (no series name): a named row like ``Megatron 12X`` keeps the
+    fuzzy route, which demands the name, so the code alone never drags in another series
+    that happens to share the capacity letter.
     """
     slug = normalize_key(url)
     for token in (*keys.tokens, *keys.identities):
@@ -297,6 +312,10 @@ def model_tokens_in_url(url: str, keys: ModelKeys) -> bool:
         for variant in (token, *truncation_variants(token)):
             if len(variant) >= 4 and variant in slug:
                 return True
+    if not has_series_name(keys):
+        ours = capacity_codes(" ".join(keys.tokens)) or capacity_codes(keys.cleaned_title)
+        if ours and ours & capacity_codes(urlsplit(url).path):
+            return True
     return bool(fuzzy_identity_match(slug, keys))
 
 

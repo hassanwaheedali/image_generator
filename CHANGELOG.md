@@ -23,6 +23,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refrigerator, washing machine, yellow sale template) and over a loopback-HTTP `--dry-run`.
 
 ### Fixed
+- **S1 now enforces the product brand on every page (owner run 2026-10-11).** The
+  `Orient Split AC Hyper 18X Super White` row deferred **Panasonic** and **Gree** pages
+  as tolerated spellings: a retail host is never "another manufacturer", so only the
+  shared capacity code (`18X` inside `UE-18XKF9`, `18` inside `GS-18PITH`) was ever
+  compared, and the variant-tail flow demoted the mismatch to "tolerated" instead of
+  rejecting it. `verify_page` now reads the page's *visible name* (title, og:title, h1 -
+  never the URL slug) with `page_product_brand`, and a page showing another known maker
+  is strength 0 outright (`other_brand_product`): not tolerated, not rescuable by the
+  relaxed fallback tier. Ten global makers (Panasonic, Mitsubishi, Daikin, Sharp,
+  Toshiba, Hitachi, Whirlpool, Bosch, Siemens, Philips) join the brand lexicon.
+- **The query string is no longer evidence.** Shopify search-result URLs echo the
+  searched term (`?_psq=18X`), and that echo sat inside S1's URL evidence, letting
+  wrong-brand pages "carry" the row's key. `_strong_fields` now judges host + path only -
+  the same policy `relaxed_page_match` already had.
+- **The official-brand route sees short capacity codes ("why not going to brand
+  official strictly first").** `sources_for(brand)` already puts the brand's own site
+  first, but `model_tokens_in_url` dropped three-letter codes (`18x` < the 4-char bar),
+  so `Orient 18X White` never saw `platinium-18x-matt-white-t3-plus.html` and died on
+  retailer search pages. A row whose only identity is the capacity code now matches the
+  bounded `\d{2,3}+letter` shape in official URLs; named rows keep the fuzzy route that
+  demands the series name, so `Megatron 12X` still matches only `titanium-12s…`.
+- **The S4 sibling limb no longer kills a row's own anchored files.** Yesterday's fix
+  rejected the Hyper row's own `…Hyper-18X-T3-Super-White-Turbo-Pro.webp` because
+  `turbo` names another sheet row. A file carrying the row's own key/brand+code or its
+  own series word is anchored (`url_anchored_to_row`) and stays; an unanchored file
+  naming a sibling still dies.
 - **S20 no longer rejects clean full-bleed product photos (LOW_1, Mega T3 Pro).** The
   line-art branch fired at `texture >= marketing_max_texture`, and that bar was 18.0 —
   *inside* the measured band of real badge-strip photos (23-26; the owner's LOW_1 measured

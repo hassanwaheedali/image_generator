@@ -28,6 +28,7 @@ from urllib.parse import unquote, urlsplit
 from models import ModelKeys, ProductTask
 from similarity import similar
 from textnorm import WHITESPACE_RE, normalize_key, normalize_text
+from url_filters import KNOWN_BRANDS
 from variant_terms import (
     COLOUR_FAMILIES,
     colour_word_conflict,
@@ -913,9 +914,47 @@ def annotate_sibling_terms(tasks: Sequence[ProductTask]) -> list[ProductTask]:
     tolerated page because neither URL prints the ``19C`` key.  The sheet itself names
     the difference, so the sheet is threaded into the per-row decision.  A single-row
     sheet (or any code-only catalogue) yields empty sets and the limb stays silent.
+
+    Each row also keeps its *own* series words, so a file that carries one of them is
+    recognised as anchored to the row and the sibling limb leaves it alone.
     """
-    terms = sibling_series_terms([task.title for task in tasks])
-    return [replace(task, sibling_terms=own) for task, own in zip(tasks, terms, strict=True)]
+    titles = [task.title for task in tasks]
+    terms = sibling_series_terms(titles)
+    own = [_series_words(title) for title in titles]
+    return [
+        replace(task, sibling_terms=sibling, own_terms=mine)
+        for task, sibling, mine in zip(tasks, terms, own, strict=True)
+    ]
+
+
+def url_anchored_to_row(
+    url: str,
+    keys: ModelKeys,
+    *,
+    brand: str | None = None,
+    own_terms: frozenset[str] = frozenset(),
+) -> bool:
+    """True when a file name provably belongs to *this* row.
+
+    A file is anchored when it carries the row's own model key, or a brand+code
+    spelling of it, or one of the row's own series words.  An anchored file stays
+    even if a sibling word decorates the same name (live 2026-10-11: the Hyper row's
+    ``…Hyper-18X-T3-Super-White-Turbo-Pro.webp`` also says ``turbo``, another row's
+    word, but ``18X`` + ``hyper`` prove it is this row's picture).
+    """
+    if url_matches_this_product(url, keys, brand=brand):
+        return True
+    if own_terms:
+        filename = urlsplit(unquote(url)).path.rsplit("/", 1)[-1]
+        filename = filename.rsplit(".", 1)[0]
+        words = {
+            segment
+            for segment in re.split(r"[^a-z]+", filename.lower())
+            if len(segment) >= _SIBLING_WORD_MIN_LENGTH
+        }
+        if words & own_terms:
+            return True
+    return False
 
 
 def is_display_product(title: str) -> bool:
@@ -1123,6 +1162,16 @@ def find_brand_code_matches(
                 found.append(matched)
                 break
     return tuple(dict.fromkeys(found))
+
+
+def has_series_name(keys: ModelKeys) -> bool:
+    """True when the row names a series/line beyond its brand (``Hyper``, ``Megatron``).
+
+    A bare capacity row (``Orient 18X White`` -> name words ``('orient',)``) has nothing
+    but the code to identify it; a named row has the code *and* the line, and the fuzzy
+    route uses that name so the bare-code route must not widen its matches.
+    """
+    return any(word not in KNOWN_BRANDS for word in keys.name_words)
 
 
 def url_matches_this_product(

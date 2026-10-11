@@ -48,6 +48,10 @@ class ProductTask:
     #: the Orient run of 2026-10-10 published the Innova file on the Pulse row because
     #: neither URL carried the ``19C`` key.  Empty for a single-row sheet.
     sibling_terms: frozenset[str] = frozenset()
+    #: This row's *own* series words.  A file carrying one of them is anchored to the
+    #: row, so a sibling word beside it is decoration, not identity (live 2026-10-11:
+    #: ``…Hyper-18X-T3-Super-White-Turbo-Pro.webp`` must not die on the word ``turbo``).
+    own_terms: frozenset[str] = frozenset()
 
 @dataclass(frozen=True)
 class ModelKeys:

@@ -175,6 +175,20 @@ KNOWN_BRANDS: dict[str, tuple[str, ...]] = {
     "hisense": ("hisensepakistan.com", "hisense.com.pk", "hisense.com"),
     # Midea Pakistan (Green Leaves Pvt Ltd): official online store + corporate + global.
     "midea": ("mideapakistan.store", "mideapakistan.com", "midea.com"),
+    # Global makers whose products appear on Pakistani retail pages (owner run
+    # 2026-10-11: a Panasonic page was deferred as a tolerated spelling of an Orient
+    # row because nothing ever asked which brand the page's product is).  Only the
+    # maker's own domain is listed, so these entries also power the domain check.
+    "panasonic": ("panasonic.com",),
+    "mitsubishi": ("mitsubishi.com", "mitsubishielectric.com"),
+    "daikin": ("daikin.com",),
+    "sharp": ("sharp.com", "sharppakistan.com"),
+    "toshiba": ("toshiba.com",),
+    "hitachi": ("hitachi.com",),
+    "whirlpool": ("whirlpool.com",),
+    "bosch": ("bosch.com",),
+    "siemens": ("siemens.com",),
+    "philips": ("philips.com",),
 }
 
 #: Model-code prefixes that name the maker when the title prints a line name
@@ -286,6 +300,28 @@ def detect_brand(url: str, title: str = "") -> str | None:
         if re.search(rf"\b{prefix}[-\s]?\d", title, re.IGNORECASE):
             return brand
     return None
+
+
+def page_product_brand(text: str) -> str | None:
+    """The manufacturer whose name the page's own text prints first (whole word).
+
+    Retail pages host every brand, so the *host* can never certify the product -
+    the page's title/H1 must.  Owner run 2026-10-11: the ``Orient Hyper 18X`` row
+    deferred Panasonic and Gree pages as tolerated spellings because only the shared
+    capacity code was ever compared.  The first brand named by the page decides
+    (``"Super Asia"`` style spellings are matched with optional inner spaces); a
+    page that names no known maker returns ``None`` and falls back to the code rules.
+    """
+    if not text:
+        return None
+    normalized = re.sub(r"\s+", " ", text.lower())
+    best: tuple[int, str] | None = None
+    for brand in KNOWN_BRANDS:
+        pattern = r"(?<![a-z0-9])" + r"\s?".join(re.escape(ch) for ch in brand) + r"(?![a-z0-9])"
+        hit = re.search(pattern, normalized)
+        if hit and (best is None or hit.start() < best[0]):
+            best = (hit.start(), brand)
+    return best[1] if best else None
 
 
 def host_is_other_manufacturer(host: str, brand: str | None) -> bool:
@@ -452,6 +488,16 @@ BRAND_DISPLAY: dict[str, str] = {
     "superasia": "Super Asia",
     "hisense": "Hisense",
     "midea": "Midea",
+    "panasonic": "Panasonic",
+    "mitsubishi": "Mitsubishi",
+    "daikin": "Daikin",
+    "sharp": "Sharp",
+    "toshiba": "Toshiba",
+    "hitachi": "Hitachi",
+    "whirlpool": "Whirlpool",
+    "bosch": "Bosch",
+    "siemens": "Siemens",
+    "philips": "Philips",
 }
 
 

@@ -479,3 +479,19 @@ def test_the_fuzzy_route_needs_the_name_not_just_a_capacity_code() -> None:
         "https://www.orient.com.pk/products/titanium-12s-olive-black-t3-plus.html", bare
     )
     assert not model_tokens_in_url("https://www.orient.com.pk/air-conditioners.html", bare)
+
+
+def test_the_official_sitemap_route_sees_short_capacity_codes() -> None:
+    """Live 2026-10-11, "why not going to brand official strictly first": the row
+    ``Orient 18X White`` has an official page (``platinium-18x-matt-white-t3-plus.html``),
+    but ``model_tokens_in_url`` dropped the 3-letter code ``18x`` (below the 4-char bar),
+    so the brand's own sitemap offered nothing and the row died on retailer search pages.
+    A capacity code that carries its letter (``18x``, ``19c``) is bounded enough to match
+    the official route - the bare number never does, and another letter stays out."""
+    keys = build_model_keys("Orient 18X White")
+    right = "https://www.orient.com.pk/products/platinium-18x-matt-white-t3-plus.html"
+    assert model_tokens_in_url(right, keys)
+    sibling = "https://www.orient.com.pk/products/hyper-18g-super-white-t3.html"
+    assert not model_tokens_in_url(sibling, keys)   # 18G is not 18X
+    listing = "https://www.orient.com.pk/air-conditioners.html"
+    assert not model_tokens_in_url(listing, keys)

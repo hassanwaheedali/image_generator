@@ -413,3 +413,60 @@ def test_the_tolerance_does_not_accept_the_sibling_capacity() -> None:
         brand="orient",
     )
     assert result.strength == 0
+
+
+# --------------------------------------------------------------------------- #
+# S1 must never accept another brand's product, and never trust the query string
+# --------------------------------------------------------------------------- #
+def test_a_page_showing_another_brand_is_rejected_even_when_the_code_matches() -> None:
+    """Live 2026-10-11, owner's run: the ``Orient Split AC Hyper 18X Super White`` row
+    deferred Panasonic and Gree pages as tolerated spellings because their codes contain
+    ``18X``.  The page's own product brand outranks any code overlap: an Orient row is
+    never satisfied by a Panasonic, whatever the page prints around the number."""
+    keys = build_model_keys("Orient Split AC Hyper 18X Super White")
+    for page_url, page_title in (
+        (
+            (
+                "https://jalalelectronics.com/products/panasonic-split-ac-inverter-1-5ton-"
+                "ue-18xkf9-heat-cool-t3-compressor"
+            ),
+            "Panasonic Split AC Inverter 1.5Ton UE-18XKF9 Heat Cool T3 Compressor",
+        ),
+        (
+            (
+                "https://electrociti.pk/products/gree-gs-18pith-16-turbo-18-pro-t3-white-"
+                "1-5-ton-air-conditioner"
+            ),
+            "Gree GS-18PITH-16 Turbo 18 Pro T3 White 1.5 Ton Air Conditioner",
+        ),
+    ):
+        html = f"<html><head><title>{page_title}</title></head><body><h1>{page_title}</h1></body></html>"
+        result = verify_page(page_url, html, keys, brand="orient")
+        assert result.strength == 0, page_title
+        assert result.accepted is False
+        assert result.tolerated is False, "another brand is a reject, never a last resort"
+        assert result.match_rule == "other_brand_product"
+
+
+def test_the_same_code_on_the_row_s_own_brand_still_matches() -> None:
+    """The brand check must not bite the hand that feeds it: an Orient page on a
+    retailer carrying the same ``18X`` stays proof."""
+    keys = build_model_keys("Orient Split AC Hyper 18X Super White")
+    title = "Orient Split AC Inverter 1.5Ton 18X Mega T3 Ampere Lock Heat Cool"
+    html = f"<html><head><title>{title}</title></head><body><h1>{title}</h1></body></html>"
+    result = verify_page("https://jalalelectronics.com/products/orient-18x-mega", html, keys, brand="orient")
+    assert result.strength == 2
+    assert result.accepted is True
+
+
+def test_a_model_key_only_in_the_query_string_is_no_evidence() -> None:
+    """Shopify search-result URLs echo the searched term (``?_psq=18X``).  The echo is
+    what made Panasonic and Gree pages 'match' the Orient row - the URL evidence is the
+    host and path only, exactly as the relaxed matcher already does."""
+    keys = build_model_keys("Orient Split AC Hyper 18X Super White")
+    title = "Air Conditioners - Jalal Electronics"
+    page_url = "https://jalalelectronics.com/search?page=1&_psq=18X&_ss=e"
+    html = f"<html><head><title>{title}</title></head><body><h1>{title}</h1></body></html>"
+    result = verify_page(page_url, html, keys, brand="orient")
+    assert result.strength == 0
+    assert result.accepted is False
