@@ -75,6 +75,7 @@ from model_matching import (
     url_anchored_to_row,
     url_belongs_to_other_model,
     url_names_other_capacity_code,
+    url_names_other_product_line,
     url_names_sibling_product,
 )
 from models import (
@@ -500,6 +501,14 @@ def process_product(
     rejections: Counter[str] = Counter()
     pages_tried = 0
     pages_rejected = 0
+    #: Owner rule 2026-10-11 ("when found in brand official just download done"): once a
+    #: page on the brand's own host has delivered an accepted picture, the row publishes
+    #: what the brand gave it and searches nothing more - no retailer sheet URL, no
+    #: fallback chain.  Every wrong image of that run (Innova for Pulse, Blaze, Glide)
+    #: arrived *after* the official page had already delivered; fewer correct images
+    #: beat a bigger mixed gallery (owner 2026-10-07), and a PARTIAL status flags the
+    #: row for review instead of silently topping it up with another product.
+    official_solved = False
     budget = _DownloadBudget(
         config.image_full_download_max_per_page,
         config.image_full_download_max_per_row,
@@ -514,6 +523,10 @@ def process_product(
     # 2. Multi-image quota: a product requires at least `min_required_images` (2+).
     #    Never stop early when only 1 image has been found; keep searching fallback
     #    sources until the required quota is reached.
+    # 3. Owner override 2026-10-11: rule 2 stands only while the brand's own site has
+    #    delivered nothing.  Once an official page has supplied a picture the row is
+    #    solved - the hunt that followed it in the live run is what downloaded Innovia
+    #    for Pulse, so no retailer page and no further source is visited after it.
     official_sheet_urls = [u for u in urls if host_is_official(u, brand)]
     non_official_sheet_urls = [u for u in urls if not host_is_official(u, brand)]
     sheet_pages_tried = 0
@@ -526,9 +539,15 @@ def process_product(
         is_fallback: bool,
     ) -> bool:
         nonlocal pages_tried, pages_rejected, sheet_pages_tried, sheet_pages_rejected
+        nonlocal official_solved
         if cancel_event is not None and cancel_event.is_set():
             return False
         if _row_is_done(accepted, config):
+            return False
+        # Owner rule 2026-10-11: the brand's own site already delivered, so nothing else
+        # is searched - the retailer hunt that follows a solved row is exactly what
+        # downloaded another product in the live run.
+        if official_solved:
             return False
         if page_url in visited_page_urls:
             return True
@@ -571,6 +590,7 @@ def process_product(
         pages_tried += 1
         if not is_fallback:
             sheet_pages_tried += 1
+        accepted_before = len(accepted)
         outcome = _visit_page(
             task=task,
             page_url=page_url,
@@ -594,6 +614,14 @@ def process_product(
             tolerated_pages.append((outcome.page_url, source_label, is_fallback))
         elif outcome.tolerated:
             relaxed_notes.append(outcome.tolerated)
+        if (
+            not official_solved
+            and len(accepted) > accepted_before
+            and host_is_official(outcome.page_url, brand)
+        ):
+            # The brand's own page delivered - the row is solved (owner 2026-10-11).
+            official_solved = True
+            stages.append(f"official page solved the row: {outcome.page_url}")
         if not outcome.fetched or not outcome.matched:
             pages_rejected += 1
             if not is_fallback:
@@ -608,6 +636,10 @@ def process_product(
 
     def _ensure_fallback_searched() -> tuple[list[PageCandidate], SourceSearchReport | None]:
         nonlocal fallback_found, fallback_report, fallback_used
+        # Owner rule 2026-10-11: the brand's own site already solved the row, so the
+        # retailer hunt never even starts - no source query, no candidate list.
+        if official_solved:
+            return [], None
         if fallback_found is None:
             if config.fallback_enabled and deps.source_searcher is not None:
                 LOG.info("[row %s] fallback search across retailer sources", task.index)
@@ -1496,6 +1528,23 @@ def _consume_candidates(
             verdict = (
                 "S4",
                 "image URL names another product from this sheet",
+            )
+        if (
+            verdict is None
+            and url_names_other_product_line(candidate.url, keys)
+            and not url_anchored_to_row(
+                candidate.url, keys, brand=brand, own_terms=task.own_terms
+            )
+        ):
+            # S4's fourth limb, no sheet needed (owner run 2026-10-11): the Pulse row
+            # downloaded "15-ton-innova-ultra-white-dc-inverter" although the sheet has
+            # no Innova row - the sibling limb was silent, the file prints no code to
+            # compare, but its own name says another product line.  A word the row does
+            # not own (no brand, no category, no colour, no commerce word) names another
+            # product; a file anchored to this row by its own key or line word stays.
+            verdict = (
+                "S4",
+                "image URL names another product line",
             )
         if verdict is not None:
             rule, detail = verdict

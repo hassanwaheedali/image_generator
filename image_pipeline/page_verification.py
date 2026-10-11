@@ -24,11 +24,13 @@ from config import PipelineConfig
 from model_matching import (
     extract_variant_facts,
     fuzzy_identity_match,
+    fuzzy_series_anchor,
     match_product,
     near_miss_codes,
     variant_conflicts,
 )
 from models import ModelKeys, PageMatchResult
+from textnorm import normalize_key
 from url_filters import (
     IMAGE_EXTENSIONS,
     host_is_official,
@@ -380,6 +382,24 @@ def _strong_fields(soup: BeautifulSoup, page_url: str) -> dict[str, str]:
     return fields
 
 
+def _official_fuzzy_route_applies(evidence: str, keys: ModelKeys) -> bool:
+    """May the brand-host capacity-letter tolerance speak for this row at all?
+
+    The fuzzy shape is capacity-glued (``19cultra`` = ``19c`` + the tail ``ultra``), and
+    a whole product line can spell it (owner run 2026-10-11: Blaze, Glide and Innovia all
+    answered for the Pulse row).  A row that names its line therefore demands the line
+    name on the page as well; a row with no line name (bare code) leaves the tolerance
+    exactly as it was.
+    """
+    anchor = fuzzy_series_anchor(keys)
+    if not anchor:
+        return True
+    slug = normalize_key(evidence)
+    # The evidence is glued (``pulse-19c-ultra`` -> ``pulse19cult...``), so the line name
+    # is matched as a substring, not a bounded word.
+    return any(word in slug for word in anchor)
+
+
 def verify_page(
     page_url: str,
     html: str,
@@ -467,12 +487,26 @@ def verify_page(
     found = decision.found
     notes: list[str] = []
 
-    if strength == 0 and brand and host_is_official(page_url, brand):
+    if (
+        strength == 0
+        and decision.rule == "none"
+        and brand
+        and host_is_official(page_url, brand)
+        and _official_fuzzy_route_applies(f"{page_name} {page_url}", keys)
+    ):
         # The brand's own page spells its own series letter: the sheet says ``12X``, Orient's
         # page and file name say ``titanium-12s-olive-black-t3-plus``.  Exact codes still
         # decide every product-vs-product question - this only lifts *the brand's own host*
         # from "refuse this page" to the tolerated level, so the official gallery is looked
         # at before a marketplace's copy of the product.  A retailer page never gets this.
+        #
+        # Two guards added by the owner run of 2026-10-11 (the Innovia download):
+        # * it never overturns a verdict match_product already gave - a page refused for
+        #   another colourway or another family stays refused, fuzzy or not;
+        # * the identity is capacity-glued (``19cultra`` = ``19C`` + the tail ``ultra``
+        #   the whole Ultra line shares), so for a row that names its line the page must
+        #   also name that line - ``pulse``.  Innovia's ``19sultra`` page names no pulse
+        #   and stays strength 0.
         identity = fuzzy_identity_match(f"{page_name} {page_url}", keys)
         if identity:
             strength, rule, found = 1, "fuzzy_identity", (identity,)

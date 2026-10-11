@@ -23,6 +23,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refrigerator, washing machine, yellow sale template) and over a loopback-HTTP `--dry-run`.
 
 ### Fixed
+- **A wrong product is never accepted - not even from the brand's own official sitemap
+  (owner run 2026-10-11).** The `Pulse 19C Ultra White T3` row downloaded the **Innova
+  19S Ultra** gallery off `orient.com.pk`. Root cause: the official-host fuzzy route in
+  `verify_page` promoted any page whose URL spelled a capacity-glued shape - `19cultra`
+  is spelled just as well by `blaze-19c-ultra`, `glide-19c-silver` and
+  `innova-19s-white` - and that promotion overrode active rejections. The fuzzy route
+  now applies only when no strict decision exists, and a capacity-glued identity
+  (`19cultra`: a shared capacity family plus a word tail, detected only when the glued
+  shape *starts* with the digits - a real part number like `hsu12hfpaa` that merely
+  contains digits stays trusted) is evidence only when the URL also names the row's own
+  line (`fuzzy_series_anchor`). The Pulse row now sees exactly one official page:
+  `pulse-19c-ultra-white-t3.html` - audited against the cached orient.com.pk sitemap,
+  row by row (QG → `qg-12x-aura…` only; Platinium/Titanium each their own; the bare
+  `Orient 18X White` row still sees all three `…18x…` pages).
+- **Once the brand-official page delivered, the search stops.** "Why then keep searching
+  on other retailers' sites and downloading wrong images?" - when a page on the brand's
+  own host accepts an image, the row is marked solved: every remaining candidate is
+  skipped and the retailer fallback search never runs at all (the search itself is
+  gated, not just the loops that consume it).
+- **A multi-product retailer page publishes no wrong-product image.** Combo pages
+  (Blaze/Glide/Pulse on one sheet) carry every sibling's photo. The S4 sibling limb
+  gained a fourth rule: an image URL naming another product line is rejected
+  (`url_names_other_product_line`) unless the file is anchored to this row - and the
+  anchor was hardened: only a real part number or one of the row's own line words proves
+  ownership; the shared capacity code (`18x`) and capacity-glued identities no longer
+  anchor, because a sibling file of another series carries the same code.
+- **The relaxed rescue tier never publishes another line's page.** The loose
+  brand + number fallback still rescues a close page (`DW-7500` for `DW-7500C`, publish
+  + flag), but a URL that names a foreign product line is refused outright - the same
+  Innova page can no longer sneak in through the rescue door on a stray number mention.
+- **Bare-capacity rows keep their wide official route.** `has_series_name` no longer
+  counts brand and catalogue-noise words (`pakistan` from the marketplace pipe tail) as
+  a series name, so `Orient 18X White` still matches the bounded capacity code in
+  official URLs; named rows (QG, Pulse, Platinium) stay on their own line's pages only.
 - **S1 now enforces the product brand on every page (owner run 2026-10-11).** The
   `Orient Split AC Hyper 18X Super White` row deferred **Panasonic** and **Gree** pages
   as tolerated spellings: a retail host is never "another manufacturer", so only the

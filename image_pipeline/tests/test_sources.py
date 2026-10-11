@@ -495,3 +495,21 @@ def test_the_official_sitemap_route_sees_short_capacity_codes() -> None:
     assert not model_tokens_in_url(sibling, keys)   # 18G is not 18X
     listing = "https://www.orient.com.pk/air-conditioners.html"
     assert not model_tokens_in_url(listing, keys)
+
+
+def test_a_named_row_s_sitemap_route_keeps_its_own_line_only() -> None:
+    """Owner run 2026-10-11: the Pulse row's identity is the glued ``19cultra`` - the
+    capacity code ``19C`` plus the tail ``ultra`` that Orient's whole Ultra line shares.
+    The real orient.com.pk sitemap (272 urls) therefore matched four pages for the row:
+    Pulse's own and Blaze's, Glide's and Innovia's.  A row that names its line keeps
+    only the URLs that also name it; the sibling lines of the same capacity stay out."""
+    keys = build_model_keys("Pulse 19C Ultra White T3 | Orient Electronics Pakistan")
+    urls = (
+        "https://www.orient.com.pk/products/blaze-19c-ultra-golden-t3.html",
+        "https://www.orient.com.pk/products/glide-19c-ultra-silver-t3.html",
+        "https://www.orient.com.pk/products/innova-19s-ultra-white-t3.html",
+        "https://www.orient.com.pk/products/pulse-19c-ultra-white-t3.html",
+        "https://www.orient.com.pk/air-conditioners.html",
+    )
+    hits = [url for url in urls if model_tokens_in_url(url, keys)]
+    assert hits == ["https://www.orient.com.pk/products/pulse-19c-ultra-white-t3.html"]

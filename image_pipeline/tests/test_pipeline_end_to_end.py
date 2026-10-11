@@ -709,11 +709,13 @@ def test_download_budget_stops_runaway_rows(tmp_path: Path) -> None:
     config = live_config(
         tmp_path, image_full_download_max_per_page=1, image_full_download_max_per_row=1
     )
+    # The URLs name the row's own model so the wrong-product limbs stay silent and
+    # the row reaches the download stage, where every one of them 404s.
     page = """<html><head><title>Haier HSU-12HFPAA Inverter AC</title></head>
     <body><div class="product-gallery">
-      <img src="https://cdn.haier.com/p/broken-1.jpg">
-      <img src="https://cdn.haier.com/p/broken-2.jpg">
-      <img src="https://cdn.haier.com/p/broken-3.jpg"></div></body></html>"""
+      <img src="https://cdn.haier.com/p/hsu-12hfpaa-1.jpg">
+      <img src="https://cdn.haier.com/p/hsu-12hfpaa-2.jpg">
+      <img src="https://cdn.haier.com/p/hsu-12hfpaa-3.jpg"></div></body></html>"""
     deps, _, image_fetcher, _ = build_deps(tmp_path, {HAIER_PAGE: page}, {})   # every URL 404s
     result, _ = process_product(
         task(0, "Haier HSU-12HFPAA Inverter AC", (HAIER_PAGE,)), deps, config
@@ -2103,11 +2105,13 @@ def test_description_only_page_relaxes_s2() -> None:
     assert kept[0].dom_flags == ("S2",)      # page has a real gallery: S2 stays strict
 
 
-def test_official_below_floor_picture_publishes_before_retailer_search(tmp_path: Path) -> None:
+def test_official_below_floor_picture_publishes_and_retailer_search_never_runs(tmp_path: Path) -> None:
     """Owner 2026-10-09: "brand official sey mil gaye toh le lo jaisa hay".  The brand
     page only has a below-floor photo; since the compression floors now judge blur
-    (not bytes), the sharp official picture is accepted on the official visit itself -
-    kept in the log before any retailer page is even fetched."""
+    (not bytes), the sharp official picture is accepted on the official visit itself.
+    Owner 2026-10-11 ("when found in brand official just download done"): once that
+    official page has delivered, the retailer hunt never starts - the retail page is
+    never fetched and the fallback chain never runs."""
     small_url = "https://cdn.haier.com/p/hsu-12hfpaa-hero-lowq.jpg"
     small = _jpeg_bytes(clean_product_image(700, 700, "#c9a227"))
     page = load_fixture("product_ok")
@@ -2140,10 +2144,9 @@ def test_official_below_floor_picture_publishes_before_retailer_search(tmp_path:
     ]
     kept = [entry["url"] for entry in log if entry["decision"] == "keep"]
     assert small_url in kept                      # the official picture published
-    assert page_fetcher.requested.index(HAIER_PAGE) < page_fetcher.requested.index(retail)
-    official_at = next(i for i, entry in enumerate(log) if entry["url"] == small_url)
-    retail_at = next(i for i, entry in enumerate(log) if "retail.pk" in entry["url"])
-    assert official_at < retail_at                # official kept before retailer touched
+    assert HAIER_PAGE in page_fetcher.requested
+    assert retail not in page_fetcher.requested   # official solved it: no retailer hunt
+    assert not any("retail.pk" in entry["url"] for entry in log)
 
 
 def test_an_ai_emblem_in_the_gallery_is_rejected_not_published(tmp_path: Path) -> None:
@@ -2474,3 +2477,156 @@ def test_the_sibling_limb_never_rejects_a_file_anchored_to_its_own_row(tmp_path:
     assert not any("gree-18pith" in image.source_url.lower() for image in accepted)
     decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
     assert "names another product from this sheet" in decisions
+
+
+# --------------------------------------------------------------------------- #
+# Owner run 2026-10-11: the Pulse row downloaded Innovia
+# --------------------------------------------------------------------------- #
+def test_the_row_stops_searching_once_the_brand_official_page_delivered(tmp_path: Path) -> None:
+    """The owner's "when found in brand official just download done": the row's official
+    page gave one correct picture, then the quota hunt visited a retailer page and the
+    fallback chain - the source of every wrong image in that run.  Once an official page
+    has delivered, the row publishes what the brand gave it and searches nothing else."""
+    config = live_config(tmp_path)
+    official_url = "https://www.orient.com.pk/products/pulse-19c-ultra-white-t3.html"
+    official_png = (
+        "https://www.orient.com.pk/assets/products-images-2026/air-conditioners/"
+        "15-ton-pulse-ultra-white-dc-inverter.png"
+    )
+    retailer_url = "https://www.bijlibazar.com/orient-pulse-19c-ultra"
+    retailer_png = "https://www.bijlibazar.com/media/pulse-19c-hero.webp"
+    fallback_url = "https://www.coolingshop.pk/products/orient-pulse-19c"
+    fallback_png = "https://www.coolingshop.pk/cdn/pulse-19c.jpg"
+    official_html = (
+        "<html><head><title>Pulse 19C Ultra White T3 | Orient Electronics Pakistan</title></head>"
+        "<body><h1>Pulse 19C Ultra White T3</h1>"
+        f"<div class='product-gallery'><img src=\"{official_png}\"></div></body></html>"
+    )
+    retailer_html = (
+        "<html><head><title>Orient Pulse 19C Ultra White T3 price</title></head>"
+        "<body><h1>Orient Pulse 19C Ultra White T3</h1>"
+        f"<div class='product-gallery'><img src=\"{retailer_png}\"></div></body></html>"
+    )
+    fallback_html = (
+        "<html><head><title>Orient Pulse 19C Ultra White T3</title></head>"
+        "<body><h1>Orient Pulse 19C Ultra White T3</h1>"
+        f"<div class='product-gallery'><img src=\"{fallback_png}\"></div></body></html>"
+    )
+    searcher = FakeSourceSearcher(
+        candidates=[
+            PageCandidate(
+                url=fallback_url, origin="woo:www.coolingshop.pk", method="woo",
+                title_hint="Orient Pulse 19C",
+            )
+        ],
+        report=SourceSearchReport(tried=("www.coolingshop.pk:woo:1",)),
+    )
+    deps, page_fetcher, image_fetcher, _ = build_deps(
+        tmp_path,
+        {official_url: official_html, retailer_url: retailer_html, fallback_url: fallback_html},
+        {
+            official_png: png_bytes(clean_product_image()),
+            retailer_png: png_bytes(second_angle_image()),
+            fallback_png: png_bytes(third_angle_image()),
+        },
+    )
+    deps.source_searcher = searcher
+    result, images = process_product(
+        task(0, "Pulse 19C Ultra White T3 | Orient Electronics Pakistan", (official_url, retailer_url)),
+        deps,
+        config,
+    )
+    assert len(images) == 1
+    assert "pulse-ultra-white" in images[0].source_url
+    assert result.status is Status.PARTIAL       # one image, flagged for review - never a wrong one
+    assert retailer_url not in page_fetcher.requested
+    assert fallback_url not in page_fetcher.requested
+    assert searcher.calls == []                  # the fallback chain never even ran
+    assert retailer_png not in image_fetcher.requested
+    assert fallback_png not in image_fetcher.requested
+
+
+def test_an_official_page_of_another_line_publishes_nothing(tmp_path: Path) -> None:
+    """The exact wrong download of the owner run 2026-10-11: the brand's own sitemap
+    offered ``innova-19s-ultra-white-t3.html`` for the Pulse row, and the official-host
+    fuzzy promotion accepted it.  The page names another line (no ``pulse`` anywhere),
+    so it is strength 0 and its gallery is never looked at."""
+    config = live_config(tmp_path)
+    sheet_url = "https://www.orient.com.pk/air-conditioners.html"
+    sheet_html = (
+        "<html><head><title>Air Conditioners | Orient Electronics Pakistan</title></head>"
+        "<body><h1>Orient Air Conditioners</h1><p>Explore the full range.</p></body></html>"
+    )
+    innova_url = "https://www.orient.com.pk/products/innova-19s-ultra-white-t3.html"
+    innova_png = (
+        "https://www.orient.com.pk/assets/products-images-2026/air-conditioners/"
+        "15-ton-innova-ultra-white-dc-inverter-4742e7e9.png"
+    )
+    innova_html = (
+        "<html><head><title>Innova 19S Ultra White T3 | Orient Electronics Pakistan</title></head>"
+        "<body><h1>Innova 19S Ultra White T3</h1>"
+        f"<div class='product-gallery'><img src=\"{innova_png}\"></div></body></html>"
+    )
+    searcher = FakeSourceSearcher(
+        candidates=[
+            PageCandidate(
+                url=innova_url, origin="sitemap:www.orient.com.pk",
+                method="sitemap", title_hint="innova-19s-ultra-white-t3.html",
+            )
+        ],
+        report=SourceSearchReport(tried=("www.orient.com.pk:sitemap:1",)),
+    )
+    deps, _, image_fetcher, _ = build_deps(
+        tmp_path,
+        {sheet_url: sheet_html, innova_url: innova_html},
+        {innova_png: png_bytes(clean_product_image())},
+    )
+    deps.source_searcher = searcher
+    result, images = process_product(
+        task(0, "Pulse 19C Ultra White T3 | Orient Electronics Pakistan", (sheet_url,)),
+        deps,
+        config,
+    )
+    assert images == []
+    assert result.status is Status.FAILED
+    assert innova_png not in image_fetcher.requested
+
+
+def test_an_image_naming_an_unknown_line_dies_without_sheet_knowledge(tmp_path: Path) -> None:
+    """The sheet-knowledge limb is silent when the other product has no row of its own
+    (this sheet has no Innova row), yet the wrong file still names itself.  A strongly
+    matched page may carry both galleries; the file whose name says ``innova`` is refused
+    for a Pulse row by its filename alone, and the row's own file stays."""
+    config = live_config(tmp_path)
+    page_url = "https://www.bijlibazar.com/orient-pulse-19c-ultra-white"
+    own_png = (
+        "https://www.orient.com.pk/assets/products-images-2026/air-conditioners/"
+        "15-ton-pulse-ultra-white-dc-inverter.png"
+    )
+    foreign_png = (
+        "https://www.orient.com.pk/assets/products-images-2026/air-conditioners/"
+        "15-ton-innova-ultra-white-dc-inverter-4742e7e9.png"
+    )
+    html = (
+        "<html><head><title>Orient Pulse 19C Ultra White T3 price in Pakistan</title></head>"
+        "<body><h1>Orient Pulse 19C Ultra White T3</h1>"
+        f"<div class='product-gallery'><img src=\"{own_png}\"><img src=\"{foreign_png}\"></div>"
+        "</body></html>"
+    )
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {page_url: html},
+        {
+            own_png: png_bytes(clean_product_image(900, 900, "#f4f4f4")),
+            foreign_png: png_bytes(second_angle_image()),
+        },
+    )
+    result, images = process_product(
+        task(0, "Pulse 19C Ultra White T3 | Orient Electronics Pakistan", (page_url,)),
+        deps,
+        config,
+    )
+    assert any("pulse-ultra-white" in image.source_url for image in images)
+    assert not any("innova" in image.source_url for image in images)
+    decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
+    assert "names another product line" in decisions

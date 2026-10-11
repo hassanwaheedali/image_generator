@@ -298,6 +298,12 @@ def relaxed_page_match(
     # result would otherwise "match" itself.  Judge by host + path + page text only.
     url_evidence = f"{parts.netloc} {parts.path}"
     haystack = f"{url_evidence} {page_text}".lower()
+    # Owner run 2026-10-11: the rescue tier stays loose by design (publish + flag), but
+    # a URL that *names another product line* is not loose, it is wrong - the official
+    # sitemap handed the ``Pulse 19C`` row an ``Innova 19S Ultra`` page, and a bare
+    # number in the body text must not publish that gallery under the rescue flag.
+    if url_names_other_product_line(page_url, keys):
+        return False, ""
     for identity in keys.identities:
         pattern = _whole_token_pattern(identity)
         if len(identity) >= 5 and pattern is not None and pattern.search(haystack):
@@ -927,6 +933,38 @@ def annotate_sibling_terms(tasks: Sequence[ProductTask]) -> list[ProductTask]:
     ]
 
 
+#: The shape of a shared capacity pair ("18x", "19c"): the whole identity of a bare
+#: capacity row, and the one code that many models of one maker share.
+_CAPACITY_SHAPE_RE = re.compile(r"\d{2,3}[a-z]")
+
+
+def _strong_anchor_keys(keys: ModelKeys) -> ModelKeys:
+    """The keys that prove a file on their own.
+
+    A real part number (``hrf538ifga``, ``dw7500c``, ``msez2c18hrfn1``) names exactly
+    one product.  The shared capacity pair (``18x``) and the capacity-glued identity
+    (``19cultra``) do not: the pair names every model of the tonnage, and the glued
+    shape names the whole product line (owner run 2026-10-11: ``blaze-19c-ultra``
+    spells ``19cultra`` too).  Neither may anchor a file that a foreign product word
+    accuses, so they are filtered out before the anchor asks the URL anything.
+    """
+    strong_tokens = tuple(
+        token
+        for token in keys.tokens
+        if token
+        and not _CAPACITY_SHAPE_RE.fullmatch(token.lower())
+        and not identity_is_capacity_glued(token.lower())
+    )
+    strong_identities = tuple(
+        identity
+        for identity in keys.identities
+        if identity
+        and not _CAPACITY_SHAPE_RE.fullmatch(identity.lower())
+        and not identity_is_capacity_glued(identity.lower())
+    )
+    return replace(keys, tokens=strong_tokens, identities=strong_identities)
+
+
 def url_anchored_to_row(
     url: str,
     keys: ModelKeys,
@@ -936,15 +974,27 @@ def url_anchored_to_row(
 ) -> bool:
     """True when a file name provably belongs to *this* row.
 
-    A file is anchored when it carries the row's own model key, or a brand+code
-    spelling of it, or one of the row's own series words.  An anchored file stays
-    even if a sibling word decorates the same name (live 2026-10-11: the Hyper row's
-    ``…Hyper-18X-T3-Super-White-Turbo-Pro.webp`` also says ``turbo``, another row's
-    word, but ``18X`` + ``hyper`` prove it is this row's picture).
+    A file is anchored when it carries one of the row's *strong* keys - a real part
+    number, never the shared capacity pair or a capacity-glued identity - or one of the
+    row's own line words.  An anchored file stays even if another product's word
+    decorates the same name (live 2026-10-11: the Hyper row's ``…Hyper-18X-T3-Super-
+    White-Turbo-Pro.webp`` also says ``turbo``, another row's word, but ``hyper``
+    proves it is this row's picture; ``18X`` alone would not, because the sibling file
+    of another series can carry the same capacity code).  The brand and the catalogue
+    noise never anchor: every Orient asset says ``orient``, so the word proves nothing
+    and would let ``orient-blaze-…`` pose as any Orient row.
     """
-    if url_matches_this_product(url, keys, brand=brand):
+    strong = _strong_anchor_keys(keys)
+    if (strong.tokens or strong.identities) and url_matches_this_product(
+        url, strong, brand=brand
+    ):
         return True
-    if own_terms:
+    usable = {
+        word
+        for word in own_terms
+        if word not in KNOWN_BRANDS and word not in _KEYWORD_EXTRA_NOISE
+    }
+    if usable:
         filename = urlsplit(unquote(url)).path.rsplit("/", 1)[-1]
         filename = filename.rsplit(".", 1)[0]
         words = {
@@ -952,9 +1002,67 @@ def url_anchored_to_row(
             for segment in re.split(r"[^a-z]+", filename.lower())
             if len(segment) >= _SIBLING_WORD_MIN_LENGTH
         }
-        if words & own_terms:
+        if words & usable:
             return True
     return False
+
+
+#: File-name words that describe commerce and photography, never a product line.  A
+#: foreign word is evidence of *another product* only after these stay silent, so a
+#: retailer's ``…-hero-banner-sale.webp`` can never pose as a sibling model.
+_URL_COMMERCE_NOISE = frozenset((
+    "sale", "offer", "offers", "deal", "deals", "discount", "price", "prices",
+    "shop", "store", "online", "buy", "order", "delivery", "shipping", "warranty",
+    "install", "installation", "support", "latest", "arrival", "exclusive",
+    "genuine", "official", "authentic", "package", "bundle", "combo", "stabilizer",
+    "copper", "energy", "saving", "karachi", "lahore", "islamabad",
+    "products", "product", "images", "image", "photo", "photos", "gallery",
+    "assets", "media", "files", "uploads", "thumbnail", "thumb", "banner", "hero",
+    "main", "front", "back", "side", "view", "detail", "zoom", "extra", "large",
+    "small", "square",
+    # file-name decorations a studio or CDN appends to the very same picture, and the
+    # page furniture that names a graphic, never a product (S14 judges emblems itself).
+    "lowq", "highq", "hires", "lores", "orig", "copy", "final", "edited",
+    "retouch", "render", "mockup", "emblem", "badge", "icon", "watermark",
+    "stamp", "seal",
+))
+
+
+def url_names_other_product_line(url: str, keys: ModelKeys) -> bool:
+    """Safeguard S4, fourth limb - sheet knowledge not required.
+
+    The owner run of 2026-10-11 downloaded ``15-ton-innova-ultra-white-dc-inverter``
+    for the ``Pulse 19C Ultra`` row: the sheet has no Innova row, so the sibling limb
+    was silent, and the file carries no code for the code limbs to compare.  But the
+    file *names itself*: a product word the row does not own, that is no brand, no
+    category, no colour and no commerce word.  A row with a line name (``pulse``)
+    refuses such a file; a bare-capacity row has no line to protect and stays with its
+    code guards.  The limb only names the danger - a file anchored to this row by its
+    own key or its own line word still stays (see :func:`url_anchored_to_row`).
+    """
+    if not has_series_name(keys):
+        return False
+    filename = urlsplit(unquote(url)).path.rsplit("/", 1)[-1]
+    filename = filename.rsplit(".", 1)[0]
+    words = {
+        segment
+        for segment in re.split(r"[^a-z]+", filename.lower())
+        if len(segment) >= _SIBLING_WORD_MIN_LENGTH
+    }
+    if not words:
+        return False
+    own = set(keys.name_words)
+    foreign = {
+        word
+        for word in words
+        if word not in own
+        and word not in KNOWN_BRANDS
+        and word not in _GENERIC_NAME_WORDS
+        and word not in _KEYWORD_EXTRA_NOISE
+        and word not in _URL_COMMERCE_NOISE
+        and not is_colour_word(word)
+    }
+    return bool(foreign)
 
 
 def is_display_product(title: str) -> bool:
@@ -1164,14 +1272,56 @@ def find_brand_code_matches(
     return tuple(dict.fromkeys(found))
 
 
+def fuzzy_series_anchor(keys: ModelKeys) -> frozenset[str]:
+    """The row's own line names - the words a page/file must carry before a
+    capacity-shaped match may speak for it.
+
+    Owner run 2026-10-11: the row ``Pulse 19C Ultra`` glues its identity ``19cultra``
+    out of the capacity code ``19C`` and the tail ``ultra`` - and Orient sells a whole
+    *line* called Ultra (Blaze 19C Ultra, Glide 19C Ultra, Innovia 19S Ultra ...).  The
+    glued shape therefore names four different products, and the fuzzy letter tolerance
+    (``19[a-z]?ultra``, built for Titanium 12X vs 12S) named a fifth.  What separates
+    the products is the line name: ``pulse``.  The anchor is the row's name words minus
+    the brand (``orient``), minus catalogue noise (``pakistan`` from the pipe tail) and
+    minus the glued identity's own tail (``ultra`` is part of ``19cultra`` and shared by
+    the whole line, so it can never anchor anything).  A bare capacity row has no anchor
+    and no line to protect - its codes guard it alone.
+    """
+    return frozenset(
+        word
+        for word in keys.name_words
+        if word not in KNOWN_BRANDS
+        and word not in _KEYWORD_EXTRA_NOISE
+        and not any(identity.endswith(word) for identity in keys.identities)
+    )
+
+
 def has_series_name(keys: ModelKeys) -> bool:
     """True when the row names a series/line beyond its brand (``Hyper``, ``Megatron``).
 
     A bare capacity row (``Orient 18X White`` -> name words ``('orient',)``) has nothing
     but the code to identify it; a named row has the code *and* the line, and the fuzzy
-    route uses that name so the bare-code route must not widen its matches.
+    route uses that name so the bare-code route must not widen its matches.  The pipe
+    tail of marketplace titles (``| Orient Electronics Pakistan``) is not a line name.
+    The glued identity's tail counts here (``QG 12X Aura`` is a named row even though
+    ``aura`` glues into the identity) - only :func:`fuzzy_series_anchor` drops it.
     """
-    return any(word not in KNOWN_BRANDS for word in keys.name_words)
+    return any(
+        word not in KNOWN_BRANDS and word not in _KEYWORD_EXTRA_NOISE
+        for word in keys.name_words
+    )
+
+
+def identity_is_capacity_glued(identity: str) -> bool:
+    """True when a glued identity is a capacity code plus a word tail (``19cultra``).
+
+    That shape is the ambiguous one: the tail is a word, so another product that shares
+    the capacity family (``blaze-19c-ultra``) or the tail (``innova-19s-ultra``) spells
+    the same shape.  The shape must *start* with the digits - a real part number that
+    merely contains digits mid-name (``hsu12hfpaa``) is not ambiguous and stays trusted
+    wherever it appears.
+    """
+    return _FUZZY_CODE_RE.match(identity) is not None
 
 
 def url_matches_this_product(

@@ -41,7 +41,9 @@ from csv_io import atomic_write_text
 from model_matching import (
     capacity_codes,
     fuzzy_identity_match,
+    fuzzy_series_anchor,
     has_series_name,
+    identity_is_capacity_glued,
     truncation_variants,
 )
 from models import ModelKeys, PageCandidate, SourceSearchReport
@@ -304,19 +306,44 @@ def model_tokens_in_url(url: str, keys: ModelKeys) -> bool:
     nothing but the code** (no series name): a named row like ``Megatron 12X`` keeps the
     fuzzy route, which demands the name, so the code alone never drags in another series
     that happens to share the capacity letter.
+
+    The glued-identity routes carry one more condition for a named row (owner run
+    2026-10-11, the Innovia download): the identity ``19cultra`` is the capacity code
+    ``19c`` glued to the tail ``ultra``, and Orient's whole Ultra line spells it -
+    the real sitemap matched Blaze's, Glide's and Innovia's pages for the Pulse row.
+    A capacity-glued identity (and its fuzzy letter tolerance) therefore only counts
+    when the URL also names the row's own line (``pulse``); a real part number stays
+    trusted wherever it appears.
     """
     slug = normalize_key(url)
-    for token in (*keys.tokens, *keys.identities):
+    anchor = fuzzy_series_anchor(keys)
+
+    def names_the_line() -> bool:
+        # The slug is glued (``pulse-19c-ultra`` -> ``pulse19cult...``), so a boundary
+        # regex would refuse the row's own page; the line name is distinctive enough to
+        # match as a substring.
+        return any(word in slug for word in anchor)
+
+    for token in keys.tokens:
         if not token:
             continue
         for variant in (token, *truncation_variants(token)):
             if len(variant) >= 4 and variant in slug:
                 return True
+    for identity in keys.identities:
+        if not identity:
+            continue
+        guarded = identity_is_capacity_glued(identity) and bool(anchor)
+        for variant in (identity, *truncation_variants(identity)):
+            if len(variant) >= 4 and variant in slug and (not guarded or names_the_line()):
+                return True
     if not has_series_name(keys):
         ours = capacity_codes(" ".join(keys.tokens)) or capacity_codes(keys.cleaned_title)
         if ours and ours & capacity_codes(urlsplit(url).path):
             return True
-    return bool(fuzzy_identity_match(slug, keys))
+    if not fuzzy_identity_match(slug, keys):
+        return False
+    return not anchor or names_the_line()
 
 
 def rank_candidates(

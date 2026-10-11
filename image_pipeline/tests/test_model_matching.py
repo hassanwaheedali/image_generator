@@ -551,6 +551,29 @@ def test_fallback_match_ignores_the_search_query_in_the_url() -> None:
     assert relaxed_page_match(right, text_right, keys, "pel")[0]
 
 
+def test_relaxed_rescue_never_publishes_another_line_s_page_for_a_named_row() -> None:
+    """Owner run 2026-10-11: the rescue tier is loose by design (publish + flag), but a
+    URL that *names another product line* is not loose, it is wrong.  The official
+    sitemap handed the ``Pulse 19C Ultra`` row an ``Innova 19S Ultra`` page - same maker,
+    same capacity family, wrong product - and a bare number in the body text must not
+    publish that gallery under the rescue flag.  The same number on a page whose URL
+    names no foreign line still rescues, so the guard is precise, not blanket."""
+    pulse = build_model_keys("Pulse 19C Ultra White T3 | Orient Electronics Pakistan")
+    innova_page = (
+        "https://www.orient.com.pk/air-conditioners/split/innova-19s-ultra-white-dc-inverter.html"
+    )
+    innova_text = "Orient Innova 19S Ultra White DC Inverter AC, cooling capacity 19000 BTU"
+    assert not relaxed_page_match(innova_page, innova_text, pulse, "orient")[0]
+
+    white = build_model_keys("DW 7500 TWIN TUB CLEAR LID (WHITE)")
+    foreign_url = "https://www.dawlance.com.pk/twin-tub/avanto-7500-twin-tub-white"
+    plain_url = "https://example.pk/products/x"
+    matching_text = "Dawlance 7500 Twin Tub, model DW-7500 C"
+    # the number alone would rescue - the foreign word in the URL forbids it.
+    assert relaxed_page_match(plain_url, matching_text, white, "Dawlance")[0]
+    assert not relaxed_page_match(foreign_url, matching_text, white, "Dawlance")[0]
+
+
 # --------------------------------------------------------------------------- #
 # slash-variant codes: HSU-13HFCP/023WDC(W) - the part before the slash is the model
 # --------------------------------------------------------------------------- #
@@ -784,3 +807,52 @@ def test_s4_sibling_check_reads_the_file_name_not_the_folders() -> None:
 
     url = "https://cdn.x.com/assets/air-conditioners/generic-white-unit.png"
     assert not url_names_sibling_product(url, frozenset({"conditioners"}))
+
+
+# --------------------------------------------------------------------------- #
+# The sheet-independent product-line guard (owner run 2026-10-11, Innovia case)
+# --------------------------------------------------------------------------- #
+def test_the_series_anchor_is_the_rows_own_line_name() -> None:
+    """The fuzzy/identity routes may only speak for a page that names the row's own
+    line.  The anchor drops the brand, the catalogue noise (``pakistan`` from the pipe
+    tail) and the glued identity's tail - ``ultra`` is part of ``19cultra``, and it is
+    shared by the whole Orient Ultra line, so it can never anchor anything."""
+    from model_matching import fuzzy_series_anchor, has_series_name
+
+    pulse = build_model_keys("Pulse 19C Ultra White T3 | Orient Electronics Pakistan")
+    assert fuzzy_series_anchor(pulse) == frozenset({"pulse"})
+    assert has_series_name(pulse)
+
+    bare = build_model_keys("Orient 18X White")
+    assert fuzzy_series_anchor(bare) == frozenset()
+    assert not has_series_name(bare)
+
+    noisy_bare = build_model_keys("Orient 18X White | Orient Electronics Pakistan")
+    assert fuzzy_series_anchor(noisy_bare) == frozenset()
+    assert not has_series_name(noisy_bare)
+
+
+def test_an_image_url_naming_another_product_line_is_rejected() -> None:
+    """The Innovia download of the owner run 2026-10-11: the file names a line the row
+    does not own, carries none of the row's codes and none of its own line words.  The
+    sheet did not contain an Innova row, so the sheet-knowledge limb was silent; this
+    guard does not need the sheet.  The row's own files stay: the one named by its line
+    word, the one anchored by its key, and a name that carries no product words at all."""
+    from model_matching import url_names_other_product_line
+
+    pulse = build_model_keys("Pulse 19C Ultra White T3 | Orient Electronics Pakistan")
+    innova = (
+        "https://www.orient.com.pk/assets/products-images-2026/air-conditioners/"
+        "15-ton-innova-ultra-white-dc-inverter-4742e7e9.png"
+    )
+    own = (
+        "https://www.orient.com.pk/assets/products-images-2026/air-conditioners/"
+        "15-ton-pulse-ultra-white-dc-inverter.png"
+    )
+    blaze = "https://newglacier.pk/media/orient-blaze-19c-ultra-golden-t3.webp"
+    assert url_names_other_product_line(innova, pulse)
+    assert url_names_other_product_line(blaze, pulse)
+    assert not url_names_other_product_line(own, pulse)
+    # A bare-capacity row has no line name to protect; its codes guard it instead.
+    bare = build_model_keys("Orient 18X White")
+    assert not url_names_other_product_line(innova, bare)

@@ -470,3 +470,51 @@ def test_a_model_key_only_in_the_query_string_is_no_evidence() -> None:
     result = verify_page(page_url, html, keys, brand="orient")
     assert result.strength == 0
     assert result.accepted is False
+
+
+# --------------------------------------------------------------------------- #
+
+# The official-host fuzzy route must never speak for another product line
+# --------------------------------------------------------------------------- #
+PULSE_ROW = "Pulse 19C Ultra White T3 | Orient Electronics Pakistan"
+
+
+def _orient_line_page(model: str) -> str:
+    return (
+        "<html><head>"
+        f"<title>Orient {model} | Orient Electronics Pakistan</title>"
+        "</head><body>"
+        f"<h1>{model}</h1>"
+        "<p>DC Inverter split air conditioner, heat and cool.</p>"
+        "</body></html>"
+    )
+
+
+def test_the_official_fuzzy_route_never_promotes_a_sibling_line_page() -> None:
+    """Owner run 2026-10-11: for the ``Pulse 19C Ultra`` row the brand's own sitemap
+    listed three *other* products of the same Ultra line, and the official-host fuzzy
+    promotion accepted every one of them.  ``19C Ultra`` is a capacity code plus a tail
+    the whole line shares, so ``19[a-z]?ultra`` matches Innovia's ``19S Ultra`` and the
+    glued ``19cultra`` sits inside Blaze's and Glide's names.  A fuzzy promotion is a
+    lookup of the brand's own page for *this* product: the page must name the row's own
+    line (``pulse``), and a page match_product already refused (another colourway) can
+    never be rescued by it."""
+    keys = build_model_keys(PULSE_ROW)
+    cases = (
+        (
+            "https://www.orient.com.pk/products/innova-19s-ultra-white-t3.html",
+            "Innova 19S Ultra White T3",
+        ),
+        (
+            "https://www.orient.com.pk/products/blaze-19c-ultra-golden-t3.html",
+            "Blaze 19C Ultra Golden T3",
+        ),
+        (
+            "https://www.orient.com.pk/products/glide-19c-ultra-silver-t3.html",
+            "Glide 19C Ultra Silver T3",
+        ),
+    )
+    for page_url, page_title in cases:
+        result = verify_page(page_url, _orient_line_page(page_title), keys, brand="orient")
+        assert result.strength == 0, page_url
+        assert result.accepted is False, page_url
