@@ -193,18 +193,29 @@ def shop_spellings(token: str) -> list[str]:
     return spellings
 
 
-def search_terms(keys: ModelKeys, *, limit: int = 3) -> tuple[str, ...]:
+def search_terms(keys: ModelKeys, *, brand: str | None = None, limit: int = 3) -> tuple[str, ...]:
     """The terms a shop is searched for: always the **sheet's own** model keys.
 
     All spellings of the first key are tried before the next key - the *term* is still the
-    sheet's own model, never a code read off some page.
+    sheet's own model, never a code read off some page.  When the row's brand is known it
+    leads the query ("Orient 18X" before "18X"): a bare capacity code is shared by every
+    maker, and an unbranded query is how a Panasonic ``18XKF9`` page surfaced for the
+    Orient Megatron row (owner run 2026-10-12).  The bare spelling stays as the fallback,
+    so a shop that indexes the code alone is still found - and the page's own brand gate
+    remains the hard stop.
     """
     terms: list[str] = []
+
+    def add(term: str) -> bool:
+        if term not in terms:
+            terms.append(term)
+        return len(terms) >= limit
+
     for token in keys.tokens:
         for spelling in shop_spellings(token):
-            if spelling not in terms:
-                terms.append(spelling)
-            if len(terms) >= limit:
+            if brand and add(f"{brand.title()} {spelling}"):
+                return tuple(terms)
+            if add(spelling):
                 return tuple(terms)
     return tuple(terms)
 
@@ -407,7 +418,7 @@ class SourceChain:
         keys: ModelKeys,
     ) -> tuple[list[PageCandidate], SourceSearchReport]:
         """Candidate pages for this row, official brand sources first."""
-        terms = search_terms(keys)
+        terms = search_terms(keys, brand=brand)
         if not terms:
             return [], SourceSearchReport(())
         tried: list[str] = []

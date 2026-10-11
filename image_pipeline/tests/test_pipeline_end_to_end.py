@@ -2630,3 +2630,92 @@ def test_an_image_naming_an_unknown_line_dies_without_sheet_knowledge(tmp_path: 
     assert not any("innova" in image.source_url for image in images)
     decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
     assert "names another product line" in decisions
+
+
+def test_a_panasonic_page_is_never_published_for_an_orient_row(tmp_path: Path) -> None:
+    """The exact wrong download of the owner run 2026-10-12: the Megatron 18X row
+    published Panasonic ``18XKF9`` renders found by a bare ``18X`` shop search.  The
+    retailer page names another maker in its own title, so it is strength 0 outright -
+    not tolerated, not rescued - and its gallery (the nameless ``UntitledProject``
+    renders) is never looked at."""
+    config = live_config(tmp_path)
+    page_url = (
+        "https://www.surmawala.pk/products/panasonic-18xkf-9-1-5-ton-inverter-"
+        "air-conditioner-2024"
+    )
+    panasonic_jpg = "https://cdn.shopify.com/s/files/1/x/files/panasonic.jpg"
+    render_webp = (
+        "https://cdn.shopify.com/s/files/1/x/files/"
+        "UntitledProject-2024-04-29T104202.450.webp"
+    )
+    html = (
+        "<html><head><title>Panasonic 18XKF-9 1.5 Ton Inverter Air Conditioner 2024"
+        " – Surmawala</title></head>"
+        "<body><h1>Panasonic 18XKF-9 1.5 Ton Inverter Air Conditioner 2024</h1>"
+        f"<div class='product-gallery'><img src=\"{panasonic_jpg}\">"
+        f"<img src=\"{render_webp}\"></div></body></html>"
+    )
+    deps, _, image_fetcher, _ = build_deps(
+        tmp_path,
+        {page_url: html},
+        {
+            panasonic_jpg: png_bytes(clean_product_image()),
+            render_webp: png_bytes(clean_product_image()),
+        },
+    )
+    result, images = process_product(
+        task(
+            0,
+            "Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton",
+            (page_url,),
+        ),
+        deps,
+        config,
+    )
+    assert images == []
+    assert result.status is Status.FAILED
+    assert panasonic_jpg not in image_fetcher.requested
+    assert render_webp not in image_fetcher.requested
+    decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
+    assert "panasonic product" in decisions
+
+
+def test_an_image_named_after_another_maker_dies_on_a_brandless_page(tmp_path: Path) -> None:
+    """The page gate judges the page's visible title - but a degraded fetch may print no
+    maker at all, and then only the file's own name is left.  A ``panasonic.jpg`` on an
+    Orient row is refused by the maker limb before download, while the row's own image
+    (whose name carries no maker) still publishes."""
+    config = live_config(tmp_path)
+    page_url = "https://www.retailpk.net/air-conditioners/megatron-infinity-18x-ecomfort"
+    foreign_jpg = "https://cdn.shopify.com/s/files/1/x/files/panasonic.jpg"
+    own_jpg = "https://www.retailpk.net/cdn/megatron-infinity-18x-ecomfort-white-front.jpg"
+    html = (
+        "<html><head><title>Megatron Infinity 18X eComfort DC Inverter Air Conditioner"
+        " 1.5 Ton</title></head>"
+        "<body><h1>Megatron Infinity 18X eComfort DC Inverter AC 1.5 Ton</h1>"
+        "<p>Orient 18X eComfort series, DC inverter, energy efficient.</p>"
+        f"<div class='product-gallery'><img src=\"{foreign_jpg}\">"
+        f"<img src=\"{own_jpg}\"></div></body></html>"
+    )
+    deps, _, image_fetcher, _ = build_deps(
+        tmp_path,
+        {page_url: html},
+        {
+            foreign_jpg: png_bytes(clean_product_image()),
+            own_jpg: png_bytes(clean_product_image(900, 900, "#f4f4f4")),
+        },
+    )
+    result, images = process_product(
+        task(
+            0,
+            "Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton",
+            (page_url,),
+        ),
+        deps,
+        config,
+    )
+    assert len(images) == 1
+    assert "megatron-infinity-18x-ecomfort" in images[0].source_url
+    assert foreign_jpg not in image_fetcher.requested
+    decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
+    assert "names another maker" in decisions

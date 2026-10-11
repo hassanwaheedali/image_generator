@@ -74,6 +74,7 @@ from model_matching import (
     relaxed_page_match,
     url_anchored_to_row,
     url_belongs_to_other_model,
+    url_names_foreign_brand,
     url_names_other_capacity_code,
     url_names_other_product_line,
     url_names_sibling_product,
@@ -1545,6 +1546,21 @@ def _consume_candidates(
             verdict = (
                 "S4",
                 "image URL names another product line",
+            )
+        foreign_maker = (
+            url_names_foreign_brand(candidate.url, brand) if verdict is None else None
+        )
+        if verdict is None and foreign_maker:
+            # S4's fifth limb, the maker itself (owner run 2026-10-12): the Megatron
+            # row published ``panasonic.jpg`` renders.  The page gate judges the page's
+            # title, but a degraded fetch may print no maker and a direct image URL
+            # carries no page at all - the file's own name is the last word, and a file
+            # named after another known maker is never this product.  Judged on the
+            # file name alone (retail CDN paths host every brand), never anchored: no
+            # key of this row can make another maker's file ours.
+            verdict = (
+                "S4",
+                f"image URL names another maker ({foreign_maker})",
             )
         if verdict is not None:
             rule, detail = verdict

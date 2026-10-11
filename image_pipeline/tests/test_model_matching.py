@@ -21,6 +21,7 @@ from model_matching import (
     score_match,
     truncation_variants,
     url_belongs_to_other_model,
+    url_names_foreign_brand,
     url_names_other_capacity_code,
     variant_conflicts,
 )
@@ -856,3 +857,22 @@ def test_an_image_url_naming_another_product_line_is_rejected() -> None:
     # A bare-capacity row has no line name to protect; its codes guard it instead.
     bare = build_model_keys("Orient 18X White")
     assert not url_names_other_product_line(innova, bare)
+
+def test_an_image_named_after_another_maker_is_foreign() -> None:
+    """Owner run 2026-10-12: ``panasonic.jpg`` renders published for the Orient Megatron
+    row.  The page gate judges the page's title, but a direct image URL carries no page
+    and a degraded fetch may print no maker - the file's own name is the last word, and
+    a file named after another known maker is never this product.  Whole-word only, on
+    the file name alone: the row's own maker is fine, ``oriental`` is not ``orient``, a
+    retail CDN directory hosting every brand is never evidence, and a row without a
+    detected brand has nothing to compare against."""
+    panasonic = "https://cdn.shopify.com/s/files/1/x/files/panasonic.jpg"
+    assert url_names_foreign_brand(panasonic, "orient") == "panasonic"
+    assert url_names_foreign_brand(panasonic, "Orient") == "panasonic"
+    own = "https://www.orient.com.pk/assets/air-conditioners/orient-megatron-18x-white.png"
+    assert url_names_foreign_brand(own, "orient") is None
+    nameless = "https://cdn.shopify.com/files/UntitledProject-2024-04-29T104202.450.webp"
+    assert url_names_foreign_brand(nameless, "orient") is None
+    assert url_names_foreign_brand(panasonic, None) is None
+    rug = "https://x.pk/cdn/panasonic/oriental-rug.jpg"
+    assert url_names_foreign_brand(rug, "orient") is None

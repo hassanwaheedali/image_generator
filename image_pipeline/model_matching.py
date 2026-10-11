@@ -28,7 +28,7 @@ from urllib.parse import unquote, urlsplit
 from models import ModelKeys, ProductTask
 from similarity import similar
 from textnorm import WHITESPACE_RE, normalize_key, normalize_text
-from url_filters import KNOWN_BRANDS
+from url_filters import KNOWN_BRANDS, page_product_brand
 from variant_terms import (
     COLOUR_FAMILIES,
     colour_word_conflict,
@@ -1063,6 +1063,27 @@ def url_names_other_product_line(url: str, keys: ModelKeys) -> bool:
         and not is_colour_word(word)
     }
     return bool(foreign)
+
+
+def url_names_foreign_brand(url: str, brand: str | None) -> str | None:
+    """The maker a file's own name prints, when it is not this row's maker.
+
+    The page gate judges the page's visible title, but a direct image URL carries no
+    page at all, and a degraded fetch may print no maker - either way a file named
+    after another known maker is never this product (owner run 2026-10-12:
+    ``panasonic.jpg`` published for the Orient Megatron row).  Judged on the file name
+    alone - directory paths host every brand on a retail CDN - and whole-word only, so
+    ``oriental-rug.jpg`` does not name ``orient``.  A row without a detected brand has
+    nothing to compare against.
+    """
+    if not brand:
+        return None
+    filename = urlsplit(unquote(url)).path.rsplit("/", 1)[-1]
+    filename = filename.rsplit(".", 1)[0]
+    shown = page_product_brand(re.sub(r"[^a-z0-9]+", " ", filename.lower()))
+    if shown is not None and shown != brand.lower():
+        return shown
+    return None
 
 
 def is_display_product(title: str) -> bool:

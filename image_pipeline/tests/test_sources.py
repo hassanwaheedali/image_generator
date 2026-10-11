@@ -75,6 +75,27 @@ def test_search_terms_spell_each_key_the_three_ways_shops_know() -> None:
     assert search_terms(build_model_keys("Haier 50 Inch QLED (H50S80EUX)")) == ("H50S80EUX",)
 
 
+def test_search_terms_carry_the_brand_when_it_is_known() -> None:
+    """Owner run 2026-10-12: ``it must contains orient not be a panasonic product``.
+
+    The Megatron row's only key is the shared capacity code ``18X``, and the unbranded
+    query ``_psq=18X`` is exactly how a Panasonic ``18XKF9`` page surfaced on Surmawala.
+    The brand now leads every spelling ("Orient 18X" first), and the bare spelling stays
+    as the fallback so a shop indexing only the code is still reached; the page's brand
+    gate remains the hard stop either way.  A row without a detected brand searches
+    exactly as before.
+    """
+    megatron = build_model_keys("Orient Megatron Infinity 18X eComfort DC Inverter AC - 1.5 Ton")
+    assert search_terms(megatron) == ("18X",)
+    assert search_terms(megatron, brand="orient") == ("Orient 18X", "18X")
+    hyphenated = build_model_keys("Dawlance Semi Automatic Washing Machine 10kg (DW-7500C)")
+    assert search_terms(hyphenated, brand="dawlance") == (
+        "Dawlance DW-7500C",
+        "DW-7500C",
+        "Dawlance DW7500C",
+    )
+
+
 def test_shopify_suggest_parsing() -> None:
     payload = json.dumps(
         {

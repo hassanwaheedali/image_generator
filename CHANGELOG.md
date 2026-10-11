@@ -23,6 +23,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refrigerator, washing machine, yellow sale template) and over a loopback-HTTP `--dry-run`.
 
 ### Fixed
+- **The shop search now asks for the row's own maker (owner run 2026-10-12).** The
+  Megatron row's only key is the shared capacity code `18X`, and the unbranded query
+  `_psq=18X` is exactly how a Panasonic `18XKF9` page surfaced on Surmawala. The brand
+  now leads every search spelling ("Orient 18X" before "18X"); the bare spelling stays
+  as a fallback term so a shop indexing only the code is still reached, and the page's
+  brand gate remains the hard stop either way.
+- **A file named after another maker is never this product.** The page gate judges the
+  page's visible title, but a degraded fetch may print no maker at all and a direct
+  image URL carries no page - S4 gained a maker limb: an image whose file name spells
+  another known brand (`panasonic.jpg` on an Orient row) is rejected before download.
+  Judged on the file name alone (retail CDN directories host every brand), whole-word
+  only (`oriental` is not `orient`), and never anchored: no key of this row can make
+  another maker's file ours.
 - **A wrong product is never accepted - not even from the brand's own official sitemap
   (owner run 2026-10-11).** The `Pulse 19C Ultra White T3` row downloaded the **Innova
   19S Ultra** gallery off `orient.com.pk`. Root cause: the official-host fuzzy route in
