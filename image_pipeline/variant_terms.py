@@ -47,13 +47,13 @@ from textnorm import normalize_text
 COLOUR_FAMILIES: dict[str, tuple[str, ...]] = {
     "white": ("white", "off white", "off-white", "ivory white", "pure white", "pearl"),
     "black": ("black", "jet black", "midnight black", "matte black"),
-    "grey": ("grey", "gray", "graphite", "silver", "stainless steel", "steel", "chrome"),
+    "grey": ("grey", "gray", "graphite", "silver", "stainless steel", "steel", "chrome", "inox", "mirror"),
     "gold": ("gold", "golden", "champagne", "bronze", "copper", "rose gold"),
     "beige": ("beige", "cream", "ivory", "sand"),
     "brown": ("brown", "walnut", "wood", "wooden", "chocolate", "maroon brown"),
     "red": ("red", "maroon", "burgundy", "cherry", "wine"),
     "blue": ("blue", "navy", "sky blue", "azure"),
-    "green": ("green", "olive", "mint"),
+    "green": ("green", "olive", "mint", "emerald", "emerald green", "teal"),
     "purple": ("purple", "violet", "lavender"),
     "pink": ("pink", "rose"),
     "orange": ("orange", "amber"),
@@ -71,7 +71,7 @@ SPELLING_ALIASES: dict[str, str] = {"gray": "grey"}
 #: family are still different products (``burgundy`` vs ``red``, ``copper`` vs ``gold``).
 NEUTRAL_COLOURS: frozenset[str] = frozenset(
     {"white", "pearl", "ivory", "cream", "beige", "black", "grey", "silver", "steel", "chrome",
-     "graphite"}
+     "graphite", "inox", "mirror"}
 )
 
 #: Verdicts of :func:`suffix_agreement`, best first.

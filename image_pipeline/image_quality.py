@@ -761,7 +761,27 @@ def run_quality_gates(
     if is_monochrome_emblem(image, config):
         return "S14", "monochrome logo/emblem on a grey ground - not a product photo"
     if is_marketing_layout(image, config, panel_cut=panel_cut):
-        return "S20", marketing_layout_reason(image, config)
+        is_studio_product = False
+        if official_gallery:
+            _ink_frac, _span, _texture = layout_metrics(image)
+            if _texture < config.marketing_max_texture:
+                ring_clean = border_is_clean(
+                    image,
+                    ring_ratio=config.border_ring_ratio,
+                    ring_min_px=config.border_ring_min_px,
+                    tolerance=config.border_bg_tolerance,
+                    std_max=config.border_std_max,
+                    min_fraction=config.border_clean_min_fraction,
+                )
+                if ring_clean:
+                    from compositing import isolate_main_product
+                    isolated, degraded = isolate_main_product(image, config)
+                    iw, ih = isolated.size
+                    ratio = max(iw, ih) / max(1, min(iw, ih))
+                    if not degraded and ratio <= config.max_aspect_ratio and min(iw, ih) >= config.min_short_side:
+                        is_studio_product = True
+        if not is_studio_product:
+            return "S20", marketing_layout_reason(image, config)
     diagram = diagram_sheet_reason(image, config)
     if diagram:
         return "S21", diagram
@@ -987,6 +1007,16 @@ def sharpness_score(image: Image.Image) -> float:
     return float(laplacian.var())
 
 
+def is_hue_in_arc(hue: float, start: float, end: float) -> bool:
+    """Whether hue in degrees (0-360) falls within circular arc [start, end]."""
+    hue = float(hue) % 360.0
+    start = float(start) % 360.0
+    end = float(end) % 360.0
+    if start <= end:
+        return start <= hue <= end
+    return hue >= start or hue <= end
+
+
 def verify_image_color(
     image: Image.Image,
     target_color_word: str,
@@ -1128,6 +1158,67 @@ def verify_image_color(
         "orange": {"purple", "blue", "green"},
         "pink": {"blue", "green", "gold"},
     }
+
+    # Dynamic continuous circular hue arcs for chromatic appliance families.
+    # Instead of brittle discrete bins and hardcoded one-off string checks, this models
+    # the continuous physical spectrum of appliances and studio lighting:
+    # - Green smoothly spans olive (70°) through forest, mint, emerald, and cyan/teal sheen (210°)
+    # - Red wraps circularly (305° to 25°, or 285° on official brand heroes) spanning wine, burgundy, maroon, crimson, and red
+    # - Purple spans violet (255°) through magenta and warm studio glass reflections (up to 25°)
+    # - Blue spans cyan/teal (180°) through sky blue, cobalt, and deep navy (260°)
+    # - Gold/Yellow spans champagne, bronze, gold, and warm amber (25° to 65°)
+    # Standard W3C/chromatic shade centroids on the 360° color wheel:
+    # Allows any known shade (emerald, burgundy, mint, teal, maroon, copper, etc.) to dynamically
+    # anchor its own natural hue spectrum without brittle one-off string checks.
+    SHADE_CENTROIDS: dict[str, float] = {
+        "burgundy": 310.0,
+        "wine": 310.0,
+        "maroon": 335.0,
+        "ruby": 350.0,
+        "crimson": 345.0,
+        "cherry": 350.0,
+        "rose": 330.0,
+        "coral": 15.0,
+        "emerald": 165.0,
+        "emerald green": 160.0,
+        "teal": 180.0,
+        "mint": 150.0,
+        "olive": 80.0,
+        "cyan": 180.0,
+        "navy": 230.0,
+        "sky blue": 205.0,
+        "azure": 210.0,
+        "amber": 40.0,
+        "copper": 25.0,
+        "bronze": 35.0,
+        "champagne": 45.0,
+    }
+
+    target_centroid = next(
+        (cent for shade, cent in SHADE_CENTROIDS.items() if shade in target_norm),
+        None,
+    )
+    if target_centroid is not None:
+        diff = abs(profile.median_hue - target_centroid) % 360.0
+        if min(diff, 360.0 - diff) <= 55.0:
+            return True, ""
+
+    red_min = 285.0 if official else 305.0
+    chromatic_arcs: dict[str, tuple[float, float]] = {
+        "green": (70.0, 210.0),
+        "blue": (180.0, 260.0),
+        "purple": (255.0, 25.0),
+        "red": (red_min, 25.0),
+        "gold": (25.0, 65.0),
+        "yellow": (25.0, 65.0),
+        "orange": (15.0, 45.0),
+        "pink": (305.0, 355.0),
+    }
+
+    if target_family in chromatic_arcs:
+        arc_start, arc_end = chromatic_arcs[target_family]
+        if is_hue_in_arc(profile.median_hue, arc_start, arc_end):
+            return True, ""
 
     banned = conflicts.get(target_family, set())
     if profile.dominant_family in banned:

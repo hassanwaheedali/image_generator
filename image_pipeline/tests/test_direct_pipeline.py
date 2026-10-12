@@ -444,3 +444,24 @@ def test_direct_falls_back_when_only_a_url_column_exists(tmp_path: Path) -> None
     sheet.write_text("Title,Image_URL\nX,http://cdn.test/x.png\n", encoding="utf-8")
     tasks = read_input(sheet, direct=True)
     assert tasks[0].source_urls == ("http://cdn.test/x.png",)
+
+
+# --------------------------------------------------------------------------- #
+# Task: Option 2 blur rejection guard
+# --------------------------------------------------------------------------- #
+from PIL import ImageFilter  # noqa: E402
+
+
+def test_direct_rejects_blurry_image_with_s13_blur(tmp_path: Path) -> None:
+    """A smeared/blurred image is stopped by the S13.blur guard in direct mode."""
+    crisp = _white_product_photo()
+    blurred = crisp.filter(ImageFilter.GaussianBlur(radius=8))
+    url = "http://cdn.test/blurry.png"
+    deps, _ = _direct_deps(tmp_path, {url: _png_bytes(blurred)})
+    task = ProductTask(index=0, title="Cool Breeze 12X Inverter AC", source_urls=(url,))
+    result, accepted = process_direct_product(task, deps, _direct_config(tmp_path))
+    assert accepted == []
+    assert result.status is Status.FAILED
+    assert "S13.blur" in _decisions(tmp_path)
+    assert "image is too blurry" in _decisions(tmp_path)
+

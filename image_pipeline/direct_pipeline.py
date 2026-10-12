@@ -27,6 +27,7 @@ from image_quality import (
     ImageValidationError,
     branded_template_reason,
     run_quality_gates,
+    sharpness_score,
     strip_promo_band,
     trim_edge_seams,
     validate_image_bytes,
@@ -40,6 +41,7 @@ from models import AcceptedImage, ImageCandidate, ProductResult, ProductTask, St
 from pipeline import (
     PipelineDeps,
     _compose_and_save,
+    _dump_rejected,
     _row_is_done,
     finalize_and_upload,
 )
@@ -128,6 +130,21 @@ def process_direct_product(
             deps.decisions.reject(title=task.title, url=url, rule_id=exc.rule_id, detail=exc.detail)
             continue
 
+        # Blur guard (Option 2): reject genuinely blurry / smeared images.
+        # Clean product shots (sharpness >= 0.02) pass; smeared/blurry images are rejected.
+        blur_score = sharpness_score(image)
+        if blur_score < config.salvage_min_sharpness:
+            rejections["S13.blur"] += 1
+            deps.decisions.reject(
+                title=task.title,
+                url=url,
+                rule_id="S13.blur",
+                detail=f"image is too blurry (sharpness {blur_score:.3f} < {config.salvage_min_sharpness:.3f})",
+            )
+            if config.keep_rejected_images:
+                _dump_rejected(image, config, task.title, url, "S13.blur")
+            continue
+
         # The same furniture cleanup Option 1 runs before the ring test: a shop
         # promo strip glued to an edge is cut, not a reason to lose the photo.
         image, band = strip_promo_band(image, config)
@@ -153,14 +170,18 @@ def process_direct_product(
         if template_reason is not None:
             rejections["S19"] += 1
             deps.decisions.reject(title=task.title, url=url, rule_id="S19", detail=template_reason)
+            if config.keep_rejected_images:
+                _dump_rejected(image, config, task.title, url, "S19")
             continue
 
         # The white-background gates (S8/S6/S9/S14/S7 + studio rescue): "we need
         # only clear pictures".  Same order and thresholds as Option 1.
-        rule_id, detail = run_quality_gates(image, config)
+        rule_id, detail = run_quality_gates(image, config, official_gallery=True)
         if rule_id != "ok":
             rejections[rule_id] += 1
             deps.decisions.reject(title=task.title, url=url, rule_id=rule_id, detail=detail)
+            if config.keep_rejected_images:
+                _dump_rejected(image, config, task.title, url, rule_id)
             continue
 
         if (
@@ -169,10 +190,20 @@ def process_direct_product(
             and keys.colour_word
             and not is_display_product(task.title)
         ):
-            color_ok, color_detail = verify_image_color(image, keys.colour_word)
-            if not color_ok:
+            color_ok, color_detail = verify_image_color(
+                image,
+                keys.colour_word,
+                official=True,
+                exempt_chroma_on_official=config.color_gate_official_chroma_exempt,
+                min_saturation=config.color_chroma_min_saturation,
+                wash_max_value=config.color_chroma_max_value,
+            )
+            remaining_urls = [u for u in task.source_urls if dedup_key(u) not in seen_keys and u != url]
+            if not color_ok and (remaining_urls or accepted):
                 rejections["S16"] += 1
                 deps.decisions.reject(title=task.title, url=url, rule_id="S16", detail=color_detail)
+                if config.keep_rejected_images:
+                    _dump_rejected(image, config, task.title, url, "S16")
                 continue
 
         fingerprint = compute_fingerprint(image)
@@ -180,6 +211,8 @@ def process_direct_product(
         if duplicate:
             rejections["S10"] += 1
             deps.decisions.reject(title=task.title, url=url, rule_id="S10", detail=duplicate)
+            if config.keep_rejected_images:
+                _dump_rejected(image, config, task.title, url, "S10")
             continue
         review_note = dedup.review_shape_match(image, fingerprint=fingerprint)
         if review_note:

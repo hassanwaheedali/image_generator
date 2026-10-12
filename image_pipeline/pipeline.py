@@ -1780,6 +1780,8 @@ def _consume_candidates(
                 deps.decisions.reject(
                     title=task.title, url=used_url, rule_id="S16", detail=color_detail
                 )
+                if config.keep_rejected_images:
+                    _dump_rejected(image, config, task.title, used_url, "S16")
                 continue
             if color_detail:
                 # Exempted, not silent: the owner reads this folder to find out why a
@@ -1991,11 +1993,11 @@ def write_output_csvs(
                 if result.alfa_urls
             ),
         )
-        atomic_write_csv(
-            config.failed_csv,
-            FAILED_HEADER,
-            ((result.title, result.reason) for result in ordered if result.status is Status.FAILED),
-        )
+    atomic_write_csv(
+        config.failed_csv,
+        FAILED_HEADER,
+        ((result.title, result.reason) for result in ordered if result.status is Status.FAILED),
+    )
     # The manual-review queue: rows that published something but carry a flag
     # (relaxed fallback match, colour/variant difference).  Written on every run,
     # including --dry-run, because it is a report.

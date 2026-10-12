@@ -17,6 +17,8 @@ from pathlib import Path
 
 from config import ConfigError, PipelineConfig, load_env_file
 from csv_io import (
+    atomic_write_csv,
+    hash_source_urls,
     load_banner_cache,
     load_checkpoint,
     merge_duplicate_titles,
@@ -78,8 +80,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="with --check-image: judge the row title too, so the colour gate is applied as in that row",
     )
     parser.add_argument("--assets-dir", default="assets", help="folder with the two templates and two banners")
-    parser.add_argument("--output-dir", default="output", help="where the CSVs, images and logs go")
-    parser.add_argument("--state-dir", default="state", help="checkpoint and banner cache folder")
+    parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="where the CSVs, images and logs go (default: output_<input file name>, or output)",
+    )
+    parser.add_argument(
+        "--state-dir",
+        default=None,
+        help="checkpoint and banner cache folder (default: state_<input file name>, or state)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="do everything except uploads and platform CSVs")
     parser.add_argument(
         "--direct",
@@ -134,10 +144,14 @@ def configure_logging(config: PipelineConfig, level: str) -> None:
 
 
 def build_config(args: argparse.Namespace) -> PipelineConfig:
+    # Each input sheet gets its own folders, so two sheets never mix their outputs/checkpoints.
+    stem = Path(args.input).stem if args.input else ""
+    output_dir = args.output_dir or (str(Path("output") / stem) if stem else "output")
+    state_dir = args.state_dir or (str(Path("state") / stem) if stem else "state")
     return PipelineConfig(
         assets_dir=Path(args.assets_dir),
-        output_dir=Path(args.output_dir),
-        state_dir=Path(args.state_dir),
+        output_dir=Path(output_dir),
+        state_dir=Path(state_dir),
         input_dir=Path(args.input_dir),
         dry_run=bool(args.dry_run),
         direct_mode=bool(args.direct),
@@ -445,14 +459,35 @@ def main(argv: list[str] | None = None) -> int:
 
     tasks = annotate_sibling_terms(tasks)
 
+    checkpoint = {} if not config.resume else load_checkpoint(config.checkpoint_path)
+
     if config.limit is not None:
-        tasks = tasks[: config.limit]
-    LOG.info("rows to process: %d", len(tasks))
+        redo = {title.strip().lower() for title in config.redo_titles}
+
+        def _is_done(t: ProductTask) -> bool:
+            key = t.title.strip().lower()
+            if key in redo:
+                return False
+            entry = checkpoint.get(key)
+            if entry is None:
+                return False
+            return entry.is_resume_done(hash_source_urls(t.source_urls))
+
+        pending_count = 0
+        selected_tasks: list[ProductTask] = []
+        for task in tasks:
+            if _is_done(task):
+                selected_tasks.append(task)
+            elif pending_count < config.limit:
+                selected_tasks.append(task)
+                pending_count += 1
+        tasks = selected_tasks
+
+    LOG.info("rows to process: %d (limit: %s)", len(tasks), config.limit)
 
     bad_rows = [task for task in tasks if not task.title or not task.source_urls]
     good_rows = [task for task in tasks if task.title and task.source_urls]
 
-    checkpoint = {} if not config.resume else load_checkpoint(config.checkpoint_path)
     decisions = DecisionLog(config.decisions_path)
     deps = build_deps(config, decisions)
     runner = BatchRunner(
@@ -472,8 +507,64 @@ def main(argv: list[str] | None = None) -> int:
 
     everything = sorted([*results, *empty_row_results(bad_rows)], key=lambda item: item.task_index)
     write_output_csvs(everything, config, include_platform_csvs=not config.dry_run)
+    _write_failed_helper_csvs(everything, tasks, config)
     summarize(everything, config)
     return 0
+
+
+def _write_failed_helper_csvs(
+    results: list[ProductResult], tasks: list[ProductTask], config: PipelineConfig
+) -> None:
+    """Generate ready-to-run CSVs for failed products so they can be re-run easily in Option 1 or Option 2."""
+    task_by_index = {task.index: task for task in tasks}
+    failed_results = [r for r in results if r.status is Status.FAILED]
+    if failed_results:
+        # 1. Option 1 re-run sheet: Title + Source URL (page URLs)
+        opt1_rows = [
+            (r.title, " | ".join(task_by_index[r.task_index].source_urls) if r.task_index in task_by_index else "")
+            for r in failed_results
+        ]
+        atomic_write_csv(
+            config.output_dir / "failed_products_option1.csv",
+            ("Title", "Source URL"),
+            opt1_rows,
+        )
+        # 2. Option 2 re-run sheet: Title + Images (direct URLs)
+        opt2_rows = [
+            (r.title, " | ".join(task_by_index[r.task_index].source_urls) if r.task_index in task_by_index else "")
+            for r in failed_results
+        ]
+        atomic_write_csv(
+            config.output_dir / "failed_products_option2.csv",
+            ("Title", "Images"),
+            opt2_rows,
+        )
+
+    # 3. Complete CSV audit of all rejected images (blurry, template, color mismatch, etc.)
+    if config.decisions_path.exists():
+        import json
+        rejected_rows = []
+        try:
+            for line in config.decisions_path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                entry = json.loads(line)
+                if entry.get("decision") == "reject":
+                    rejected_rows.append((
+                        entry.get("title", ""),
+                        entry.get("url", ""),
+                        entry.get("rule_id", ""),
+                        entry.get("detail", ""),
+                    ))
+            if rejected_rows:
+                atomic_write_csv(
+                    config.output_dir / "rejected_images.csv",
+                    ("Title", "URL", "Rule", "Detail"),
+                    rejected_rows,
+                )
+        except Exception as exc:
+            LOG.warning("could not write rejected_images.csv: %s", exc)
+
 
 
 def summarize(results: list[ProductResult], config: PipelineConfig) -> None:

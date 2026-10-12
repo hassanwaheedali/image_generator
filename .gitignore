@@ -22,6 +22,8 @@ state/banner_urls.json
 *.log
 *.sqlite
 *.sqlite3
+*.bak
+*.bak.*
 
 # Python Bytecode & Runtime
 __pycache__/

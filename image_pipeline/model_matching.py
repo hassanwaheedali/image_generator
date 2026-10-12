@@ -270,6 +270,36 @@ def _whole_token_pattern(needle: str) -> re.Pattern[str] | None:
     return re.compile(rf"(?<![0-9a-z]){body}(?![0-9a-z])")
 
 
+def _relaxed_disjoint_code(page_text: str, keys: ModelKeys) -> bool:
+    """True when the page's own model code is *disjoint* from all of the row's codes.
+
+    A page that carries the bare digit stem ``1035`` could belong to ``VF-1035GD``
+    **or** to ``DBD-1035`` - they share the number but are different appliances.
+    Parsing the page's own strong text (title / H1 / first strong tag) with the same
+    tokenizer tells us which: if the page prints ``DBD-1035`` as a whole code and the
+    row is ``VF-1035GD``, the two code sets are disjoint - the page names another
+    product and the rescue match is rejected.
+
+    A page whose own text carries *no* code at all (the body is marketing prose) has
+    nothing to compare - the function returns ``False`` (no evidence to reject on).
+    """
+    clean_text = re.sub(r"<[^>]+>", " ", page_text)
+    page_keys = build_model_keys(clean_text)
+    if not page_keys.identities or not keys.identities:
+        return False  # no code on the page - cannot accuse
+    # Any overlap is enough: the page may carry our code alongside others.
+    our_set = set(keys.identities)
+    # Include truncation variants so ``dw7500`` still overlaps with ``dw7500c``.
+    our_expanded = set(our_set)
+    for identity in keys.identities:
+        our_expanded.update(truncation_variants(identity))
+    return not any(
+        page_id in our_expanded
+        or any(page_id.startswith(ours) or ours.startswith(page_id) for ours in our_set)
+        for page_id in page_keys.identities
+    )
+
+
 def relaxed_page_match(
     page_url: str,
     page_text: str,
@@ -289,6 +319,14 @@ def relaxed_page_match(
       through the page's own spacing, but never inside a longer model code); or
     * the page names the brand **and** carries the model's number (``2500c`` or ``2500``),
       which covers the sibling-variant case (``DW-2500`` page for a ``DW-2500C`` row).
+
+    Two guards added 2026-10-12:
+    * the bare-digit stem must be **at least 3 digits** - a 2-digit number (e.g. ``15``
+      from ``MD-15``) appears everywhere as a capacity, size or year and is too weak to
+      identify a product;
+    * when the page's own parsed model code (from its title/strong text) is **disjoint**
+      from all of the row's codes, the page names a different product and is rejected
+      even at the rescue tier.
     """
     if not keys.identities:
         return False, ""
@@ -307,15 +345,26 @@ def relaxed_page_match(
     for identity in keys.identities:
         pattern = _whole_token_pattern(identity)
         if len(identity) >= 5 and pattern is not None and pattern.search(haystack):
+            # Guard: the page's own code (parsed from the page text) must not be
+            # disjoint from ours.  A page that carries ``dw2500c`` as a whole token
+            # also proves itself; a page whose title names ``dw2500e`` shares the
+            # same digits but sells a different colourway - still the rescue tier.
+            if _relaxed_disjoint_code(page_text, keys):
+                return False, ""
             return True, f"page carries {identity}"
     stems: list[str] = []
     for identity in keys.identities:
         stem = numeric_stem(identity)
         if not stem:
             continue
-        stems.append(stem)
         digits = re.match(r"\d+", stem)
-        if digits and digits.group(0) not in stems:
+        # Guard: a 2-digit bare number (``15``) appears as a capacity or size
+        # in every product description - it names nothing.  Only 3+ digit runs
+        # are specific enough to identify a model family.
+        if not digits or len(digits.group(0)) < 3:
+            continue
+        stems.append(stem)
+        if digits.group(0) != stem and digits.group(0) not in stems:
             stems.append(digits.group(0))
     hit = next(
         (
@@ -328,6 +377,11 @@ def relaxed_page_match(
     if not hit:
         return False, ""
     if brand and not brand_token_present(f"{url_evidence} {page_text}", brand):
+        return False, ""
+    # Guard: if the page's own model code is disjoint from the row's codes, the shared
+    # digit stem is a coincidence (e.g. ``VF-1035GD`` and ``DBD-1035`` share ``1035``
+    # but name different appliances).  Reject rather than rescue.
+    if _relaxed_disjoint_code(page_text, keys):
         return False, ""
     return True, f"brand + number match ({hit}) without an exact model proof"
 
@@ -366,7 +420,7 @@ _GENERIC_NAME_WORDS = frozenset((
     "cu", "ft", "capacity", "litre", "liters", "gallon", "kg", "watt", "ton", "tons",
     "split", "window", "portable", "cabinet", "chest", "upright", "pro", "plus",
     "max", "special", "edition", "smart", "digital", "direct",
-    "twin", "tub", "semi", "automatic", "manual", "frost", "standing", "floor",
+    "twin", "tub", "semi", "automatic", "manual", "standing", "floor",
     "vertical", "horizontal", "compact", "mini", "large", "small", "luxury",
     "premium", "original", "model", "series", "type", "style", "with", "without",
     "and", "the", "for", "hd", "led", "lcd",
@@ -627,6 +681,8 @@ def _segment_truncation_hit(token: str, core: str, normalized: str) -> bool:
     segments = [part for part in re.split(r"[-_/ ]+", token) if part]
     for drop in (1, 2):
         if len(segments) <= drop:
+            continue
+        if segments[-drop].isdigit() or re.search(r"\d{2,}", segments[-drop]):
             continue
         candidate = normalize_key("-".join(segments[:-drop]))
         if len(candidate) < 5 or candidate == core:
@@ -1043,8 +1099,12 @@ _URL_COMMERCE_NOISE = frozenset((
     # Editor-default exports (``UntitledProject-…``) name nothing, so they accuse nothing.
     "lowq", "highq", "hires", "lores", "orig", "copy", "final", "edited",
     "retouch", "render", "mockup", "emblem", "badge", "icon", "watermark",
-    "stamp", "seal", "untitled", "project", "artboard",
+    "stamp", "seal", "untitled", "project", "artboard", "design",
 ))
+
+_HEX_HASH_RE = re.compile(
+    r"^[0-9a-fA-F\-_]{16,}$|^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?:-\d+)?$"
+)
 
 
 def url_names_other_product_line(url: str, keys: ModelKeys) -> bool:
@@ -1063,6 +1123,8 @@ def url_names_other_product_line(url: str, keys: ModelKeys) -> bool:
         return False
     filename = urlsplit(unquote(url)).path.rsplit("/", 1)[-1]
     filename = filename.rsplit(".", 1)[0]
+    if _HEX_HASH_RE.match(filename) and any(c.isdigit() for c in filename):
+        return False
     words = _filename_words(filename)
     if not words:
         return False
@@ -1079,6 +1141,7 @@ def url_names_other_product_line(url: str, keys: ModelKeys) -> bool:
         and word not in _KEYWORD_EXTRA_NOISE
         and word not in _URL_COMMERCE_NOISE
         and not is_colour_word(word)
+        and not (len(word) <= 4 and set(word).issubset(set("abcdef")))
     }
     return bool(foreign)
 
@@ -1440,6 +1503,8 @@ def _needs_key_tolerance(text: str, keys: ModelKeys, allow_key_truncation: bool)
     that machine - but it is not proof the page shows our model, so the pipeline first
     looks for a page that really prints it and falls back to this one, flagged, only after
     the whole chain found nothing better.
+
+    A keyword row always matches exactly (no codes) and is never tolerated here.
     """
     if not allow_key_truncation:
         return False
@@ -1501,6 +1566,7 @@ def _recognize(
             tolerated=_needs_key_tolerance(strong_text, keys, allow_key_truncation),
         )
 
+
     if brand_match_enabled and brand:
         found = find_brand_code_matches(
             strong_text,
@@ -1523,6 +1589,7 @@ def _recognize(
             in_body_only=True,
             tolerated=_needs_key_tolerance(body_text, keys, allow_key_truncation),
         )
+
 
     if brand_match_enabled and brand:
         found = find_brand_code_matches(
@@ -1732,6 +1799,10 @@ def match_product(
     )
     if not variant_separation_enabled or not match.matched:
         return match
+    if brand:
+        shown_brand = page_product_brand(_URL_TOKEN_RE.sub(" ", strong_text))
+        if shown_brand is not None and shown_brand != brand.lower():
+            return ProductMatch(False, "brand_conflict", ())
     score = score_match(keys, strong_text, brand, selected_colourway)
     if score.colour_veto:
         # A different colour is a different picture, so the page is not this product at
