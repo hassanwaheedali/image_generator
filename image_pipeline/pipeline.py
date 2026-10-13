@@ -1509,8 +1509,6 @@ def _consume_candidates(
             # Not `_row_is_done`: this page's own gallery is read to the end (see
             # ``_page_publish_goal``), so a third manual sheet cannot spend the last slot.
             break
-        if config.early_stop_when_image_found and len(accepted) >= 1:
-            break
 
         verdict = _decide_candidate(candidate, keys, seen_keys)
         if (
