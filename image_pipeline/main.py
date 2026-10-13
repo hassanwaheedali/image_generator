@@ -33,7 +33,7 @@ from fetch import (
     DomainRateLimiter,
     PermanentAPIError,
 )
-from image_host import FreeImageHost
+from image_host import FallbackImageHost, FreeImageHost, ImgBBHost
 from models import ProductResult, ProductTask, Status
 from pipeline import (
     BatchRunner,
@@ -42,6 +42,7 @@ from pipeline import (
     csv_escape,
     write_output_csvs,
 )
+from protocols import ImageHost
 from sources import SourceChain
 
 LOG = logging.getLogger("pipeline.main")
@@ -247,18 +248,40 @@ def check_assets(config: PipelineConfig) -> None:
 
 def build_deps(config: PipelineConfig, decisions: DecisionLog) -> PipelineDeps:
     limiter = DomainRateLimiter(config.domain_min_interval_s)
-    host = (
-        DryRunHost(config.output_dir)
-        if config.dry_run
-        else FreeImageHost(
-            api_key=config.api_key,
-            endpoint=config.upload_url,
-            min_interval_s=config.upload_min_interval_s,
-            max_retries=config.max_retries,
-            base_delay_s=config.backoff_base_s,
-            max_delay_s=config.backoff_max_s,
+    if config.dry_run:
+        host: ImageHost = DryRunHost(config.output_dir)
+    else:
+        primary = (
+            FreeImageHost(
+                api_key=config.api_key,
+                endpoint=config.upload_url,
+                min_interval_s=config.upload_min_interval_s,
+                max_retries=config.max_retries,
+                base_delay_s=config.backoff_base_s,
+                max_delay_s=config.backoff_max_s,
+            )
+            if config.api_key
+            else None
         )
-    )
+        fallback = (
+            ImgBBHost(
+                api_key=config.imgbb_api_key,
+                min_interval_s=config.upload_min_interval_s,
+                max_retries=config.max_retries,
+                base_delay_s=config.backoff_base_s,
+                max_delay_s=config.backoff_max_s,
+            )
+            if config.imgbb_api_key
+            else None
+        )
+        if primary is not None and fallback is not None:
+            host = FallbackImageHost(primary=primary, fallback=fallback)
+        elif primary is not None:
+            host = primary
+        elif fallback is not None:
+            host = fallback
+        else:
+            raise PermanentAPIError("No upload host configured (FREEIMAGE_API_KEY or IMGBB_API_KEY required)")
     # Direct mode (Option 2) never searches: the row supplies its own images.
     searcher = (
         SourceChain(config, CurlCffiJsonHttp(config, limiter))

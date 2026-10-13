@@ -151,10 +151,15 @@ def _read_upload_url() -> str:
 def _read_api_key() -> str:
     """Image-host API key, read from the environment at call time (no default).
 
-    Supplied by ``FREEIMAGE_API_KEY`` - exported in the shell, set as a Colab secret, or
+    Supplied by ``FREEIMAGE_API_KEY``
     put in a ``.env`` file (see :func:`load_env_file`, called by ``main``).
     """
     return os.environ.get("FREEIMAGE_API_KEY", "").strip()
+
+
+def _read_imgbb_api_key() -> str:
+    """ImgBB API key for fallback/primary upload, read from ``IMGBB_API_KEY``."""
+    return os.environ.get("IMGBB_API_KEY", "").strip()
 
 
 @dataclass(frozen=True)
@@ -693,6 +698,8 @@ class PipelineConfig:
 
     # ----- image host ------------------------------------------------------
     api_key: str = field(default_factory=_read_api_key)
+    #: Fallback/alternative upload host - ``IMGBB_API_KEY``.
+    imgbb_api_key: str = field(default_factory=_read_imgbb_api_key)
     #: Upload endpoint - ``FREEIMAGE_UPLOAD_URL``, defaulting to freeimage.host.
     upload_url: str = field(default_factory=_read_upload_url)
     upload_min_interval_s: float = 0.6
@@ -706,10 +713,10 @@ class PipelineConfig:
         self._validate_fetch()
         self._validate_image_gates()
         self._validate_compositing()
-        if not self.dry_run and not self.api_key:
+        if not self.dry_run and not self.api_key and not self.imgbb_api_key:
             raise ConfigError(
-                "FREEIMAGE_API_KEY is not set (and --dry-run was not requested). "
-                "Put it in the .env file next to main.py (FREEIMAGE_API_KEY=...) or export "
+                "FREEIMAGE_API_KEY (or IMGBB_API_KEY) is not set (and --dry-run was not requested). "
+                "Put it in secrets.env (FREEIMAGE_API_KEY=... or IMGBB_API_KEY=...) or export "
                 "it in the shell before a real upload run."
             )
 
