@@ -30,8 +30,8 @@ LOG = logging.getLogger("pipeline.csv_io")
 
 TITLE_ALIASES: tuple[str, ...] = ("title", "producttitle", "name", "productname")
 URL_ALIASES: tuple[str, ...] = (
-    "sourceurl", "sourcelink", "images", "image", "imageurls", "imageurl", "sourceurls",
-    "url", "urls", "link", "pagelink",
+    "sourceurl", "sourcelink", "brandurl", "pageurl", "producturl", "images", "image",
+    "imageurls", "imageurl", "sourceurls", "url", "urls", "link", "pagelink",
 )
 #: Option 2 (--direct) reads the sheet's direct-image column, never the Source URL
 #: column (that one belongs to Option 1's scraping).  Falls back to URL_ALIASES only

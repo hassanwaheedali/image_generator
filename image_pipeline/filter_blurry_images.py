@@ -158,7 +158,7 @@ def scan_and_filter_blurry(
     option1_csv = out_dir / "blurry_products_for_option1.csv"
     with open(option1_csv, "w", newline="", encoding="utf-8") as f:
         csv_writer = csv.writer(f)
-        csv_writer.writerow(["Title", "source_url", "Direct_Urls"])
+        csv_writer.writerow(["Title", "Source_URL", "Direct_Images"])
         for b in blurry_list:
             csv_writer.writerow([b["title"], b["source_url"], b["direct_urls"]])
 
