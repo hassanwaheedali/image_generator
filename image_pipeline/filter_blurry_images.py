@@ -73,7 +73,7 @@ def slugify(title: str) -> str:
 
 
 def scan_and_filter_blurry(
-    input_csv_path: str = "image_pipeline/input/1800_products.csv",
+    input_csv_path: str = "input/1800_products.csv",
     output_dir: str = "output",
     hf_threshold: float = 0.102,
     edge_threshold: float = 48.0,

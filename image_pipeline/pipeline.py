@@ -159,6 +159,8 @@ CURATED_GALLERY_SOURCES: frozenset[str] = frozenset(
         "json_ld",
         "embedded_json",
         "state_json",
+        "shopify_json",
+        "woo_json",
         "dom_audit",
     }
 )
@@ -1249,7 +1251,18 @@ def _visit_page(
         brand_match_min_digits=config.brand_match_min_digits,
     )
     candidates = extract_candidates(context)
-    if len(candidates) < config.target_images_per_product:
+    # Count only candidates that survive the cheap URL/DOM pre-filters. Junk
+    # found in the HTML (site logos, social icons, other-model images, links to other pages)
+    # all inflate this count and were previously suppressing the Shopify/WooCommerce JSON
+    # fetch even though every one of them would be rejected moments later. Using the
+    # canonical ``_decide_candidate`` check gives an accurate picture of how many *usable*
+    # candidates the HTML produced, without touching performance (no network I/O, pure in-memory ops).
+    usable_candidates = [
+        c
+        for c in candidates
+        if c.source != "dom_audit" and _decide_candidate(c, keys, seen_keys) is None
+    ]
+    if len(usable_candidates) < config.target_images_per_product:
         candidates = _extend_with_structured_gallery(
             page_url=resolved_url,
             html=response.text,

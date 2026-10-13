@@ -84,6 +84,7 @@ _ATTR_PRIORITY: tuple[str, ...] = (
     "data-highres",
     "data-full",
     "data-original",
+    "data-image",
     # Haier's product template puts the crisp gallery asset here (owner-supplied markup,
     # 2026-10-10): <img src="…_60.png" data-imgurl="…_1200.png">. Missing this is why the
     # run took the 60px thumbnail and then *guessed* a size, landing on a blurry unnamed
@@ -138,10 +139,17 @@ def collect_img_urls(node: Any, page_url: str) -> list[str]:
             if best:
                 urls.append(best)
 
-    if getattr(node, "name", None) == "a":
+    if getattr(node, "name", None) in ("a", "div"):
         href = node.get("href")
         if isinstance(href, str) and _looks_like_image(href):
             urls.insert(0, href)
+
+    parent = getattr(node, "parent", None)
+    if parent is not None:
+        for attr in ("data-image", "href"):
+            pval = parent.get(attr)
+            if isinstance(pval, str) and _looks_like_image(pval):
+                urls.insert(0, pval)
 
     return _canonical_unique(urls, page_url)
 

@@ -381,3 +381,26 @@ def test_haier_emblem_is_still_extracted_but_fails_on_pixels() -> None:
     context = _context(HAIER, _HAIER_GALLERY_HTML, "Haier HSU-13HFPC 0.75 WD", "haier")
     urls = [candidate.url for candidate in extract_candidates(context)]
     assert any("W020260404458942582487" in url for url in urls)
+
+
+def test_shopify_productview_gallery_extracted_from_html() -> None:
+    """Shopify themes (like Surmawala's Halo/Ella theme) use .productView-thumbnail-wrapper
+    and .productView-images. All product gallery images must be extracted as gallery candidates.
+    """
+    html = """
+    <html><body>
+      <div class="productView-images-wrapper">
+        <div class="productView-thumbnail-wrapper">
+          <div class="productView-thumbnail"><img src="https://cdn.shopify.com/s/files/1/0829/6490/6267/files/7991.jpg"></div>
+          <div class="productView-thumbnail"><img src="https://cdn.shopify.com/s/files/1/0829/6490/6267/files/imgi_58.jpg"></div>
+          <div class="productView-thumbnail"><img src="https://cdn.shopify.com/s/files/1/0829/6490/6267/files/imgi_61.jpg"></div>
+        </div>
+      </div>
+    </body></html>
+    """
+    context = _context(SHOPIFY_PAGE, html, "Jackpot JP-7991 Single Washer", "jackpot")
+    candidates = extract_candidates(context)
+    gallery_cands = [c for c in candidates if c.source == "gallery_container"]
+    assert len(gallery_cands) == 3
+    assert all("files/imgi_" in c.url or "files/7991" in c.url for c in gallery_cands)
+

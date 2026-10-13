@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment
 from soupsieve import match as css_match
 
 from config import PipelineConfig
@@ -95,6 +95,16 @@ GALLERY_CONTAINER_SELECTORS: tuple[str, ...] = (
     "[data-gallery-role]",
     ".product-single__photos",
     ".product__media",
+    ".productView-images",
+    ".productView-images-wrapper",
+    ".productView-thumbnail-wrapper",
+    ".productView-thumbnail",
+    ".productView-image",
+    ".productView-for",
+    ".productView-nav",
+    '[class*="productView-image" i]',
+    '[class*="productView-thumbnail" i]',
+    '[class*="productView-images" i]',
     ".pdp-gallery",
     ".sd_imgs",
     ".js_prodetail_imglist",
@@ -206,7 +216,7 @@ def strip_unwanted_regions(soup: BeautifulSoup, page_url: str = "") -> Beautiful
             with contextlib.suppress(Exception):   # pragma: no cover - defensive
                 parent[STRIPPED_ATTR] = "1"
         element.decompose()
-    for comment in soup.find_all(string=lambda text: isinstance(text, type(soup.Comment))):
+    for comment in soup.find_all(string=lambda text: isinstance(text, Comment)):
         comment.extract()
     return soup
 

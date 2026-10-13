@@ -1290,6 +1290,46 @@ def test_shopify_product_json_tops_up_a_one_image_page(tmp_path: Path) -> None:
     assert result.status is Status.OK
 
 
+def test_shopify_product_json_tops_up_when_html_has_junk_images(tmp_path: Path) -> None:
+    """When HTML contains 1 product image plus junk (logo, social icon), candidate count
+    is 3. Without pre-filtering, target=3 would falsely skip JSON fetch.
+    With pre-filtering, junk is excluded from usable count, so JSON is fetched."""
+    config = live_config(tmp_path, target_images_per_product=3)
+    page = (
+        "<html><head><title>Dawlance Semi Automatic Washing Machine DW-7500C - 10Kg</title>"
+        "<script>var t='cdn.shopify.com'</script></head><body>"
+        "<div class='product-gallery'>"
+        "<img src='https://cdn.shopify.com/s/files/1/0829/files/7500-c.png?v=1'>"
+        "</div>"
+        "<img src='https://cdn.shopify.com/s/files/1/0829/files/SurmawalaLogo-504w.png'>"
+        "<a href='https://tiktok.com/@surmawala'>"
+        "<img src='https://cdn.shopify.com/s/files/1/0829/files/tiktokicon.png'>"
+        "</a>"
+        "</body></html>"
+    )
+    product_json = json.dumps({"product": {"images": [
+        {"src": "https://cdn.shopify.com/s/files/1/0829/files/7500-c.png?v=1"},
+        {"src": "https://cdn.shopify.com/s/files/1/0829/files/7500-c-side.png?v=2"},
+        {"src": "https://cdn.shopify.com/s/files/1/0829/files/7500-c-top.png?v=3"},
+    ]}})
+    files = "https://cdn.shopify.com/s/files/1/0829/files"
+    images = {
+        f"{files}/7500-c.png": png_bytes(_gallery_image(1)),
+        f"{files}/7500-c-side.png": png_bytes(_gallery_image(2)),
+        f"{files}/7500-c-top.png": png_bytes(_gallery_image(3)),
+    }
+    deps, pages, _, _ = build_deps(
+        tmp_path, {SHOPIFY_PAGE: page, f"{SHOPIFY_PAGE}.json": product_json}, images
+    )
+    result, accepted = process_product(
+        task(0, SHOPIFY_TITLE, (SHOPIFY_PAGE,)), deps, config
+    )
+    assert f"{SHOPIFY_PAGE}.json" in pages.requested, "the product JSON must be fetched despite junk HTML candidates"
+    assert result.images_accepted == 3
+    assert len(accepted) == 3
+    assert result.status is Status.OK
+
+
 def test_woo_store_api_tops_up_a_one_image_page(tmp_path: Path) -> None:
     config = live_config(tmp_path)
     page = (

@@ -609,26 +609,24 @@ def _write_failed_helper_csvs(
     task_by_index = {task.index: task for task in tasks}
     failed_results = [r for r in results if r.status is Status.FAILED]
     if failed_results:
-        # 1. Option 1 re-run sheet: Title + Source URL (page URLs)
-        opt1_rows = [
+        rows = [
             (r.title, " | ".join(task_by_index[r.task_index].source_urls) if r.task_index in task_by_index else "")
             for r in failed_results
         ]
-        atomic_write_csv(
-            config.output_dir / "failed_products_option1.csv",
-            ("Title", "Source URL"),
-            opt1_rows,
-        )
-        # 2. Option 2 re-run sheet: Title + Images (direct URLs)
-        opt2_rows = [
-            (r.title, " | ".join(task_by_index[r.task_index].source_urls) if r.task_index in task_by_index else "")
-            for r in failed_results
-        ]
-        atomic_write_csv(
-            config.output_dir / "failed_products_option2.csv",
-            ("Title", "Images"),
-            opt2_rows,
-        )
+        if config.direct_mode:
+            # Option 2 re-run sheet: Title + Images (direct URLs)
+            atomic_write_csv(
+                config.output_dir / "failed_products_option2.csv",
+                ("Title", "Images"),
+                rows,
+            )
+        else:
+            # Option 1 re-run sheet: Title + Source URL (page URLs)
+            atomic_write_csv(
+                config.output_dir / "failed_products_option1.csv",
+                ("Title", "Source URL"),
+                rows,
+            )
 
     # 3. Complete CSV audit of all rejected images (blurry, template, color mismatch, etc.)
     if config.decisions_path.exists():
