@@ -903,3 +903,42 @@ def test_a_camel_case_own_file_is_not_another_product_line() -> None:
     nameless = "https://cdn.shopify.com/files/UntitledProject-2024-04-29T104202.450.webp"
     assert url_names_other_product_line(foreign_camel, pulse)
     assert not url_names_other_product_line(nameless, pulse)
+
+
+def test_super_asia_ecm_4700_and_gh_406_di_clean_matches() -> None:
+    """Super Asia products on official store must match cleanly without being deferred."""
+    # 1. ECM-4700
+    t1 = "Super Asia ECM-4700 Plus Air Cooler 50 Litters"
+    k1 = build_model_keys(t1)
+    st1 = (
+        "https://superasiastore.com/products/ecm-4700-plus-dc-inverter-cool-master \n "
+        "ECM-4700 Plus DC Inverter Cool Master"
+    )
+    m1 = match_product(keys=k1, brand="superasia", strong_text=st1)
+    assert m1.matched
+    assert m1.rule == "model_key"
+    assert not m1.tolerated
+
+    # 2. GH-406-Di
+    t2 = "Super Asia Instant Gas Water Heater 6Ltr (GH-406-Di)"
+    k2 = build_model_keys(t2)
+    st2 = "https://superasiastore.com/products/gh-406-di \n GH-406DI CRYSTAL SERIES (NG/LPG)"
+    m2 = match_product(keys=k2, brand="superasia", strong_text=st2)
+    assert m2.matched
+    assert m2.rule == "model_key"
+    assert not m2.tolerated
+
+
+def test_tcl_tv_exact_match_not_demoted_to_tolerated() -> None:
+    """TCL 65 Inch 4K UHD QLED TV (65P7L) must match ShandaarBuy page cleanly without being deferred."""
+    title = "TCL 65 Inch 4K UHD QLED TV (65P7L)"
+    keys = build_model_keys(title)
+    strong_text = (
+        "https://shandaarbuy.pk/products/tcl-65-p7l-4k-qled-google-tv \n "
+        "TCL 65\" P7L 4K QLED Google TV Price in Pakistan | ShandaarBuy"
+    )
+    verdict = match_product(keys=keys, brand="tcl", strong_text=strong_text)
+    assert verdict.matched
+    assert verdict.rule == "model_key"
+    assert not verdict.tolerated
+

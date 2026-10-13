@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from urllib.parse import unquote, urlsplit
@@ -434,7 +434,19 @@ _GENERIC_NAME_WORDS = frozenset((
     "audio", "visuals", "sound", "soundbar", "speaker", "speakers", "bars",
     "refrigerators", "freezers", "dispensers", "coolers", "washers", "machines",
     "television",
+    # Additional category / unit / marketing terms (e.g. Super Asia coolers, heaters, TVs)
+    "litters", "litres", "heater", "heaters", "instant", "master", "crystal", "gas",
+    "room", "auto", "easy", "inch", "inches", "qled", "oled", "uhd", "fhd", "google",
+    "android", "dimming",
 ))
+
+#: Dynamically registered generic words from config
+_DYNAMIC_GENERIC_NAME_WORDS: set[str] = set()
+
+
+def register_generic_name_words(words: Iterable[str]) -> None:
+    """Register additional generic category/marketing words dynamically from config."""
+    _DYNAMIC_GENERIC_NAME_WORDS.update(w.strip().lower() for w in words if w.strip())
 
 
 def _name_words(title: str) -> tuple[str, ...]:
@@ -450,7 +462,11 @@ def _name_words(title: str) -> tuple[str, ...]:
         normalized = raw.lower()
         if len(normalized) < 4:
             continue
-        if normalized in _GENERIC_NAME_WORDS or is_colour_word(normalized):
+        if (
+            normalized in _GENERIC_NAME_WORDS
+            or normalized in _DYNAMIC_GENERIC_NAME_WORDS
+            or is_colour_word(normalized)
+        ):
             continue
         if model_like_token(raw) or normalized in out:
             continue

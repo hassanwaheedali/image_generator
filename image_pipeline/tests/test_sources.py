@@ -534,3 +534,13 @@ def test_a_named_row_s_sitemap_route_keeps_its_own_line_only() -> None:
     )
     hits = [url for url in urls if model_tokens_in_url(url, keys)]
     assert hits == ["https://www.orient.com.pk/products/pulse-19c-ultra-white-t3.html"]
+
+
+def test_model_tokens_in_url_ignores_search_query_parameters() -> None:
+    """Shopify search URLs carry query params like ?_psq=Tcl+65P7L that must not falsely match unrelated products."""
+    keys = build_model_keys("TCL 65 Inch 4K UHD QLED TV (65P7L)")
+    unrelated_search_url = "https://shandaarbuy.pk/products/tcl-65-c7l-qd-mini-led-google-tv?_pos=2&_psq=Tcl+65P7L&_psid=ce97b783c&_ss=e"
+    assert not model_tokens_in_url(unrelated_search_url, keys)
+
+    correct_search_url = "https://shandaarbuy.pk/products/tcl-65-p7l-4k-qled-google-tv?_pos=1&_psq=Tcl+65P7L&_psid=ce97b783c&_ss=e"
+    assert model_tokens_in_url(correct_search_url, keys)

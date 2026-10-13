@@ -326,7 +326,8 @@ def model_tokens_in_url(url: str, keys: ModelKeys) -> bool:
     when the URL also names the row's own line (``pulse``); a real part number stays
     trusted wherever it appears.
     """
-    slug = normalize_key(url)
+    path = urlsplit(url).path or url
+    slug = normalize_key(path)
     anchor = fuzzy_series_anchor(keys)
 
     def names_the_line() -> bool:
@@ -382,7 +383,11 @@ def rank_candidates(
         index, candidate = index_and_candidate
         haystack = f"{candidate.url} {candidate.title_hint}".lower()
         colour_hit = 0 if colours and any(colour in haystack for colour in colours) else 1
-        model_hit = 0 if model_tokens_in_url(candidate.url, keys) else 1
+        title_hint_lower = candidate.title_hint.lower()
+        has_model = model_tokens_in_url(candidate.url, keys) or (
+            bool(keys.tokens) and any(t.lower() in title_hint_lower for t in keys.tokens if t)
+        )
+        model_hit = 0 if has_model else 1
         return (colour_hit, model_hit, index)
 
     return [candidate for _, candidate in sorted(enumerate(candidates), key=score)]
