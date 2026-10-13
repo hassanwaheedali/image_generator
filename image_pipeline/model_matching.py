@@ -456,21 +456,31 @@ def _name_words(title: str) -> tuple[str, ...]:
     not a known colour word and not part of a model code.  The brand stays in here (this
     function does not know it); :func:`_drop_brand_words` removes it before any veto, so
     a brand spelled one way in the sheet and another on the page can never veto.
+
+    A separator-delimited segment that carries a digit is a piece of a part number, so
+    its alphabetic runs are code fragments, never line names (``MSAG``, ``HRDN`` of
+    ``MSAG2B-12HRDN1-QC0``): a family page that prints the code only in its body can
+    never carry those fragments in its own name, so left in they veto the series on
+    every variant page (live Midea Eco row, 2026-10-13).  A pure word glued to a code
+    by a separator (``(PWD-425-GD)-Ocean``, ``…023WDC(W)-Triple``) is its own segment
+    and stays a name word.
     """
     out: list[str] = []
-    for raw in re.findall(r"[A-Za-z]+", title):
-        normalized = raw.lower()
-        if len(normalized) < 4:
-            continue
-        if (
-            normalized in _GENERIC_NAME_WORDS
-            or normalized in _DYNAMIC_GENERIC_NAME_WORDS
-            or is_colour_word(normalized)
-        ):
-            continue
-        if model_like_token(raw) or normalized in out:
-            continue
-        out.append(normalized)
+    for token in title.split():
+        for segment in re.split(r"[^A-Za-z0-9]+", token):
+            if not segment.isalpha():
+                continue
+            normalized = segment.lower()
+            if len(normalized) < 4:
+                continue
+            if (
+                normalized in _GENERIC_NAME_WORDS
+                or normalized in _DYNAMIC_GENERIC_NAME_WORDS
+                or is_colour_word(normalized)
+                or normalized in out
+            ):
+                continue
+            out.append(normalized)
     return tuple(out)
 
 
@@ -1116,6 +1126,11 @@ _URL_COMMERCE_NOISE = frozenset((
     "lowq", "highq", "hires", "lores", "orig", "copy", "final", "edited",
     "retouch", "render", "mockup", "emblem", "badge", "icon", "watermark",
     "stamp", "seal", "untitled", "project", "artboard", "design",
+    # Camera-export artefacts: a phone photo keeps the app's own name
+    # (``WhatsAppImage2026-…``), and the camel hump splits it into ``whats`` - a
+    # fragment that names no product line but would accuse the row's own picture
+    # (live Midea Eco official gallery, 2026-10-13).
+    "whatsapp", "whats",
 ))
 
 _HEX_HASH_RE = re.compile(

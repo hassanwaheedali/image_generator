@@ -942,3 +942,62 @@ def test_tcl_tv_exact_match_not_demoted_to_tolerated() -> None:
     assert verdict.rule == "model_key"
     assert not verdict.tolerated
 
+
+
+def test_code_fragments_are_not_series_names() -> None:
+    """Midea Eco row (owner 2026-10-13): the part number ``MSAG2B-12HRDN1-QC0`` splits
+    into the alphabetic runs ``msag`` / ``hrdn``, which are code fragments, not line
+    names.  Left as name words they vetoed the series on the brand's own family page -
+    a page whose name carries no code at all can never print them, so the veto fired
+    on every variant page and demoted a perfect body match to tolerated."""
+    keys = build_model_keys(
+        "MIDEA ECO - WALL MOUNTED DC INVERTER MSAG2B-12HRDN1-QC0 1.0 Ton"
+    )
+    assert "msag" not in keys.name_words
+    assert "hrdn" not in keys.name_words
+    assert {"midea", "wall", "mounted"} <= set(keys.name_words)
+
+
+def test_family_page_body_match_is_not_demoted_to_tolerated() -> None:
+    """The official Midea Eco page names the product only in its body (the variant
+    selector) while title/H1/URL carry the family name.  A body match on a page whose
+    own name adds only shop furniture words is proof, not a last resort."""
+    keys = build_model_keys(
+        "MIDEA ECO - WALL MOUNTED DC INVERTER MSAG2B-12HRDN1-QC0 1.0 Ton"
+    )
+    strong_text = (
+        "https://mideapakistan.store/products/midea-wall-mounted-eco \n "
+        "MIDEA ECO - WALL MOUNTED DC INVERTER | Midea Pakistan | Official Online Store"
+    )
+    body_text = (
+        "Capacity Not sure? Size my room MSAG2B-12HRDN1-QC0 Rs.140,000.00 "
+        "MSAG2C-18HRDN1-QC2 Rs.172,000.00 MSAG2D-24HRDN1-QC0W Rs.230,000.00 "
+        "In stock - installed within 3 working days Add to cart"
+    )
+    verdict = match_product(keys=keys, brand="Midea", strong_text=strong_text, body_text=body_text)
+    assert verdict.matched
+    assert verdict.rule == "body_model_key"
+    assert not verdict.tolerated
+
+
+def test_a_whatsapp_export_filename_accuses_no_product_line() -> None:
+    """Midea Eco official gallery (owner 2026-10-13): the brand's own pictures are
+    phone exports named ``WhatsAppImage2026-…``; the camel hump split read ``whats`` as
+    a foreign product word and S4 refused all four of the row's own photos.  A camera
+    export names no product line.  A file that really names another line still accuses."""
+    from model_matching import url_names_other_product_line
+
+    keys = build_model_keys(
+        "MIDEA ECO - WALL MOUNTED DC INVERTER MSAG2B-12HRDN1-QC0 1.0 Ton"
+    )
+    whatsapp = (
+        "https://mideapakistan.store/cdn/shop/files/"
+        "WhatsAppImage2026-04-10at11.05.41AM_2.jpg?v=1777325128&width=1200"
+    )
+    assert not url_names_other_product_line(whatsapp, keys)
+    innova = (
+        "https://www.orient.com.pk/assets/products-images-2026/air-conditioners/"
+        "15-ton-innova-ultra-white-dc-inverter-4742e7e9.png"
+    )
+    pulse = build_model_keys("Pulse 19C Ultra White T3 | Orient Electronics Pakistan")
+    assert url_names_other_product_line(innova, pulse)
