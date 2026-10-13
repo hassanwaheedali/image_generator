@@ -1675,3 +1675,74 @@ def test_a_wide_cut_out_unit_loses_no_band_to_the_transparency(config: PipelineC
     black = Image.open(io.BytesIO(buffer.getvalue())).convert("RGB")
     assert not verify_image_color(black, "white")[0]
     assert strip_promo_band(black, config)[1] is not None
+
+
+def test_s20_allows_product_on_pale_neutral_studio_background_with_corner_badge(
+    config: PipelineConfig,
+) -> None:
+    """Super Asia cooler cases: pale mint/neutral studio backdrop (e.g. RGB 229, 242, 232)
+    with a small corner feature badge.  Official gallery recognizes it as studio product."""
+    size = 1000
+    # Pale mint studio backdrop
+    image = Image.new("RGB", (size, size), (229, 242, 232))
+    draw = ImageDraw.Draw(image)
+    # Product in centre (e.g. cooler body)
+    draw.rounded_rectangle((280, 150, 720, 880), radius=20, fill=(35, 35, 35))
+    draw.rectangle((300, 200, 700, 550), fill=(245, 245, 245))
+    # Small corner badge (e.g. top-left energy badge touching within 64px ring)
+    draw.rectangle((20, 50, 150, 120), fill=(20, 120, 40))
+
+    # In official gallery, studio background is recognized and passes
+    rule, detail = run_quality_gates(image, config, official_gallery=True)
+    assert rule == "ok", f"Expected ok but got {rule}: {detail}"
+
+    # On an unverified retailer page without official gallery status, S20 stays vigilant
+    ret_rule, ret_detail = run_quality_gates(image, config, official_gallery=False)
+    assert ret_rule == "S20", f"Expected S20 but got {ret_rule}: {ret_detail}"
+
+
+def test_clean_outer_studio_background_handles_dynamic_shades_and_gradients(
+    config: PipelineConfig,
+) -> None:
+    """Dynamic background cleaning works across arbitrary tints, studio gradients, and preserves inner panels."""
+    from compositing import clean_outer_studio_background
+
+    # Test cases: (name, corner_colors: TL, TR, BL, BR)
+    test_cases = [
+        ("Pale Mint", (229, 242, 232), (229, 242, 232), (229, 242, 232), (229, 242, 232)),
+        ("Lighting Gradient", (224, 224, 224), (241, 241, 241), (212, 212, 212), (221, 221, 221)),
+        ("Warm Ivory", (245, 240, 230), (242, 238, 228), (238, 233, 224), (235, 230, 220)),
+        ("Lavender Grey", (232, 228, 238), (235, 230, 240), (226, 220, 232), (228, 222, 234)),
+    ]
+
+    w, h = 600, 600
+    u = np.linspace(0.0, 1.0, w)[None, :, None]
+    v = np.linspace(0.0, 1.0, h)[:, None, None]
+
+    for name, c_tl, c_tr, c_bl, c_br in test_cases:
+        bg_surface = (
+            (1.0 - u) * (1.0 - v) * np.array(c_tl)
+            + u * (1.0 - v) * np.array(c_tr)
+            + (1.0 - u) * v * np.array(c_bl)
+            + u * v * np.array(c_br)
+        )
+        base = np.clip(bg_surface, 0, 255).astype(np.uint8)
+        img = Image.fromarray(base)
+        draw = ImageDraw.Draw(img)
+
+        # Draw product in the middle with a white interior panel
+        draw.rounded_rectangle((150, 120, 450, 480), radius=15, fill=(40, 40, 40))
+        draw.rectangle((200, 200, 400, 400), fill=(230, 230, 230))  # inner light panel
+
+        cleaned = clean_outer_studio_background(img, config)
+        arr = np.asarray(cleaned)
+
+        # Corners and edges must be cleanly whitened to 255
+        assert (arr[:10, :10] == 255).all(), f"{name}: TL not whitened"
+        assert (arr[:10, -10:] == 255).all(), f"{name}: TR not whitened"
+        assert (arr[-10:, :10] == 255).all(), f"{name}: BL not whitened"
+        assert (arr[-10:, -10:] == 255).all(), f"{name}: BR not whitened"
+
+        # Inner product panel must remain intact, not flooded by outer background whitening
+        assert arr[300, 300, 0] <= 235, f"{name}: inner panel was corrupted"
+

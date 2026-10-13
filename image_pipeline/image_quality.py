@@ -773,7 +773,8 @@ def run_quality_gates(
                     std_max=config.border_std_max,
                     min_fraction=config.border_clean_min_fraction,
                 )
-                if ring_clean:
+                has_studio_bg = ring_clean or official_gallery_pass(image, config)
+                if has_studio_bg:
                     from compositing import isolate_main_product
                     isolated, degraded = isolate_main_product(image, config)
                     iw, ih = isolated.size

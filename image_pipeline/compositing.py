@@ -197,6 +197,96 @@ def _single_body_box(mask: np.ndarray, config: PipelineConfig) -> tuple[int, int
     )
 
 
+def clean_outer_studio_background(rgb: Image.Image, config: PipelineConfig) -> Image.Image:
+    """Dynamically whiten edge-connected neutral studio background (any shade or lighting gradient).
+
+    Seamless studio backdrops vary across products (pale mint, light grey, warm ivory,
+    lavender grey, off-white) and frequently feature lighting gradients from top to bottom
+    or corner to corner.
+
+    This function dynamically:
+    1. Measures the 4 corner patches and perimeter to infer the studio background.
+    2. Repairs any corner contaminated by a badge, logo, or foreground element using
+       variance and perimeter median consistency.
+    3. Fits a continuous 2D bilinear gradient field B(x, y) modeling the exact lighting surface.
+    4. Dynamically scales tolerance to the background's measured sensor and compression noise.
+    5. Applies edge-connected floodfill seeded exclusively at image boundaries to preserve all
+       inner product components (white panels, bezels, vents).
+    6. Whitens only the edge-connected background to pure white (255, 255, 255).
+    """
+    try:
+        from scipy import ndimage
+    except Exception:
+        return rgb
+
+    arr = np.asarray(rgb, dtype=float)
+    h, w = arr.shape[:2]
+    if h < 8 or w < 8:
+        return rgb
+
+    s = max(4, int(min(w, h) * config.corner_patch_ratio))
+    patches = {
+        "TL": arr[:s, :s],
+        "TR": arr[:s, -s:],
+        "BL": arr[-s:, :s],
+        "BR": arr[-s:, -s:],
+    }
+    corners = {k: np.median(v.reshape(-1, 3), axis=0) for k, v in patches.items()}
+    stds = {k: float(np.std(v.reshape(-1, 3), axis=0).max()) for k, v in patches.items()}
+
+    # If all four corners are already pure studio white (<= 6 levels from 255), do nothing
+    if all(float(np.abs(c - 255.0).max()) <= 6.0 for c in corners.values()):
+        return rgb
+
+    # Perimeter median provides the robust baseline for the outer studio background
+    perim = np.concatenate([arr[0, :], arr[-1, :], arr[:, 0], arr[:, -1]], axis=0)
+    perim_med = np.median(perim, axis=0)
+
+    # Repair any corner corrupted by a badge, seal, or graphic (high variance or far from perimeter)
+    clean_corners: dict[str, np.ndarray] = {}
+    for k, c in corners.items():
+        dev = float(np.abs(c - perim_med).max())
+        if stds[k] > 6.0 or dev > 40.0:
+            clean_corners[k] = perim_med
+        else:
+            clean_corners[k] = c
+
+    # Construct the continuous 2D bilinear background field B(x, y)
+    u = np.linspace(0.0, 1.0, w, endpoint=True, dtype=float)[None, :, None]
+    v = np.linspace(0.0, 1.0, h, endpoint=True, dtype=float)[:, None, None]
+    bg_surface = (
+        (1.0 - u) * (1.0 - v) * clean_corners["TL"]
+        + u * (1.0 - v) * clean_corners["TR"]
+        + (1.0 - u) * v * clean_corners["BL"]
+        + u * v * clean_corners["BR"]
+    )
+
+    diff = np.abs(arr - bg_surface).max(axis=2)
+
+    # Dynamically scale tolerance based on the background's measured noise
+    clean_stds = [stds[k] for k in stds if stds[k] <= 6.0]
+    median_std = float(np.median(clean_stds)) if clean_stds else 1.0
+    tol = max(10, min(24, round(median_std * 3.5 + 8)))
+
+    bg_candidates = diff <= tol
+
+    # Edge-connected components: seed strictly at the 4 frame borders
+    edge_seeds = np.zeros((h, w), dtype=bool)
+    edge_seeds[0, :] = edge_seeds[-1, :] = edge_seeds[:, 0] = edge_seeds[:, -1] = True
+
+    labels, num = ndimage.label(bg_candidates)
+    if num == 0:
+        return rgb
+    edge_labels = set(np.unique(labels[edge_seeds])) - {0}
+    if not edge_labels:
+        return rgb
+
+    is_outer_bg = np.isin(labels, list(edge_labels))
+    cleaned_arr = np.asarray(rgb).copy()
+    cleaned_arr[is_outer_bg] = [255, 255, 255]
+    return Image.fromarray(cleaned_arr)
+
+
 def isolate_main_product(
     image: Image.Image, config: PipelineConfig
 ) -> tuple[Image.Image, bool]:
@@ -207,6 +297,7 @@ def isolate_main_product(
     Never raises and never returns an empty image.
     """
     rgb = to_rgb(image)
+    rgb = clean_outer_studio_background(rgb, config)
     mask = _foreground_mask(rgb, config)
     fraction = float(mask.mean()) if mask.size else 0.0
 
