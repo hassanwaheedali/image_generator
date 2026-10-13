@@ -12,7 +12,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 # --------------------------------------------------------------------------- #
 # Asset file names (defaults; all overridable through PipelineConfig)
@@ -139,8 +139,37 @@ def load_env_file(
     return contributed or first_seen
 
 
+def load_config_file(
+    path: Path | None = None,
+    *,
+    search_dirs: Sequence[Path] | None = None,
+) -> dict[str, Any]:
+    """Load configuration dictionary from a JSON file (e.g. pipeline_config.json)."""
+    import json
+    candidates: list[Path] = []
+    if path is not None:
+        candidates.append(path)
+    else:
+        folders = list(search_dirs) if search_dirs is not None else default_search_dirs()
+        for folder in folders:
+            candidates.append(folder / "pipeline_config.json")
+            candidates.append(folder / "config.json")
+    for candidate in candidates:
+        if candidate.is_file():
+            try:
+                with candidate.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+            except (OSError, ValueError):
+                pass
+    return {}
+
+
+
 #: Default endpoint used when ``FREEIMAGE_UPLOAD_URL`` is not set.
 DEFAULT_UPLOAD_URL: Final[str] = "https://freeimage.host/api/1/upload"
+
 
 
 def _read_upload_url() -> str:
@@ -250,7 +279,20 @@ class PipelineConfig:
     unbalanced_bracket_keeps_text: bool = True
     use_bracketed_keys_as_fallback: bool = True
 
+    # ----- performance & iteration control ---------------------------------
+    #: When True, stop searching subsequent pages and fallback sources as soon as
+    #: at least 1 valid image is accepted for the product.
+    early_stop_when_image_found: bool = False
+
+    #: When True, stop inspecting candidates on a page as soon as target_images_per_product
+    #: is reached, rather than inspecting all remaining candidates in large galleries.
+    limit_gallery_iteration: bool = False
+
+    #: Extra generic / category words that must not trigger a series substitution veto.
+    extra_generic_name_words: tuple[str, ...] = ()
+
     # ----- simplified matching (customer decisions 2026-10-05, plan §3.6) ---
+
     # Loose about recognizing the product, strict about publishing a wrong image.
     # --- product recognition: two plain rules (see model_matching) ----------
     allow_key_truncation_match: bool = True      # DW-7500C sheet vs DW-7500 page
@@ -293,22 +335,22 @@ class PipelineConfig:
             "www.dawlance.com.pk": "sitemap",
             "www.tcl.com/pk": "sitemap",
             "www.orient.com.pk": "sitemap",
-            "shandaarbuy.pk": "shopify",
             "eshop.pel.com.pk": "shopify",
             "homage.com.pk": "woo",
             "www.kenwoodpakistan.com": "woo",
             "www.kenwoodpakistan.pk": "woo",
             "www.surmawala.pk": "shopify",
-            "modernelectronics.pk": "shopify",
             "friendshome.pk": "shopify",
+            "www.alfatah.com.pk": "woo",
+            "modernelectronics.pk": "shopify",
+            "subhanelectronics.pk": "woo",
+            "pkelectronics.pk": "woo",
             "jalalelectronics.com": "shopify",
+            "shandaarbuy.pk": "shopify",
             "electrociti.pk": "shopify",
             "whitehouse.com.pk": "shopify",
-            "www.alfatah.com.pk": "woo",
             "www.almumtaz.com.pk": "woo",
             "hadielectronics.com.pk": "woo",
-            "pkelectronics.pk": "woo",
-            "subhanelectronics.pk": "woo",
             "sohailelectronics.com": "woo",
             "cityelectronics.com.pk": "woo",
             "yasirelectronics.com": "woo",
@@ -332,10 +374,10 @@ class PipelineConfig:
         }
     )
     retail_shopify_sources: tuple[str, ...] = (
-        "https://shandaarbuy.pk",
         "https://www.surmawala.pk",
         "https://modernelectronics.pk",
         "https://friendshome.pk",
+        "https://shandaarbuy.pk",
         "https://jalalelectronics.com",
         "https://electrociti.pk",
         "https://whitehouse.com.pk",
@@ -719,6 +761,11 @@ class PipelineConfig:
                 "Put it in secrets.env (FREEIMAGE_API_KEY=... or IMGBB_API_KEY=...) or export "
                 "it in the shell before a real upload run."
             )
+        if self.extra_generic_name_words:
+            from model_matching import register_generic_name_words
+
+            register_generic_name_words(self.extra_generic_name_words)
+
 
     def sources_for(self, brand: str | None) -> tuple[str, ...]:
         """The fallback chain for one row: the brand's own sites first, then retail.

@@ -623,6 +623,9 @@ def process_product(
             # The brand's own page delivered - the row is solved (owner 2026-10-11).
             official_solved = True
             stages.append(f"official page solved the row: {outcome.page_url}")
+        if config.early_stop_when_image_found and len(accepted) >= 1:
+            stages.append(f"early stop: {len(accepted)} image(s) accepted from {outcome.page_url}")
+            return False
         if not outcome.fetched or not outcome.matched:
             pages_rejected += 1
             if not is_fallback:
@@ -639,8 +642,9 @@ def process_product(
         nonlocal fallback_found, fallback_report, fallback_used
         # Owner rule 2026-10-11: the brand's own site already solved the row, so the
         # retailer hunt never even starts - no source query, no candidate list.
-        if official_solved:
+        if official_solved or _row_is_done(accepted, config):
             return [], None
+
         if fallback_found is None:
             if config.fallback_enabled and deps.source_searcher is not None:
                 LOG.info("[row %s] fallback search across retailer sources", task.index)
@@ -1049,7 +1053,9 @@ class _DownloadBudget:
 
 
 def _row_is_done(accepted: list[AcceptedImage], config: PipelineConfig) -> bool:
-    """Enough images for this row: the customer target (3), capped by the maximum."""
+    """Enough images for this row: early stop if configured, or customer target capped by max."""
+    if config.early_stop_when_image_found and len(accepted) >= 1:
+        return True
     goal = min(config.target_images_per_product, config.max_images_per_product)
     return len(accepted) >= max(1, goal)
 
@@ -1072,7 +1078,7 @@ def _page_publish_goal(candidates: list[ImageCandidate], config: PipelineConfig)
     full official gallery does not invite a retailer top-up.
     """
     goal = min(config.target_images_per_product, config.max_images_per_product)
-    if not config.gallery_publishes_all:
+    if config.limit_gallery_iteration or not config.gallery_publishes_all:
         return goal
     curated = sum(1 for candidate in candidates if candidate.source in GALLERY_IMAGE_SOURCES)
     if curated >= config.gallery_publishes_all_min:
@@ -1098,6 +1104,11 @@ def _page_download_allowance(
     ceiling silently ignored the rest).  There the gallery is read in full, never more
     than the row may publish and never more than the row's own download budget.
     """
+    if config.limit_gallery_iteration:
+        return min(
+            config.image_full_download_max_per_page,
+            max(config.target_images_per_product * 2, 2),
+        )
     curated = sum(1 for candidate in candidates if candidate.source in GALLERY_IMAGE_SOURCES)
     if curated <= 0:
         return config.image_full_download_max_per_page
@@ -1105,6 +1116,7 @@ def _page_download_allowance(
         config.image_full_download_max_per_page,
         min(curated, config.max_images_per_product, config.image_full_download_max_per_row),
     )
+
 
 
 def _search_sources(
@@ -1497,6 +1509,9 @@ def _consume_candidates(
             # Not `_row_is_done`: this page's own gallery is read to the end (see
             # ``_page_publish_goal``), so a third manual sheet cannot spend the last slot.
             break
+        if config.early_stop_when_image_found and len(accepted) >= 1:
+            break
+
         verdict = _decide_candidate(candidate, keys, seen_keys)
         if (
             verdict is None

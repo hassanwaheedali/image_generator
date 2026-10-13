@@ -15,7 +15,7 @@ import sys
 import threading
 from pathlib import Path
 
-from config import ConfigError, PipelineConfig, load_env_file
+from config import ConfigError, PipelineConfig, load_config_file, load_env_file
 from csv_io import (
     atomic_write_csv,
     hash_source_urls,
@@ -102,8 +102,23 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--redo", nargs="*", default=[], help="exact titles to force re-process")
     parser.add_argument("--limit", type=int, default=None, help="process at most N products")
     parser.add_argument("--workers", type=int, default=4, help="parallel workers (default 4)")
-    parser.add_argument("--min-images", type=int, default=2, help="images required for status ok")
-    parser.add_argument("--max-images", type=int, default=10, help="images kept per product")
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="path to a JSON config file (default: pipeline_config.json)",
+    )
+    parser.add_argument(
+        "--early-stop",
+        action="store_true",
+        help="stop searching further pages once >= 1 valid image is accepted",
+    )
+    parser.add_argument(
+        "--limit-gallery",
+        action="store_true",
+        help="stop gallery candidate evaluation once target image quota is reached",
+    )
+    parser.add_argument("--min-images", type=int, default=None, help="images required for status ok (default 2)")
+    parser.add_argument("--max-images", type=int, default=None, help="images kept per product (default 10)")
     parser.add_argument("--no-resume", action="store_true", help="ignore the checkpoint entirely")
     parser.add_argument(
         "--no-fallback",
@@ -118,7 +133,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--target-images",
         type=int,
-        default=3,
+        default=None,
         help="images to aim for per product (default 3, hard cap --max-images)",
     )
     parser.add_argument("--log-level", default="INFO", help="DEBUG/INFO/WARNING")
@@ -147,9 +162,33 @@ def configure_logging(config: PipelineConfig, level: str) -> None:
 
 def build_config(args: argparse.Namespace) -> PipelineConfig:
     # Each input sheet gets its own folders, so two sheets never mix their outputs/checkpoints.
+    file_cfg = load_config_file(Path(args.config) if getattr(args, "config", None) else None)
     stem = Path(args.input).stem if args.input else ""
     output_dir = args.output_dir or (str(Path("output") / stem) if stem else "output")
     state_dir = args.state_dir or (str(Path("state") / stem) if stem else "state")
+
+    early_stop = bool(getattr(args, "early_stop", False)) or bool(file_cfg.get("early_stop_when_image_found", False))
+    limit_gallery = bool(getattr(args, "limit_gallery", False)) or bool(file_cfg.get("limit_gallery_iteration", False))
+    extra_words = tuple(file_cfg.get("extra_generic_name_words", ()))
+    gallery_publishes_all = bool(file_cfg.get("gallery_publishes_all", True))
+
+    min_required_images = (
+        int(args.min_images)
+        if getattr(args, "min_images", None) is not None
+        else int(file_cfg.get("min_required_images", 2))
+    )
+    max_images_per_product = (
+        int(args.max_images)
+        if getattr(args, "max_images", None) is not None
+        else int(file_cfg.get("max_images_per_product", 10))
+    )
+    target_images_per_product = (
+        int(args.target_images)
+        if getattr(args, "target_images", None) is not None
+        else int(file_cfg.get("target_images_per_product", 3))
+    )
+    fallback_max_pages_per_source = int(file_cfg.get("fallback_max_pages_per_source", 3))
+
     return PipelineConfig(
         assets_dir=Path(args.assets_dir),
         output_dir=Path(output_dir),
@@ -161,13 +200,19 @@ def build_config(args: argparse.Namespace) -> PipelineConfig:
         limit=args.limit,
         redo_titles=tuple(args.redo or ()),
         resume=not args.no_resume,
-        min_required_images=int(args.min_images),
-        max_images_per_product=int(args.max_images),
-        target_images_per_product=int(args.target_images),
+        min_required_images=min_required_images,
+        max_images_per_product=max_images_per_product,
+        target_images_per_product=target_images_per_product,
         keep_rejected_images=bool(getattr(args, "keep_rejected", False)),
         fallback_enabled=not bool(args.no_fallback),
         refresh_sitemaps=bool(args.refresh_sitemaps),
+        early_stop_when_image_found=early_stop,
+        limit_gallery_iteration=limit_gallery,
+        gallery_publishes_all=gallery_publishes_all,
+        extra_generic_name_words=extra_words,
+        fallback_max_pages_per_source=fallback_max_pages_per_source,
     )
+
 
 
 def _discover_sheets_in_dir(directory: Path) -> list[Path]:
