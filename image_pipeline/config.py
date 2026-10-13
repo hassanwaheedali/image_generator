@@ -169,12 +169,19 @@ def load_config_file(
 
 #: Default endpoint used when ``FREEIMAGE_UPLOAD_URL`` is not set.
 DEFAULT_UPLOAD_URL: Final[str] = "https://freeimage.host/api/1/upload"
+DEFAULT_IMGBB_UPLOAD_URL: Final[str] = "https://api.imgbb.com/1/upload"
+DEFAULT_APILAYER_UPLOAD_URL: Final[str] = "https://api.apilayer.com/image_upload/upload"
 
 
 
 def _read_upload_url() -> str:
     """Upload endpoint supplied by ``FREEIMAGE_UPLOAD_URL`` (blank uses the default)."""
     return os.environ.get("FREEIMAGE_UPLOAD_URL", "").strip() or DEFAULT_UPLOAD_URL
+
+
+def _read_imgbb_upload_url() -> str:
+    """Upload endpoint supplied by ``IMGBB_UPLOAD_URL`` (blank uses the default)."""
+    return os.environ.get("IMGBB_UPLOAD_URL", "").strip() or DEFAULT_IMGBB_UPLOAD_URL
 
 
 def _read_api_key() -> str:
@@ -189,6 +196,16 @@ def _read_api_key() -> str:
 def _read_imgbb_api_key() -> str:
     """ImgBB API key for fallback/primary upload, read from ``IMGBB_API_KEY``."""
     return os.environ.get("IMGBB_API_KEY", "").strip()
+
+
+def _read_apilayer_api_key() -> str:
+    """APILayer API key for fallback/primary upload, read from ``APILAYER_API_KEY``."""
+    return os.environ.get("APILAYER_API_KEY", "").strip()
+
+
+def _read_apilayer_upload_url() -> str:
+    """Upload endpoint supplied by ``APILAYER_UPLOAD_URL`` (blank uses the default)."""
+    return os.environ.get("APILAYER_UPLOAD_URL", "").strip() or DEFAULT_APILAYER_UPLOAD_URL
 
 
 @dataclass(frozen=True)
@@ -342,16 +359,16 @@ class PipelineConfig:
             "www.surmawala.pk": "shopify",
             "friendshome.pk": "shopify",
             "www.alfatah.com.pk": "woo",
-            "modernelectronics.pk": "shopify",
             "subhanelectronics.pk": "woo",
+            "sohailelectronics.com": "woo",
             "pkelectronics.pk": "woo",
             "jalalelectronics.com": "shopify",
+            "modernelectronics.pk": "shopify",
             "shandaarbuy.pk": "shopify",
             "electrociti.pk": "shopify",
             "whitehouse.com.pk": "shopify",
             "www.almumtaz.com.pk": "woo",
             "hadielectronics.com.pk": "woo",
-            "sohailelectronics.com": "woo",
             "cityelectronics.com.pk": "woo",
             "yasirelectronics.com": "woo",
             "umarelectronics.pk": "woo",
@@ -742,8 +759,14 @@ class PipelineConfig:
     api_key: str = field(default_factory=_read_api_key)
     #: Fallback/alternative upload host - ``IMGBB_API_KEY``.
     imgbb_api_key: str = field(default_factory=_read_imgbb_api_key)
+    #: Fallback/alternative upload host - ``APILAYER_API_KEY``.
+    apilayer_api_key: str = field(default_factory=_read_apilayer_api_key)
     #: Upload endpoint - ``FREEIMAGE_UPLOAD_URL``, defaulting to freeimage.host.
     upload_url: str = field(default_factory=_read_upload_url)
+    #: Upload endpoint - ``IMGBB_UPLOAD_URL``, defaulting to api.imgbb.com.
+    imgbb_upload_url: str = field(default_factory=_read_imgbb_upload_url)
+    #: Upload endpoint - ``APILAYER_UPLOAD_URL``, defaulting to api.apilayer.com.
+    apilayer_upload_url: str = field(default_factory=_read_apilayer_upload_url)
     upload_min_interval_s: float = 0.6
 
     # ------------------------------------------------------------------ #
@@ -755,10 +778,11 @@ class PipelineConfig:
         self._validate_fetch()
         self._validate_image_gates()
         self._validate_compositing()
-        if not self.dry_run and not self.api_key and not self.imgbb_api_key:
+        if not self.dry_run and not self.api_key and not self.imgbb_api_key and not self.apilayer_api_key:
             raise ConfigError(
-                "FREEIMAGE_API_KEY (or IMGBB_API_KEY) is not set (and --dry-run was not requested). "
-                "Put it in secrets.env (FREEIMAGE_API_KEY=... or IMGBB_API_KEY=...) or export "
+                "FREEIMAGE_API_KEY (or IMGBB_API_KEY / APILAYER_API_KEY) is not set "
+                "(and --dry-run was not requested). "
+                "Put it in secrets.env (FREEIMAGE_API_KEY=..., IMGBB_API_KEY=..., or APILAYER_API_KEY=...) or export "
                 "it in the shell before a real upload run."
             )
         if self.extra_generic_name_words:

@@ -33,7 +33,7 @@ from fetch import (
     DomainRateLimiter,
     PermanentAPIError,
 )
-from image_host import FallbackImageHost, FreeImageHost, ImgBBHost
+from image_host import APILayerHost, FallbackImageHost, FreeImageHost, ImgBBHost
 from models import ProductResult, ProductTask, Status
 from pipeline import (
     BatchRunner,
@@ -296,38 +296,49 @@ def _build_image_host(config: PipelineConfig) -> ImageHost:
     if config.dry_run:
         return DryRunHost(config.output_dir)
 
-    primary = (
-        FreeImageHost(
-            api_key=config.api_key,
-            endpoint=config.upload_url,
-            min_interval_s=config.upload_min_interval_s,
-            max_retries=config.max_retries,
-            base_delay_s=config.backoff_base_s,
-            max_delay_s=config.backoff_max_s,
+    hosts: list[ImageHost] = []
+    if config.api_key:
+        hosts.append(
+            FreeImageHost(
+                api_key=config.api_key,
+                endpoint=config.upload_url,
+                min_interval_s=config.upload_min_interval_s,
+                max_retries=config.max_retries,
+                base_delay_s=config.backoff_base_s,
+                max_delay_s=config.backoff_max_s,
+            )
         )
-        if config.api_key
-        else None
-    )
-    fallback = (
-        ImgBBHost(
-            api_key=config.imgbb_api_key,
-            min_interval_s=config.upload_min_interval_s,
-            max_retries=config.max_retries,
-            base_delay_s=config.backoff_base_s,
-            max_delay_s=config.backoff_max_s,
+    if config.imgbb_api_key:
+        hosts.append(
+            ImgBBHost(
+                api_key=config.imgbb_api_key,
+                endpoint=config.imgbb_upload_url,
+                min_interval_s=config.upload_min_interval_s,
+                max_retries=config.max_retries,
+                base_delay_s=config.backoff_base_s,
+                max_delay_s=config.backoff_max_s,
+            )
         )
-        if config.imgbb_api_key
-        else None
+    if config.apilayer_api_key:
+        hosts.append(
+            APILayerHost(
+                api_key=config.apilayer_api_key,
+                endpoint=config.apilayer_upload_url,
+                min_interval_s=config.upload_min_interval_s,
+                max_retries=config.max_retries,
+                base_delay_s=config.backoff_base_s,
+                max_delay_s=config.backoff_max_s,
+            )
+        )
+
+    if len(hosts) > 1:
+        return FallbackImageHost(hosts=hosts)
+    if len(hosts) == 1:
+        return hosts[0]
+
+    raise PermanentAPIError(
+        "No upload host configured (FREEIMAGE_API_KEY, IMGBB_API_KEY, or APILAYER_API_KEY required)"
     )
-
-    if primary is not None and fallback is not None:
-        return FallbackImageHost(primary=primary, fallback=fallback)
-    if primary is not None:
-        return primary
-    if fallback is not None:
-        return fallback
-
-    raise PermanentAPIError("No upload host configured (FREEIMAGE_API_KEY or IMGBB_API_KEY required)")
 
 
 def build_deps(config: PipelineConfig, decisions: DecisionLog) -> PipelineDeps:
