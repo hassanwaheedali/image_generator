@@ -246,42 +246,48 @@ def check_assets(config: PipelineConfig) -> None:
         )
 
 
+def _build_image_host(config: PipelineConfig) -> ImageHost:
+    """Build the configured image host, supporting dry-run, primary, fallback or failover."""
+    if config.dry_run:
+        return DryRunHost(config.output_dir)
+
+    primary = (
+        FreeImageHost(
+            api_key=config.api_key,
+            endpoint=config.upload_url,
+            min_interval_s=config.upload_min_interval_s,
+            max_retries=config.max_retries,
+            base_delay_s=config.backoff_base_s,
+            max_delay_s=config.backoff_max_s,
+        )
+        if config.api_key
+        else None
+    )
+    fallback = (
+        ImgBBHost(
+            api_key=config.imgbb_api_key,
+            min_interval_s=config.upload_min_interval_s,
+            max_retries=config.max_retries,
+            base_delay_s=config.backoff_base_s,
+            max_delay_s=config.backoff_max_s,
+        )
+        if config.imgbb_api_key
+        else None
+    )
+
+    if primary is not None and fallback is not None:
+        return FallbackImageHost(primary=primary, fallback=fallback)
+    if primary is not None:
+        return primary
+    if fallback is not None:
+        return fallback
+
+    raise PermanentAPIError("No upload host configured (FREEIMAGE_API_KEY or IMGBB_API_KEY required)")
+
+
 def build_deps(config: PipelineConfig, decisions: DecisionLog) -> PipelineDeps:
     limiter = DomainRateLimiter(config.domain_min_interval_s)
-    if config.dry_run:
-        host: ImageHost = DryRunHost(config.output_dir)
-    else:
-        primary = (
-            FreeImageHost(
-                api_key=config.api_key,
-                endpoint=config.upload_url,
-                min_interval_s=config.upload_min_interval_s,
-                max_retries=config.max_retries,
-                base_delay_s=config.backoff_base_s,
-                max_delay_s=config.backoff_max_s,
-            )
-            if config.api_key
-            else None
-        )
-        fallback = (
-            ImgBBHost(
-                api_key=config.imgbb_api_key,
-                min_interval_s=config.upload_min_interval_s,
-                max_retries=config.max_retries,
-                base_delay_s=config.backoff_base_s,
-                max_delay_s=config.backoff_max_s,
-            )
-            if config.imgbb_api_key
-            else None
-        )
-        if primary is not None and fallback is not None:
-            host = FallbackImageHost(primary=primary, fallback=fallback)
-        elif primary is not None:
-            host = primary
-        elif fallback is not None:
-            host = fallback
-        else:
-            raise PermanentAPIError("No upload host configured (FREEIMAGE_API_KEY or IMGBB_API_KEY required)")
+    host = _build_image_host(config)
     # Direct mode (Option 2) never searches: the row supplies its own images.
     searcher = (
         SourceChain(config, CurlCffiJsonHttp(config, limiter))
