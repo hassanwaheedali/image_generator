@@ -16,11 +16,17 @@ from typing import Any, Final
 
 # --------------------------------------------------------------------------- #
 # Asset file names (defaults; all overridable through PipelineConfig)
+#
+# Assets live one folder per platform - ``assets/<platform key>/template.png`` and
+# ``assets/<platform key>/last.png`` - so a filename never has to carry the platform
+# and a new platform is a folder, not four more constants.  These four are the
+# transitional spelling of that tree for the two platforms the code still addresses
+# by role; they go when the callers move to ``platforms.PlatformSpec``.
 # --------------------------------------------------------------------------- #
-DEFAULT_DIGIMALL_TEMPLATE = "DigiMall.png"
-DEFAULT_ALFAMALL_TEMPLATE = "AlfaMall.png"
-DEFAULT_DIGIMALL_BANNER = "digi_last.png"
-DEFAULT_ALFAMALL_BANNER = "alfa_last.png"
+DEFAULT_DIGIMALL_TEMPLATE = "digi/template.png"
+DEFAULT_ALFAMALL_TEMPLATE = "alfa/template.png"
+DEFAULT_DIGIMALL_BANNER = "digi/last.png"
+DEFAULT_ALFAMALL_BANNER = "alfa/last.png"
 
 # Output CSV headers.  Changing the header is a one-constant change.
 OUTPUT_HEADER: tuple[str, ...] = ("Title", "Brand", "Image_Urls")
@@ -217,12 +223,26 @@ class PipelineConfig:
     output_dir: Path = Path("output")
     state_dir: Path = Path("state")
     input_dir: Path = Path("input")
+    #: Windows MAX_PATH is 260 and Excel's own limit is lower in practice.  The deepest
+    #: path a run writes is ``output/<run>/images/<platform>/<slug>/<prefix>_NN.jpg``;
+    #: when composing it would pass this budget the *slug* is shortened (with a hash
+    #: suffix, so it stays unique) and the model-code prefix is left alone - the prefix
+    #: is what the owner reads in the CSV.
+    max_output_path_chars: int = 220
 
     # ----- asset file names ------------------------------------------------
     digimall_template_name: str = DEFAULT_DIGIMALL_TEMPLATE
     alfamall_template_name: str = DEFAULT_ALFAMALL_TEMPLATE
     digimall_banner_name: str = DEFAULT_DIGIMALL_BANNER
     alfamall_banner_name: str = DEFAULT_ALFAMALL_BANNER
+
+    # ----- platforms -------------------------------------------------------
+    #: Comma-separated platform keys, in publish order.  ``--platforms`` and the
+    #: startup prompt override this.  Keys and their assets live in ``platforms.py``.
+    enabled_platforms: str = "website,alfa,digi"
+    #: Website drops the closing banner by rule (the site has its own closing slot).
+    #: Owner asked for the rule to stay switchable rather than be baked into the table.
+    website_keep_banner: bool = False
 
     # ----- run control -----------------------------------------------------
     dry_run: bool = False
@@ -775,6 +795,7 @@ class PipelineConfig:
     def __post_init__(self) -> None:
         self._validate_quotas()
         self._validate_run_control()
+        self._validate_platforms()
         self._validate_fetch()
         self._validate_image_gates()
         self._validate_compositing()
@@ -864,6 +885,19 @@ class PipelineConfig:
             raise ConfigError("workers must be >= 1")
         if self.limit is not None and self.limit < 1:
             raise ConfigError("limit must be >= 1 when given")
+
+    def _validate_platforms(self) -> None:
+        # Imported lazily: platforms.py reads ConfigError from this module, so a
+        # module-level import here would be circular.  The same trick is used below
+        # for model_matching.
+        from platforms import PLATFORM_KEYS, parse_platform_keys
+
+        if not parse_platform_keys(self.enabled_platforms):
+            raise ConfigError(
+                "enabled_platforms must name at least one of: " + ", ".join(PLATFORM_KEYS)
+            )
+        if self.max_output_path_chars < 120:
+            raise ConfigError("max_output_path_chars must be >= 120")
 
     def _validate_fetch(self) -> None:
         if self.connect_timeout_s <= 0:

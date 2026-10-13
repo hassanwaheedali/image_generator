@@ -225,19 +225,24 @@ def config(tmp_path: Path) -> PipelineConfig:
 
 
 def make_assets(folder: Path) -> None:
-    """Small but realistic templates: header band + footer, plus two banners."""
+    """Small but realistic per-platform assets: header band + footer, plus two banners.
+
+    Mirrors the real tree (``assets/<platform>/template.png`` + ``last.png``).  Website is
+    deliberately absent: a missing template must skip that platform, not break the run.
+    """
     template = Image.new("RGBA", (800, 800), (255, 255, 255, 255))
     draw = ImageDraw.Draw(template)
     draw.rectangle((0, 0, 800, 90), fill=(12, 78, 160, 255))
     draw.rectangle((0, 740, 800, 800), fill=(12, 78, 160, 255))
-    template.save(folder / "DigiMall.png")
-    template.save(folder / "AlfaMall.png")
     digi_banner = Image.new("RGB", (900, 300), (250, 250, 250))
     ImageDraw.Draw(digi_banner).rectangle((0, 0, 900, 60), fill=(200, 30, 60))
-    digi_banner.save(folder / "digi_last.png")
     alfa_banner = Image.new("RGB", (900, 300), (245, 245, 252))
     ImageDraw.Draw(alfa_banner).rectangle((0, 0, 900, 60), fill=(20, 90, 170))
-    alfa_banner.save(folder / "alfa_last.png")
+    for key, banner in (("digi", digi_banner), ("alfa", alfa_banner)):
+        platform_dir = folder / key
+        platform_dir.mkdir(parents=True, exist_ok=True)
+        template.save(platform_dir / "template.png")
+        banner.save(platform_dir / "last.png")
 
 
 @pytest.fixture()

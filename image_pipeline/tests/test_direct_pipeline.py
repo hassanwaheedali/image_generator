@@ -163,7 +163,7 @@ def test_batch_runner_uses_the_injected_processor(tmp_path: Path) -> None:
     """The seam: Option 2 swaps the per-row processor without touching Option 1."""
     config = PipelineConfig(
         dry_run=True,
-        assets_dir=Path("assets"),
+        assets_dir=_assets(tmp_path),
         output_dir=tmp_path / "out",
         state_dir=tmp_path / "state",
     )
@@ -202,7 +202,12 @@ def test_batch_runner_uses_the_injected_processor(tmp_path: Path) -> None:
 # --------------------------------------------------------------------------- #
 import io  # noqa: E402
 
-from conftest import FakeImageFetcher, FakeImageHost, FakePageFetcher  # noqa: E402
+from conftest import (  # noqa: E402
+    FakeImageFetcher,
+    FakeImageHost,
+    FakePageFetcher,
+    make_assets,
+)
 
 from decisions import DecisionLog  # noqa: E402
 from direct_pipeline import process_direct_product  # noqa: E402
@@ -228,11 +233,24 @@ def _direct_deps(tmp_path: Path, images: dict[str, bytes]) -> tuple[PipelineDeps
     return deps, fetcher
 
 
+def _assets(tmp_path: Path) -> Path:
+    """Synthetic template + banner tree, built in ``tmp_path``.
+
+    These tests used to point at the relative ``assets`` folder, which only resolved
+    because pytest runs from ``image_pipeline/`` and a second copy of the artwork lived
+    there.  Building them per test makes the suite CWD-independent.
+    """
+    folder = tmp_path / "assets"
+    folder.mkdir(parents=True, exist_ok=True)
+    make_assets(folder)
+    return folder
+
+
 def _direct_config(tmp_path: Path, **overrides: object) -> PipelineConfig:
     return PipelineConfig(
         dry_run=True,
         direct_mode=True,
-        assets_dir=Path("assets"),
+        assets_dir=_assets(tmp_path),
         output_dir=tmp_path / "out",
         state_dir=tmp_path / "state",
         **overrides,  # type: ignore[arg-type]

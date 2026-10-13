@@ -36,6 +36,7 @@ py-modules = [
     "models",
     "page_verification",
     "pipeline",
+    "platforms",
     "protocols",
     "similarity",
     "sources",

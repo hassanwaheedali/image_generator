@@ -371,9 +371,15 @@ def test_product_is_never_pasted_above_the_safe_margin(config: PipelineConfig) -
 
 
 def _shipped_assets_config(tmp_path: Path) -> PipelineConfig:
-    """A config pointing at the **real** `assets/` folder of the project."""
+    """A config pointing at the **real** `assets/` tree of the project.
+
+    ``tests/ -> image_pipeline/ -> repo root``.  This used to resolve
+    ``image_pipeline/assets/``, which held four synthetic placeholders (two distinct
+    images behind four filenames), so every test below claimed to check the shipped
+    templates while checking blanks.
+    """
     return PipelineConfig(
-        assets_dir=Path(__file__).resolve().parent.parent / "assets",
+        assets_dir=Path(__file__).resolve().parent.parent.parent / "assets",
         output_dir=tmp_path / "out",
         state_dir=tmp_path / "state",
         dry_run=True,
