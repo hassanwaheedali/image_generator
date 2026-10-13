@@ -1,0 +1,37 @@
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+src = ["image_pipeline"]
+extend-exclude = [
+    "verification",
+    ".agents",
+    "output",
+    "state",
+    "uploads",
+    "assets",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "C4", "SIM", "PIE", "PERF", "RUF", "FURB", "ISC", "S", "BLE"]
+ignore = ["BLE001", "S110", "RUF001"]
+
+[tool.ruff.lint.per-file-ignores]
+"image_pipeline/tests/*" = ["S", "BLE001", "SIM117", "RUF059", "SLF001"]
+"tests/*" = ["S", "BLE001", "SIM117", "RUF059", "SLF001"]
+
+[tool.ruff.lint.flake8-builtins]
+builtins-allowed-modules = ["io", "os"]
+
+[tool.pytest.ini_options]
+testpaths = ["image_pipeline/tests"]
+addopts = "-q"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["image_pipeline"]
+exclude = ["image_pipeline/tests/fixtures", "verification"]
+
+[[tool.mypy.overrides]]
+module = ["scipy", "scipy.*", "requests", "requests.*", "openpyxl", "openpyxl.*", "cv2", "cv2.*"]
+ignore_missing_imports = true
