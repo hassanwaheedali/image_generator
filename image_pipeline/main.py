@@ -31,6 +31,7 @@ from fetch import (
     CurlCffiJsonHttp,
     CurlCffiPageFetcher,
     DomainRateLimiter,
+    PermanentAPIError,
 )
 from image_host import FreeImageHost
 from models import ProductResult, ProductTask, Status
@@ -504,6 +505,21 @@ def main(argv: list[str] | None = None) -> int:
         # rerun resumes instead of starting over.  Fail with a plain sentence.
         print(f"cannot write run outputs under {config.output_dir}: {exc}", file=sys.stderr)
         return 3
+    except PermanentAPIError as exc:
+        print(f"\n[FATAL] Image host error: {exc}", file=sys.stderr)
+        print(
+            "The image host (freeimage.host) refused the upload permanently.\n"
+            "Common causes:\n"
+            "  1. The API key in secrets.env has expired or been banned (e.g. error code 103).\n"
+            "  2. Your IP address is temporarily blocked due to rate limits or VPN.\n"
+            "\n"
+            "How to proceed:\n"
+            "  - Run with '--dry-run' to process and generate all images locally without uploading.\n"
+            "  - Or get a fresh API key from https://freeimage.host/page/api and update secrets.env.\n"
+            "All completed products have been preserved in the checkpoint file.",
+            file=sys.stderr,
+        )
+        return 4
 
     everything = sorted([*results, *empty_row_results(bad_rows)], key=lambda item: item.task_index)
     write_output_csvs(everything, config, include_platform_csvs=not config.dry_run)
