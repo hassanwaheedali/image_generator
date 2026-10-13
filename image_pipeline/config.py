@@ -581,6 +581,13 @@ class PipelineConfig:
     #: the normal path is untouched.
     salvage_min_sharpness: float = 0.02
 
+    # ----- canvas blur guard (Option 2) -----------------------------------
+    #: Reject upscaled, low-fidelity images whose high-frequency spectral energy
+    #: and edge gradients are depleted after compositing onto the square canvas.
+    canvas_blur_guard_enabled: bool = True
+    canvas_blur_hf_threshold: float = 0.102
+    canvas_blur_edge_threshold: float = 48.0
+
     # ----- compositing -----------------------------------------------------
     canonical_side: int = 1200
     padding_px: int = 6
@@ -856,6 +863,10 @@ class PipelineConfig:
             raise ConfigError("isolation_merge_radius_ratio must be in (0, 0.25]")
         if not 0.0 < self.isolation_multi_body_ratio <= 1.0:
             raise ConfigError("isolation_multi_body_ratio must be in (0, 1]")
+        if not 0.0 < self.canvas_blur_hf_threshold <= 1.0:
+            raise ConfigError("canvas_blur_hf_threshold must be in (0, 1]")
+        if self.canvas_blur_edge_threshold <= 0.0:
+            raise ConfigError("canvas_blur_edge_threshold must be > 0")
         if self.marketing_max_texture <= 0:
             raise ConfigError("marketing_max_texture must be > 0")
         if not 0 < self.isolation_ink_scan_distance < 64:

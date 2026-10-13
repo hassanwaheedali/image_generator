@@ -8,22 +8,19 @@ and generates a targeted CSV for reprocessing with Option 1.
 from __future__ import annotations
 
 import csv
-import os
-import re
-from pathlib import Path
-from typing import Dict, List, Tuple
-
 import sys
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 from PIL import Image
 from scipy import ndimage
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "image_pipeline"))
-from csv_io import safe_slug  # noqa: E402
+from csv_io import safe_slug
 
 
-def compute_blur_metrics(image_path: str | Path) -> dict:
+def compute_blur_metrics(image_path: str | Path) -> dict[str, Any]:
     """Calculate mathematically grounded blur & spectral frequency metrics."""
     try:
         img = Image.open(image_path).convert("L")
@@ -80,25 +77,25 @@ def scan_and_filter_blurry(
     output_dir: str = "output",
     hf_threshold: float = 0.102,
     edge_threshold: float = 48.0,
-) -> Tuple[List[dict], Path]:
+) -> tuple[list[dict[str, Any]], Path]:
     """Scan all generated images, detect blurry photos, and export CSV for Option 1."""
     out_dir = Path(output_dir)
     images_dir = out_dir / "images"
 
     # Read the 1800_products.csv to get Title, Brand URL, and Direct URLs
     products = []
-    with open(input_csv_path, mode="r", encoding="utf-8") as f:
+    with open(input_csv_path, encoding="utf-8") as f:
         reader = csv.reader(f)
-        header = next(reader, None)
+        _header = next(reader, None)
         for row in reader:
             if not row:
                 continue
             title = row[0].strip()
-            brand_url = row[1].strip() if len(row) > 1 else ""
+            source_url = row[1].strip() if len(row) > 1 else ""
             direct_urls = row[2].strip() if len(row) > 2 else ""
             products.append({
                 "title": title,
-                "brand_url": brand_url,
+                "source_url": source_url,
                 "direct_urls": direct_urls,
                 "slug": slugify(title),
             })
@@ -129,7 +126,7 @@ def scan_and_filter_blurry(
 
         report_entry = {
             "title": prod["title"],
-            "brand_url": prod["brand_url"],
+            "source_url": prod["source_url"],
             "raw_size": raw_size,
             "hf_energy": metrics["hf_energy"],
             "edge_sharpness": metrics["edge_sharpness"],
@@ -142,7 +139,7 @@ def scan_and_filter_blurry(
         if is_blurry:
             blurry_list.append({
                 "title": prod["title"],
-                "brand_url": prod["brand_url"],
+                "source_url": prod["source_url"],
                 "direct_urls": prod["direct_urls"],
                 "hf_energy": metrics["hf_energy"],
                 "raw_size": raw_size,
@@ -152,7 +149,7 @@ def scan_and_filter_blurry(
     report_csv = out_dir / "blurry_images_full_report.csv"
     with open(report_csv, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=[
-            "title", "status", "hf_energy", "edge_sharpness", "lap_var", "raw_size", "brand_url", "image_path"
+            "title", "status", "hf_energy", "edge_sharpness", "lap_var", "raw_size", "source_url", "image_path"
         ])
         writer.writeheader()
         writer.writerows(all_reports)
@@ -160,10 +157,10 @@ def scan_and_filter_blurry(
     # Save Option 1 Input CSV (only blurry images)
     option1_csv = out_dir / "blurry_products_for_option1.csv"
     with open(option1_csv, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["Title", "Brand_URL", "Direct_Urls"])
+        csv_writer = csv.writer(f)
+        csv_writer.writerow(["Title", "source_url", "Direct_Urls"])
         for b in blurry_list:
-            writer.writerow([b["title"], b["brand_url"], b["direct_urls"]])
+            csv_writer.writerow([b["title"], b["source_url"], b["direct_urls"]])
 
     print(f"Scanned {len(all_reports)} products.")
     print(f"Detected {len(blurry_list)} blurry products.")

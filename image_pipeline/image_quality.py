@@ -1007,6 +1007,45 @@ def sharpness_score(image: Image.Image) -> float:
     return float(laplacian.var())
 
 
+def is_canvas_blurry(
+    canvas_image: Image.Image,
+    config: PipelineConfig,
+) -> tuple[bool, float, float]:
+    """Safeguard S13.blur: catch upscaled/blurry images whose high-frequency spectral energy is depleted.
+
+    Evaluates the FFT spectral energy in the upper frequencies (r > 0.35 * min(h, w))
+    and product edge gradient sharpness.
+    """
+    if not config.canvas_blur_guard_enabled:
+        return False, 1.0, 100.0
+
+    arr = np.asarray(canvas_image.convert("L"), dtype=np.float64)
+    h, w = arr.shape
+    prod = arr < 250
+    if prod.sum() < 500:
+        return False, 1.0, 100.0
+
+    f = np.fft.fftshift(np.abs(np.fft.fft2(arr)))
+    r_high = min(h, w) * 0.35
+    y, x = np.ogrid[:h, :w]
+    high_mask = (x - w // 2) ** 2 + (y - h // 2) ** 2 > r_high ** 2
+    total_energy = float(f.sum())
+    if total_energy <= 1e-6:
+        return False, 1.0, 100.0
+    hf_energy = float(f[high_mask].sum() / total_energy)
+
+    gy, gx = np.gradient(arr)
+    grad = np.sqrt(gx ** 2 + gy ** 2)
+    edge_pixels = prod & (grad > 20)
+    edge_sharpness = float(grad[edge_pixels].mean()) if edge_pixels.sum() > 50 else 0.0
+
+    is_blurry = bool(
+        hf_energy < config.canvas_blur_hf_threshold
+        and edge_sharpness < config.canvas_blur_edge_threshold
+    )
+    return is_blurry, hf_energy, edge_sharpness
+
+
 def is_hue_in_arc(hue: float, start: float, end: float) -> bool:
     """Whether hue in degrees (0-360) falls within circular arc [start, end]."""
     hue = float(hue) % 360.0
@@ -1163,7 +1202,8 @@ def verify_image_color(
     # Instead of brittle discrete bins and hardcoded one-off string checks, this models
     # the continuous physical spectrum of appliances and studio lighting:
     # - Green smoothly spans olive (70°) through forest, mint, emerald, and cyan/teal sheen (210°)
-    # - Red wraps circularly (305° to 25°, or 285° on official brand heroes) spanning wine, burgundy, maroon, crimson, and red
+    # - Red wraps circularly (305° to 25°, or 285° on official brand heroes) spanning wine,
+    #   burgundy, maroon, crimson, and red
     # - Purple spans violet (255°) through magenta and warm studio glass reflections (up to 25°)
     # - Blue spans cyan/teal (180°) through sky blue, cobalt, and deep navy (260°)
     # - Gold/Yellow spans champagne, bronze, gold, and warm amber (25° to 65°)

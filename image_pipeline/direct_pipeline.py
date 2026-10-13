@@ -6,9 +6,9 @@ S19 branded-template guard -> white-background gates -> colour rule -> pixel
 dedup -> isolate/square/sharpen -> both templates -> upload -> CSVs.
 
 Every stage calls the Option 1 machinery (nothing is forked); the only new
-logic is the gate order and the S19 call.  There is deliberately no page
-verification (S1-S3), no gallery extraction, no fallback search (S15) and no
-URL-heuristic filtering (S4/S5/S12): those exist to prove scraped pages, and
+logic is about the blur check after downloading the picture, gate order and the S19 call.
+There is deliberately no page verification (S1-S3), no gallery extraction, no fallback search
+(S15) and no URL-heuristic filtering (S4/S5/S12): those exist to prove scraped pages, and
 Option 2 never scrapes.
 """
 
@@ -19,6 +19,7 @@ import threading
 from collections import Counter
 from dataclasses import replace
 
+from compositing import apply_template, isolate_main_product, sharpen, to_square_canvas
 from config import PipelineConfig
 from csv_io import hash_source_urls
 from dedup import ProductDedup, compute_fingerprint
@@ -26,6 +27,7 @@ from fetch import FetchError, PermanentAPIError
 from image_quality import (
     ImageValidationError,
     branded_template_reason,
+    is_canvas_blurry,
     run_quality_gates,
     sharpness_score,
     strip_promo_band,
@@ -42,6 +44,7 @@ from pipeline import (
     PipelineDeps,
     _compose_and_save,
     _dump_rejected,
+    _load_prepared_template,
     _row_is_done,
     finalize_and_upload,
 )
@@ -217,6 +220,40 @@ def process_direct_product(
         review_note = dedup.review_shape_match(image, fingerprint=fingerprint)
         if review_note:
             deps.decisions.keep(title=task.title, url=url, rule_id="S10.review", detail=review_note)
+
+        # Blur guard (Option 2): reject images that lack high-frequency details when composited on canvas.
+        if config.canvas_blur_guard_enabled:
+            digi_prepared = _load_prepared_template(config, "digimall_template")
+            isolated, _ = isolate_main_product(image, config)
+            square = to_square_canvas(
+                isolated,
+                config.canonical_side,
+                fill_ratio=config.product_fill_ratio,
+                max_upscale=config.max_upscale,
+            )
+            square = sharpen(
+                square,
+                radius=config.unsharp_radius,
+                percent=config.unsharp_percent,
+                threshold=config.unsharp_threshold,
+            )
+            preview = apply_template(square, digi_prepared.base, config, prepared=digi_prepared)
+            blurry, hf_val, edge_val = is_canvas_blurry(preview, config)
+            if blurry:
+                rejections["S13.blur"] += 1
+                deps.decisions.reject(
+                    title=task.title,
+                    url=url,
+                    rule_id="S13.blur",
+                    detail=(
+                        f"image lacks high-frequency detail after canvas scaling "
+                        f"(hf={hf_val:.4f} < {config.canvas_blur_hf_threshold}, "
+                        f"edge={edge_val:.1f} < {config.canvas_blur_edge_threshold})"
+                    ),
+                )
+                if config.keep_rejected_images:
+                    _dump_rejected(image, config, task.title, url, "S13.blur")
+                continue
 
         # Same as Option 1's ``_consume_candidates``: register the URL key on
         # accept so a repeated link is caught by the S10-key check before download.
