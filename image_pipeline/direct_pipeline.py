@@ -310,7 +310,7 @@ def process_direct_product(
         return replace(base, reason=reason, note=note), []
 
     result = replace(base, status=Status.PARTIAL, images_accepted=len(accepted), note=note)
-    result = finalize_and_upload(task, result, accepted, deps, config)
+    result = finalize_and_upload(task, result, accepted, deps, config, keys)
     LOG.info(
         "[direct] %s | %d accepted, status %s", task.title, len(accepted), result.status.value
     )

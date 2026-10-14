@@ -208,6 +208,14 @@ class AcceptedImage:
         raise KeyError(f"no final image for platform {key!r}")
 
 
+#: On-disk shape of a checkpoint line.  Lines written by an older layout are recognised and
+#: then **re-processed**, never resumed: a pre-platform-split entry stores two fixed URL
+#: lists, so a run that now publishes three platforms could not attribute those URLs to the
+#: extra one and would resume a row it cannot actually write.  Bump this whenever a stored
+#: entry stops meaning what it used to.
+CHECKPOINT_LAYOUT: int = 2
+
+
 @dataclass(frozen=True)
 class ProductResult:
     """Everything the CSV writers and the checkpoint need for one product."""
@@ -216,8 +224,10 @@ class ProductResult:
     title: str
     status: Status
     brand: str = ""
-    digi_urls: tuple[str, ...] = ()
-    alfa_urls: tuple[str, ...] = ()
+    #: Published URLs per platform as ordered ``(platform key, urls)`` pairs, in the order
+    #: the run resolved its platforms - the same idiom ``AcceptedImage.final_paths`` uses,
+    #: so the instance stays frozen and a fourth platform needs no new field.
+    platform_urls: tuple[tuple[str, tuple[str, ...]], ...] = ()
     reason: str = ""
     pages_tried: int = 0
     pages_rejected: int = 0
@@ -225,20 +235,49 @@ class ProductResult:
     note: str = ""
     source_url_hash: str = ""
 
+    def urls_for(self, key: str) -> tuple[str, ...]:
+        """One platform's URL list; ``()`` when the row published nothing there.
+
+        Silent for a missing key, unlike :meth:`AcceptedImage.final_path`: a failed row
+        legitimately carries no URLs, and the CSV writers skip those rows anyway.
+        """
+        for platform, urls in self.platform_urls:
+            if platform == key:
+                return urls
+        return ()
+
     def to_checkpoint_dict(self) -> dict[str, object]:
         return {
+            "layout": CHECKPOINT_LAYOUT,
             "title": self.title,
             "brand": self.brand,
             "source_url_hash": self.source_url_hash,
             "status": self.status.value,
-            "digi_urls": list(self.digi_urls),
-            "alfa_urls": list(self.alfa_urls),
+            "platform_urls": [[key, list(urls)] for key, urls in self.platform_urls],
             "reason": self.reason,
             "pages_tried": self.pages_tried,
             "pages_rejected": self.pages_rejected,
             "images_accepted": self.images_accepted,
             "note": self.note,
         }
+
+
+def _platform_urls(raw: object) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """``[["digi", ["url", ...]], ...]`` back into ordered pairs.
+
+    A malformed pair is skipped rather than raising: the checkpoint is append-only
+    history, and one damaged line must not cost a resume of everything after it.
+    """
+    if not isinstance(raw, list):
+        return ()
+    pairs: list[tuple[str, tuple[str, ...]]] = []
+    for item in raw:
+        if not isinstance(item, list) or len(item) != 2 or not isinstance(item[0], str):
+            continue
+        if not isinstance(item[1], list):
+            continue
+        pairs.append((item[0], tuple(str(url) for url in item[1])))
+    return tuple(pairs)
 
 
 @dataclass(frozen=True)
@@ -248,14 +287,16 @@ class CheckpointEntry:
     title: str
     source_url_hash: str
     status: Status
-    digi_urls: tuple[str, ...]
-    alfa_urls: tuple[str, ...]
+    #: The same ordered ``(platform key, urls)`` pairs ``ProductResult`` publishes with.
+    platform_urls: tuple[tuple[str, tuple[str, ...]], ...]
     reason: str
     timestamp: str
     #: Brand for the import CSV.  Kept in the checkpoint so a resumed run still writes it
     #: (live bug: every resumed row had an empty Brand column).  Defaults to "" so
     #: checkpoints written before this field existed still load.
     brand: str = ""
+    #: Layout this line was written in; see :data:`CHECKPOINT_LAYOUT`.  Absent means 1.
+    layout: int = 1
 
     @staticmethod
     def from_dict(payload: dict[str, object]) -> CheckpointEntry:
@@ -264,41 +305,35 @@ class CheckpointEntry:
             status = Status(raw_status)
         except ValueError:          # unknown status -> treat as failed (retry)
             status = Status.FAILED
-        digi_raw = payload.get("digi_urls")
-        alfa_raw = payload.get("alfa_urls")
-        digi = (
-            tuple(str(item) for item in digi_raw)
-            if isinstance(digi_raw, list)
-            else ()
-        )
-        alfa = (
-            tuple(str(item) for item in alfa_raw)
-            if isinstance(alfa_raw, list)
-            else ()
-        )
+        raw_layout = payload.get("layout", 1)
         return CheckpointEntry(
             title=str(payload.get("title", "")),
             source_url_hash=str(payload.get("source_url_hash", "")),
             status=status,
-            digi_urls=digi,
-            alfa_urls=alfa,
+            platform_urls=_platform_urls(payload.get("platform_urls")),
             reason=str(payload.get("reason", "")),
             timestamp=str(payload.get("timestamp", "")),
             brand=str(payload.get("brand", "")),
+            layout=raw_layout if isinstance(raw_layout, int) else 1,
         )
 
     def is_resume_done(self, source_url_hash: str) -> bool:
-        """Done = ok/partial, publicly published URLs, and unchanged source URLs.
+        """Done = current layout, ok/partial, publicly published URLs, unchanged sources.
 
         A ``--dry-run`` entry carries ``file://`` local paths instead of real uploads;
         resuming one into a live run would publish local paths to the platforms, so
         dry entries must always be re-processed (owner run 2026-10-08: he deleted
         ``output/`` and wondered why rows still said "already done" - the resume
         cache lives in ``state/checkpoint.jsonl``, and dry entries poisoned it).
+
+        An older layout never resumes either: its URLs cannot be attributed to the
+        platforms this run publishes (see :data:`CHECKPOINT_LAYOUT`).
         """
+        if self.layout != CHECKPOINT_LAYOUT:
+            return False
         if self.status not in (Status.OK, Status.PARTIAL):
             return False
-        urls = (*self.digi_urls, *self.alfa_urls)
+        urls = tuple(url for _, per_platform in self.platform_urls for url in per_platform)
         if not urls:
             return False
         if not all(url.startswith(("http://", "https://")) for url in urls):

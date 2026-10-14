@@ -26,7 +26,14 @@ from csv_io import (
     save_banner_cache,
     save_image_atomic,
 )
-from models import ModelKeys, ProductResult, ProductTask, Status
+from models import (
+    CHECKPOINT_LAYOUT,
+    CheckpointEntry,
+    ModelKeys,
+    ProductResult,
+    ProductTask,
+    Status,
+)
 
 
 def _keys(*tokens: str, keywords: tuple[str, ...] = ()) -> ModelKeys:
@@ -141,8 +148,10 @@ def test_checkpoint_round_trip_keeps_latest(tmp_path: Path) -> None:
         task_index=0,
         title="Haier HSU-12HFPAA",
         status=Status.OK,
-        digi_urls=("https://img.example/a.jpg",),
-        alfa_urls=("https://img.example/a.jpg",),
+        platform_urls=(
+            ("digi", ("https://img.example/a.jpg",)),
+            ("alfa", ("https://img.example/a.jpg",)),
+        ),
         source_url_hash="abc123",
     )
     append_checkpoint(path, result, timestamp="2026-01-01T00:00:00Z")
@@ -157,7 +166,16 @@ def test_checkpoint_round_trip_keeps_latest(tmp_path: Path) -> None:
 
 def test_checkpoint_ignores_garbage_lines(tmp_path: Path) -> None:
     path = tmp_path / "checkpoint.jsonl"
-    append_jsonl(path, {"title": "A", "status": "ok", "digi_urls": ["u"], "source_url_hash": "h"})
+    append_jsonl(
+        path,
+        {
+            "title": "A",
+            "status": "ok",
+            "layout": 2,
+            "platform_urls": [["digi", ["u"]]],
+            "source_url_hash": "h",
+        },
+    )
     with path.open("a", encoding="utf-8") as handle:
         handle.write("not json\n")
     entries = load_checkpoint(path)
@@ -325,16 +343,14 @@ def test_decisions_log_is_jsonl(tmp_path: Path) -> None:
 def test_dry_run_checkpoint_entries_are_never_resumed() -> None:
     """Owner run 2026-10-08: a dry-run wrote file:// URLs into the checkpoint and the
     next (live) run skipped the row as done.  Dry entries must always re-process."""
-    from models import CheckpointEntry, Status
-
     dry = CheckpointEntry(
         title="Homage HRF-47662-GD",
         source_url_hash="abc",
         status=Status.PARTIAL,
-        digi_urls=("file:///tmp/output/images/x.jpg",),
-        alfa_urls=(),
+        platform_urls=(("digi", ("file:///tmp/output/images/x.jpg",)),),
         reason="",
         timestamp="2026-10-08T19:21:00",
+        layout=CHECKPOINT_LAYOUT,
     )
     assert dry.is_resume_done("abc") is False
 
@@ -342,10 +358,49 @@ def test_dry_run_checkpoint_entries_are_never_resumed() -> None:
         title="Homage HRF-47662-GD",
         source_url_hash="abc",
         status=Status.PARTIAL,
-        digi_urls=("https://iili.io/some-upload.jpg",),
-        alfa_urls=(),
+        platform_urls=(("digi", ("https://iili.io/some-upload.jpg",)),),
         reason="",
         timestamp="2026-10-08T19:21:00",
+        layout=CHECKPOINT_LAYOUT,
     )
     assert live.is_resume_done("abc") is True
     assert live.is_resume_done("different-hash") is False
+
+
+def test_a_pre_platform_checkpoint_is_never_resumed() -> None:
+    """An entry written before URLs were stored per platform cannot be trusted.
+
+    It carries two fixed lists, so a run that now publishes a third platform would mark
+    the row done and then write a CSV column it has no URLs for.
+    """
+    old = CheckpointEntry.from_dict(
+        {
+            "title": "Dawlance DW-7500C",
+            "status": "ok",
+            "digi_urls": ["https://iili.io/1.jpg"],
+            "alfa_urls": ["https://iili.io/2.jpg"],
+            "source_url_hash": "abc",
+        }
+    )
+    assert old.layout != CHECKPOINT_LAYOUT
+    assert old.platform_urls == ()
+    assert old.is_resume_done("abc") is False
+
+
+def test_checkpoint_round_trip_carries_the_layout_and_every_platform(tmp_path: Path) -> None:
+    path = tmp_path / "checkpoint.jsonl"
+    result = ProductResult(
+        task_index=0,
+        title="Midea 12HRFN1 QC6",
+        status=Status.OK,
+        platform_urls=(
+            ("alfa", ("https://i.example/a1.jpg", "https://i.example/banner.jpg")),
+            ("digi", ("https://i.example/d1.jpg", "https://i.example/banner.jpg")),
+        ),
+        source_url_hash="h1",
+    )
+    append_checkpoint(path, result, timestamp="2026-10-14T00:00:00Z")
+    entry = load_checkpoint(path)["midea 12hrfn1 qc6"]
+    assert entry.layout == CHECKPOINT_LAYOUT
+    assert entry.platform_urls == result.platform_urls   # order preserved, per platform
+    assert entry.is_resume_done("h1") is True

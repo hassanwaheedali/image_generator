@@ -37,9 +37,11 @@ from csv_io import (
 from decisions import DecisionLog
 from fetch import PermanentAPIError
 from models import (
+    CHECKPOINT_LAYOUT,
     AcceptedImage,
     CheckpointEntry,
     ImageCandidate,
+    ModelKeys,
     PageCandidate,
     ProductResult,
     ProductTask,
@@ -122,6 +124,11 @@ def task(index: int, title: str, urls: tuple[str, ...]) -> ProductTask:
     return ProductTask(index=index, title=title, source_urls=urls)
 
 
+def _urls(digi: str, alfa: str) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """One URL per platform, as ``ProductResult.platform_urls`` stores them (plan order)."""
+    return (("alfa", (alfa,)), ("digi", (digi,)))
+
+
 # --------------------------------------------------------------------------- #
 # happy path, ordering, banners
 # --------------------------------------------------------------------------- #
@@ -137,12 +144,15 @@ def test_ok_product_urls_are_real_images_then_banner(tmp_path: Path) -> None:
     )
     assert result.status is Status.OK
     assert len(images) == 3
-    assert len(result.digi_urls) == 4                      # 3 images + closing banner
-    assert result.digi_urls[-1].endswith("digimall-closing-banner.jpg")
-    assert len(result.alfa_urls) == len(result.digi_urls)
-    assert result.alfa_urls[-1].endswith("alfamall-closing-banner.jpg")
-    assert host.uploads[-2].startswith("digimall-closing-banner")
-    assert host.uploads[-1].startswith("alfamall-closing-banner")
+    digi = result.urls_for("digi")
+    alfa = result.urls_for("alfa")
+    assert len(digi) == 4                                  # 3 images + closing banner
+    assert digi[-1].endswith("digimall-closing-banner.jpg")
+    assert len(alfa) == len(digi)
+    assert alfa[-1].endswith("alfamall-closing-banner.jpg")
+    # banners are uploaded last, in the plan's platform order (alfa before digi)
+    assert host.uploads[-2].startswith("alfamall-closing-banner")
+    assert host.uploads[-1].startswith("digimall-closing-banner")
     for accepted in images:
         assert len(accepted.final_paths) == 2
         assert all(path.exists() for _, path in accepted.final_paths)
@@ -161,7 +171,7 @@ def test_partial_product_gets_one_banner_per_platform(tmp_path: Path) -> None:
     )
     assert result.status is Status.PARTIAL
     assert len(images) == 1
-    assert len(result.digi_urls) == 2 and len(result.alfa_urls) == 2
+    assert len(result.urls_for("digi")) == 2 and len(result.urls_for("alfa")) == 2
     banner_uploads = [name for name in host.uploads if "closing-banner" in name]
     assert len(banner_uploads) == 2                        # one per platform
 
@@ -175,7 +185,7 @@ def test_failed_product_uploads_nothing(tmp_path: Path) -> None:
     )
     assert result.status is Status.FAILED
     assert result.reason == "pages matched but no image passed quality gates"
-    assert result.digi_urls == () and result.alfa_urls == ()
+    assert result.platform_urls == ()
     assert images == []
     assert host.uploads == []                              # zero upload calls
 
@@ -272,7 +282,7 @@ def test_switching_variant_separation_off_publishes_the_page_again(tmp_path: Pat
         task(0, "Haier Refrigerator HRF-538 IFGA Golden", (url,)), deps, config
     )
     assert accepted                      # the photo is published as before
-    assert result.digi_urls and result.alfa_urls
+    assert result.urls_for("digi") and result.urls_for("alfa")
     assert host.uploads
 
 
@@ -283,8 +293,8 @@ def test_output_rows_preserve_input_order(tmp_path: Path) -> None:
     config = live_config(tmp_path)
     results = [
         ProductResult(task_index=2, title="C", status=Status.FAILED, reason="no page matched this model"),
-        ProductResult(task_index=0, title="A", status=Status.OK, digi_urls=("u1",), alfa_urls=("a1",)),
-        ProductResult(task_index=1, title="B", status=Status.PARTIAL, digi_urls=("u2",), alfa_urls=("a2",)),
+        ProductResult(task_index=0, title="A", status=Status.OK, platform_urls=_urls("u1", "a1")),
+        ProductResult(task_index=1, title="B", status=Status.PARTIAL, platform_urls=_urls("u2", "a2")),
     ]
     write_output_csvs(results, config)
     lines = config.digimall_csv.read_text(encoding="utf-8").strip().splitlines()
@@ -338,7 +348,7 @@ def test_interrupt_then_resume_skips_done_retries_failed(tmp_path: Path) -> None
     by_index = {result.task_index: result for result in second}
     assert by_index[0].status is Status.OK
     assert by_index[0].note == "resumed from checkpoint"
-    assert by_index[0].digi_urls                      # published URLs survive the resume
+    assert by_index[0].platform_urls                 # published URLs survive the resume
     assert by_index[1].status is Status.FAILED
 
 
@@ -353,17 +363,18 @@ def test_empty_urls_row_and_changed_url_are_retried(tmp_path: Path) -> None:
         title="Haier HSU-12HFPAA",
         source_url_hash=hash_source_urls(("https://old.example/p",)),
         status=Status.OK,
-        digi_urls=("https://img.example/a.jpg",),
-        alfa_urls=("https://img.example/a.jpg",),
+        platform_urls=(("digi", ("https://img.example/a.jpg",)),
+                       ("alfa", ("https://img.example/a.jpg",))),
         reason="",
         timestamp="2026-01-01T00:00:00Z",
+        layout=CHECKPOINT_LAYOUT,
     )
     # same URLs -> done
     assert entry.is_resume_done(hash_source_urls(("https://old.example/p",))) is True
     # changed Source URL -> retry
     assert entry.is_resume_done(hash_source_urls(("https://new.example/p",))) is False
     # empty URL list with an ok status -> retry
-    empty = CheckpointEntry("X", "", Status.OK, (), (), "", "")
+    empty = CheckpointEntry("X", "", Status.OK, (), "", "")
     assert empty.is_resume_done(hash_source_urls(())) is False
 
 
@@ -412,7 +423,7 @@ def test_banner_cache_prevents_second_upload(tmp_path: Path) -> None:
     first, _ = process_product(task(0, "Haier HSU-12HFPAA", (HAIER_PAGE,)), deps, config)
     uploads_after_first = len(host.uploads)
     second, _ = process_product(task(0, "Haier HSU-12HFPAA", (HAIER_PAGE,)), deps, config)
-    assert first.digi_urls == second.digi_urls
+    assert first.platform_urls == second.platform_urls
     # only the product files are uploaded again; the banners come from the cache
     assert len(host.uploads) == uploads_after_first + 6
 
@@ -771,8 +782,10 @@ def test_output_folder_explains_itself(tmp_path: Path) -> None:
             title="Haier HSU-12HFPAA Inverter AC",
             status=Status.OK,
             brand="Haier",
-            digi_urls=("https://i.example/1.jpg", "https://i.example/banner.jpg"),
-            alfa_urls=("https://a.example/1.jpg", "https://a.example/banner.jpg"),
+            platform_urls=(
+                ("digi", ("https://i.example/1.jpg", "https://i.example/banner.jpg")),
+                ("alfa", ("https://a.example/1.jpg", "https://a.example/banner.jpg")),
+            ),
         ),
         ProductResult(task_index=1, title="Bad Row", status=Status.FAILED, reason="no page matched"),
     ]
@@ -795,8 +808,10 @@ def test_output_csv_has_title_brand_and_pipe_separated_urls(tmp_path: Path) -> N
             title="Haier HSU-12HFPAA Inverter AC",
             status=Status.OK,
             brand="Haier",
-            digi_urls=("https://i.example/1.jpg", "https://i.example/2.jpg"),
-            alfa_urls=("https://a.example/1.jpg", "https://a.example/2.jpg"),
+            platform_urls=(
+                ("digi", ("https://i.example/1.jpg", "https://i.example/2.jpg")),
+                ("alfa", ("https://a.example/1.jpg", "https://a.example/2.jpg")),
+            ),
         )
     ]
     write_output_csvs(results, config)
@@ -832,18 +847,21 @@ def test_banner_cache_is_scoped_to_the_run_mode(tmp_path: Path) -> None:
     deps, _, _, _ = build_deps(tmp_path, pages={}, images={})
     cache_shared = deps.banner_cache
     assert cache_shared == {}
+    digi = deps.platforms.by_key("digi")
+    assert digi is not None and digi.banner_path is not None
+    banner = digi.banner_path
 
     dry_deps = replace(deps, image_host=DryRunHost(config.output_dir))
-    dry_url = ensure_banner_url(replace(config, dry_run=True), dry_deps, "digimall")
+    dry_url = ensure_banner_url(replace(config, dry_run=True), dry_deps, "digimall", banner)
     assert dry_url.startswith("file://")
     assert len(cache_shared) == 1
 
-    live_url = ensure_banner_url(config, deps, "digimall")       # same cache, live mode
+    live_url = ensure_banner_url(config, deps, "digimall", banner)   # same cache, live mode
     assert live_url.startswith("https://"), "a dry-run banner URL leaked into a live run"
     assert live_url != dry_url
     assert len(cache_shared) == 2                               # both modes cached separately
 
-    assert ensure_banner_url(config, deps, "digimall") == live_url   # live entry is reused
+    assert ensure_banner_url(config, deps, "digimall", banner) == live_url  # live entry is reused
 
 
 def test_a_live_run_refuses_to_publish_a_local_path(tmp_path: Path) -> None:
@@ -870,11 +888,21 @@ def test_a_live_run_refuses_to_publish_a_local_path(tmp_path: Path) -> None:
         )
     ]
     result = ProductResult(task_index=0, title="Haier HSU-12HFPAA Inverter AC", status=Status.OK)
+    keys = ModelKeys(
+        cleaned_title="Haier HSU-12HFPAA Inverter AC",
+        tokens=("HSU-12HFPAA",),
+        title_key="haier",
+    )
     final = finalize_and_upload(
-        task(0, "Haier HSU-12HFPAA Inverter AC", (HAIER_PAGE,)), result, accepted, deps, config
+        task(0, "Haier HSU-12HFPAA Inverter AC", (HAIER_PAGE,)),
+        result,
+        accepted,
+        deps,
+        config,
+        keys,
     )
     assert final.status is Status.FAILED
-    assert final.digi_urls == () and final.alfa_urls == ()
+    assert final.platform_urls == ()
     assert "non-http" in final.reason
 
 
@@ -909,15 +937,20 @@ def test_resume_keeps_the_brand_column(tmp_path: Path) -> None:
 
 
 def test_an_old_checkpoint_without_a_brand_still_loads(tmp_path: Path) -> None:
-    """Checkpoints written before the brand field existed must not break resume."""
+    """Checkpoints written before the brand field existed must not break resume.
+
+    The entry below is layout 2 with no ``brand`` key - exactly what a run before that
+    field wrote - so it must still resume, and the brand must come back from the title.
+    """
     config = live_config(tmp_path)
     entry = CheckpointEntry.from_dict(
         {
+            "layout": CHECKPOINT_LAYOUT,
             "title": "Haier HSU-12HFPAA Inverter AC",
-            "source_url_hash": "abc",
+            "source_url_hash": hash_source_urls((HAIER_PAGE,)),
             "status": "ok",
-            "digi_urls": ["https://i.example/1.jpg"],
-            "alfa_urls": ["https://a.example/1.jpg"],
+            "platform_urls": [["digi", ["https://i.example/1.jpg"]],
+                              ["alfa", ["https://a.example/1.jpg"]]],
             "reason": "",
             "timestamp": "2026-10-06T00:00:00+00:00",
         }
@@ -926,6 +959,7 @@ def test_an_old_checkpoint_without_a_brand_still_loads(tmp_path: Path) -> None:
     tasks = [task(0, "Haier HSU-12HFPAA Inverter AC", (HAIER_PAGE,))]
     deps, _, _, _ = build_deps(tmp_path, {}, {})
     results = BatchRunner(config, deps, tasks, {"haier hsu-12hfpaa inverter ac": entry}).run()
+    assert results[0].note == "resumed from checkpoint"
     assert results[0].brand == "Haier"          # recovered from the title
 
 
@@ -2106,7 +2140,6 @@ def test_haier_thumb_upgrades_to_the_crisp_original_rung(tmp_path: Path) -> None
 # --------------------------------------------------------------------------- #
 def test_decorated_logo_filename_is_rejected_at_s5() -> None:
     """``cropped-logooooooo.png`` - whole-token matching cannot see the logo."""
-    from models import ModelKeys
     from pipeline import _decide_candidate
 
     keys = ModelKeys(cleaned_title="Orient Hyper 18X", tokens=("18X",), title_key="orient")

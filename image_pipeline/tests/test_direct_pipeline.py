@@ -276,8 +276,8 @@ def test_direct_publishes_white_product_photos_with_links(tmp_path: Path) -> Non
     result, accepted = process_direct_product(task, deps, _direct_config(tmp_path))
     assert result.status is Status.OK
     assert len(accepted) == 2
-    assert len(result.digi_urls) == 3 and len(result.alfa_urls) == 3  # + closing banner
-    assert all(url.startswith(("https://", "http://", "file://")) for url in result.digi_urls)
+    assert len(result.urls_for("digi")) == 3 and len(result.urls_for("alfa")) == 3  # + banner
+    assert all(url.startswith(("https://", "http://", "file://")) for url in result.urls_for("digi"))
     assert fetcher.requested == list(urls)  # downloaded, no page fetches
     assert '"rule_id": "accept"' in _decisions(tmp_path)
 

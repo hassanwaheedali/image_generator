@@ -101,7 +101,7 @@ from page_verification import (
     strip_unwanted_regions,
     verify_page,
 )
-from platforms import PLATFORM_KEYS, PlatformPlan
+from platforms import PLATFORM_KEYS, PlatformPlan, ResolvedPlatform
 from protocols import BinaryResponse, ImageFetcher, ImageHost, PageFetcher, SourceSearcher
 from url_filters import (
     dedup_key,
@@ -322,39 +322,23 @@ def finalize_and_upload(
     images: list[AcceptedImage],
     deps: PipelineDeps,
     config: PipelineConfig,
+    keys: ModelKeys,
 ) -> ProductResult:
-    """Safeguard S14: composite, then upload every image to **both** platforms.
+    """Safeguard S14: upload every accepted picture to **all** selected platforms.
 
-    Nothing is uploaded until the product's final selection is complete, and the
-    product either publishes on both platforms or on neither: any upload failure
-    discards the product instead of publishing a half-filled row.
+    Nothing is uploaded until the product's final selection is complete, and the product
+    either publishes on every platform the run selected or on none: any upload failure
+    discards the row instead of leaving a shop with half the set.  An empty plan is the
+    same "none" - there is no such thing as a row that publishes to zero platforms.
     """
-    if not images:
-        return replace(
-            result,
-            status=Status.FAILED,
-            digi_urls=(),
-            alfa_urls=(),
-            reason=result.reason or "no image passed the quality gates",
+    platforms = deps.platforms.platforms
+    if not images or not platforms:
+        return _discard(
+            result, result.reason or "no image passed the quality gates"
         )
 
-    digi_urls: list[str] = []
-    alfa_urls: list[str] = []
     try:
-        for index, image in enumerate(images, start=1):
-            stem = f"{safe_slug(task.title)}-{index:02d}"
-            digi_final = image.final_path("digi")
-            alfa_final = image.final_path("alfa")
-            if config.dry_run:
-                digi_urls.append(f"file://{digi_final.resolve()}")
-                alfa_urls.append(f"file://{alfa_final.resolve()}")
-                continue
-            digi_urls.append(
-                deps.image_host.upload(digi_final.read_bytes(), f"{stem}-digimall.jpg")
-            )
-            alfa_urls.append(
-                deps.image_host.upload(alfa_final.read_bytes(), f"{stem}-alfamall.jpg")
-            )
+        per_platform = _upload_finals(task, images, deps, config, platforms)
     except PermanentAPIError:
         # Invalid key / quota / forbidden: retrying cannot help and nothing may be
         # published.  The runner flushes the checkpoint and aborts the whole run.
@@ -362,53 +346,95 @@ def finalize_and_upload(
         raise
     except (FetchError, OSError) as exc:
         LOG.error("[fatal] upload failed for %r: %s", task.title, exc)
-        return replace(
-            result,
-            status=Status.FAILED,
-            digi_urls=(),
-            alfa_urls=(),
-            reason="image host upload failed after retries",
-        )
+        return _discard(result, "image host upload failed after retries")
 
-    if not digi_urls or not alfa_urls:
-        return replace(result, status=Status.FAILED, digi_urls=(), alfa_urls=(), reason="upload produced no URL")
+    if not all(per_platform.values()):
+        return _discard(result, "upload produced no URL")
 
     try:
-        digi_urls.append(ensure_banner_url(config, deps, "digimall"))
-        alfa_urls.append(ensure_banner_url(config, deps, "alfamall"))
+        _append_banners(task, keys, images, deps, config, platforms, per_platform)
     except PermanentAPIError:
+        LOG.error("[fatal] image host rejected the closing banner permanently for %r", task.title)
         raise
     except (FetchError, OSError) as exc:
         LOG.error("[fatal] banner upload failed for %r: %s", task.title, exc)
-        return replace(
-            result,
-            status=Status.FAILED,
-            digi_urls=(),
-            alfa_urls=(),
-            reason="banner upload failed after retries",
-        )
+        return _discard(result, "banner upload failed after retries")
 
-    if not config.dry_run and not all(is_public_url(url) for url in (*digi_urls, *alfa_urls)):
+    published = tuple((platform.key, tuple(per_platform[platform.key])) for platform in platforms)
+    urls = tuple(url for _, per_platform in published for url in per_platform)
+    if not config.dry_run and not all(is_public_url(url) for url in urls):
         # Defence in depth: a local path must never reach an import CSV.  If it does, the
         # row is discarded instead of publishing something the shop cannot fetch.
         LOG.error("[fatal] refusing to publish a local path for %r", task.title)
-        return replace(
-            result,
-            status=Status.FAILED,
-            digi_urls=(),
-            alfa_urls=(),
-            reason="a live run produced a non-http image URL",
-        )
+        return _discard(result, "a live run produced a non-http image URL")
 
     status = Status.OK if len(images) >= config.min_required_images else Status.PARTIAL
     return replace(
         result,
         status=status,
-        digi_urls=tuple(digi_urls),
-        alfa_urls=tuple(alfa_urls),
+        platform_urls=published,
         images_accepted=len(images),
         reason="",
     )
+
+
+def _discard(result: ProductResult, reason: str) -> ProductResult:
+    """S14's "none": the row publishes nothing, so no platform keeps a URL."""
+    return replace(result, status=Status.FAILED, platform_urls=(), reason=reason)
+
+
+def _upload_finals(
+    task: ProductTask,
+    images: list[AcceptedImage],
+    deps: PipelineDeps,
+    config: PipelineConfig,
+    platforms: tuple[ResolvedPlatform, ...],
+) -> dict[str, list[str]]:
+    """Upload one product's whole set on every platform, keeping the platforms apart.
+
+    ``--dry-run`` records the local path instead of calling the host, so the CSVs and the
+    picture folders are still the ones a real run would have produced.
+    """
+    per_platform: dict[str, list[str]] = {platform.key: [] for platform in platforms}
+    for index, image in enumerate(images, start=1):
+        stem = f"{safe_slug(task.title)}-{index:02d}"
+        for platform in platforms:
+            final = image.final_path(platform.key)
+            if config.dry_run:
+                per_platform[platform.key].append(f"file://{final.resolve()}")
+            else:
+                # The *display* name, not the folder key: this string is what the host and
+                # therefore the shop sees, and it has always read "digimall", not "digi".
+                name = f"{stem}-{platform.display_name.lower()}.jpg"
+                per_platform[platform.key].append(deps.image_host.upload(final.read_bytes(), name))
+    return per_platform
+
+
+def _append_banners(
+    task: ProductTask,
+    keys: ModelKeys,
+    images: list[AcceptedImage],
+    deps: PipelineDeps,
+    config: PipelineConfig,
+    platforms: tuple[ResolvedPlatform, ...],
+    per_platform: dict[str, list[str]],
+) -> None:
+    """Close each platform's set with its banner: the shared URL, and a copy in the folder.
+
+    One upload serves every product (the URL is cached by content hash), but the folder of
+    each product has to contain the picture the CSV points at, so the bytes are written per
+    row under the same ``<code>_N.jpg`` stem - the banner is simply the last index.
+    """
+    name = f"{filename_prefix(keys, task.title)}_{len(images) + 1}.jpg"
+    for platform in platforms:
+        banner_path = platform.banner_path if platform.appends_banner else None
+        if banner_path is None:
+            continue
+        per_platform[platform.key].append(
+            ensure_banner_url(config, deps, platform.display_name.lower(), banner_path)
+        )
+        with Image.open(banner_path) as banner:
+            _save_final(banner, config, task.title, platform.key, name)
 
 
 def _banner_cache_key(config: PipelineConfig, digest: str) -> str:
@@ -421,11 +447,11 @@ def _banner_cache_key(config: PipelineConfig, digest: str) -> str:
     return f"{'dry' if config.dry_run else 'live'}:{digest}"
 
 
-def ensure_banner_url(config: PipelineConfig, deps: PipelineDeps, role: str) -> str:
+def ensure_banner_url(
+    config: PipelineConfig, deps: PipelineDeps, role: str, banner_path: Path
+) -> str:
     """Uploaded closing-banner URL, cached in ``state/banner_urls.json`` by content hash."""
-    asset_key = "digimall_banner" if role == "digimall" else "alfamall_banner"
-    path = config.asset_paths[asset_key]
-    data = path.read_bytes()
+    data = banner_path.read_bytes()
     digest = _banner_cache_key(config, sha256_bytes(data))
     with deps.banner_cache_lock:
         cached = deps.banner_cache.get(digest)
@@ -862,14 +888,15 @@ def process_product(
         images_accepted=len(accepted),
         note=note,
     )
-    stages.append(f"5 compose: {len(accepted)} final set(s) on both templates")
-    result = finalize_and_upload(task, result, accepted, deps, config)
+    stages.append(f"5 compose: {len(accepted)} final set(s) on every selected template")
+    result = finalize_and_upload(task, result, accepted, deps, config, keys)
     if relaxed_notes and result.status is Status.OK:
         # A relaxed fallback match is published, never silently "ok": the row goes to
         # review_products.csv and to the report with its flag.
         result = replace(result, status=Status.PARTIAL)
     stages.append(
-        f"6 upload: {len(result.digi_urls)} digimall / {len(result.alfa_urls)} alfamall URL(s)"
+        "6 upload: "
+        + ", ".join(f"{len(urls)} {key}" for key, urls in result.platform_urls)
         if result.status is not Status.FAILED
         else "6 upload: failed"
     )
@@ -2047,18 +2074,18 @@ def write_output_csvs(
             config.digimall_csv,
             OUTPUT_HEADER,
             (
-                (result.title, result.brand, "|".join(result.digi_urls))
+                (result.title, result.brand, "|".join(result.urls_for("digi")))
                 for result in ordered
-                if result.digi_urls
+                if result.urls_for("digi")
             ),
         )
         atomic_write_csv(
             config.alfamall_csv,
             OUTPUT_HEADER,
             (
-                (result.title, result.brand, "|".join(result.alfa_urls))
+                (result.title, result.brand, "|".join(result.urls_for("alfa")))
                 for result in ordered
-                if result.alfa_urls
+                if result.urls_for("alfa")
             ),
         )
     atomic_write_csv(
@@ -2154,7 +2181,7 @@ def _write_output_readme(
     partial = sum(1 for result in results if result.status is Status.PARTIAL)
     failed = sum(1 for result in results if result.status is Status.FAILED)
     # every row's last URL is the banner, so the product pictures are one fewer per published row
-    images = sum(max(0, len(result.digi_urls) - 1) for result in results)
+    images = sum(max(0, len(result.urls_for("digi")) - 1) for result in results)
     dry_note = (
         ""
         if include_platform_csvs
@@ -2223,8 +2250,7 @@ class BatchRunner:
                         # so fall back to reading the brand out of the title
                         brand=entry.brand or display_brand(None, task.title),
                         status=entry.status,
-                        digi_urls=entry.digi_urls,
-                        alfa_urls=entry.alfa_urls,
+                        platform_urls=entry.platform_urls,
                         reason=entry.reason,
                         note="resumed from checkpoint",
                         source_url_hash=entry.source_url_hash,
