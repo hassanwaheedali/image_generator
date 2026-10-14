@@ -14,20 +14,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
-# --------------------------------------------------------------------------- #
-# Asset file names (defaults; all overridable through PipelineConfig)
-#
-# Assets live one folder per platform - ``assets/<platform key>/template.png`` and
-# ``assets/<platform key>/last.png`` - so a filename never has to carry the platform
-# and a new platform is a folder, not four more constants.  These four are the
-# transitional spelling of that tree for the two platforms the code still addresses
-# by role; they go when the callers move to ``platforms.PlatformSpec``.
-# --------------------------------------------------------------------------- #
-DEFAULT_DIGIMALL_TEMPLATE = "digi/template.png"
-DEFAULT_ALFAMALL_TEMPLATE = "alfa/template.png"
-DEFAULT_DIGIMALL_BANNER = "digi/last.png"
-DEFAULT_ALFAMALL_BANNER = "alfa/last.png"
-
 # Output CSV headers.  Changing the header is a one-constant change.
 #: ``Image_Urls`` serves the hosted-import mode; ``images`` serves the CSV-only mode
 #: where the owner zips ``images/<platform>/`` and imports the bare filenames
@@ -239,12 +225,6 @@ class PipelineConfig:
     #: suffix, so it stays unique) and the model-code prefix is left alone - the prefix
     #: is what the owner reads in the CSV.
     max_output_path_chars: int = 220
-
-    # ----- asset file names ------------------------------------------------
-    digimall_template_name: str = DEFAULT_DIGIMALL_TEMPLATE
-    alfamall_template_name: str = DEFAULT_ALFAMALL_TEMPLATE
-    digimall_banner_name: str = DEFAULT_DIGIMALL_BANNER
-    alfamall_banner_name: str = DEFAULT_ALFAMALL_BANNER
 
     # ----- platforms -------------------------------------------------------
     #: Comma-separated platform keys, in publish order.  ``--platforms`` and the
@@ -1076,16 +1056,6 @@ class PipelineConfig:
     # ------------------------------------------------------------------ #
     # helpers
     # ------------------------------------------------------------------ #
-    @property
-    def asset_paths(self) -> dict[str, Path]:
-        """The four fixed asset files, keyed by role, as resolved paths."""
-        return {
-            "digimall_template": self.assets_dir / self.digimall_template_name,
-            "alfamall_template": self.assets_dir / self.alfamall_template_name,
-            "digimall_banner": self.assets_dir / self.digimall_banner_name,
-            "alfamall_banner": self.assets_dir / self.alfamall_banner_name,
-        }
-
     @property
     def images_dir(self) -> Path:
         """Publishable pictures only: ``images/<platform key>/<product>/``.

@@ -48,6 +48,7 @@ from image_quality import (
     trim_edge_seams,
     validate_image_bytes,
 )
+from platforms import TEMPLATE_STEM, resolve_asset
 
 
 # --------------------------------------------------------------------------- #
@@ -386,6 +387,13 @@ def _shipped_assets_config(tmp_path: Path) -> PipelineConfig:
     )
 
 
+def _asset(config: PipelineConfig, key: str, stem: str = TEMPLATE_STEM) -> Path:
+    """One platform's asset, looked up the way the pipeline looks it up."""
+    path = resolve_asset(config.assets_dir / key, stem)
+    assert path is not None, f"no {stem} asset under {config.assets_dir / key}"
+    return path
+
+
 def _rendered(image: Image.Image) -> np.ndarray:
     """What a human sees: the RGBA image flattened onto white (how the final JPEG looks)."""
     flat = Image.alpha_composite(Image.new("RGBA", image.size, (255, 255, 255, 255)), image.convert("RGBA"))
@@ -400,8 +408,8 @@ def test_real_asset_templates_protect_their_band(tmp_path: Path) -> None:
     there.  The product itself must still be visible in the content area.
     """
     config = _shipped_assets_config(tmp_path)
-    for key in ("digimall_template", "alfamall_template"):
-        template = Image.open(config.asset_paths[key]).convert("RGBA")
+    for key in ("digi", "alfa"):
+        template = Image.open(_asset(config, key)).convert("RGBA")
         margin = header_safe_margin(template, config)
         assert margin > 0, f"{key}: no logo band found"
         square = to_square_canvas(
@@ -432,9 +440,7 @@ def test_opaque_templates_are_never_treated_as_transparent(tmp_path: Path) -> No
     """The white knockout must run for every opaque template - with or without an alpha
     channel.  Getting this wrong painted the template over the product."""
     config = _shipped_assets_config(tmp_path)
-    shipped = {
-        key: Image.open(config.asset_paths[key]) for key in ("digimall_template", "alfamall_template")
-    }
+    shipped = {key: Image.open(_asset(config, key)) for key in ("digi", "alfa")}
     for key, template in shipped.items():
         assert not template_has_transparency(       # the shipped art must knockout its white
             template, min_alpha=config.template_transparency_min_alpha
@@ -469,7 +475,7 @@ def test_an_opaque_alpha_channel_does_not_hide_the_product(config: PipelineConfi
 def test_shipped_templates_really_show_two_different_products(tmp_path: Path) -> None:
     """Two different products must never produce the same final image."""
     config = _shipped_assets_config(tmp_path)
-    template = Image.open(config.asset_paths["digimall_template"]).convert("RGBA")
+    template = Image.open(_asset(config, "digi")).convert("RGBA")
     left = apply_template(Image.new("RGB", (900, 900), (220, 30, 40)), template, config)
     right = apply_template(Image.new("RGB", (900, 900), (20, 90, 190)), template, config)
 
@@ -486,7 +492,7 @@ def test_shipped_templates_really_show_two_different_products(tmp_path: Path) ->
 
 
 def test_apply_template_keeps_template_size(config: PipelineConfig) -> None:
-    template = Image.open(config.asset_paths["digimall_template"]).convert("RGBA")
+    template = Image.open(_asset(config, "digi")).convert("RGBA")
     result = apply_template(clean_product_image(), template, config)
     assert result.size == template.size
 
@@ -598,7 +604,7 @@ def _shaped_product(width: int, height: int) -> Image.Image:
     return image
 
 
-@pytest.mark.parametrize("key", ["digimall_template", "alfamall_template"])
+@pytest.mark.parametrize("key", ["digi", "alfa"])
 def test_product_fills_the_real_template(tmp_path: Path, key: str) -> None:
     """The user's complaint ("very damn small"): a tall product must fill the canvas.
 
@@ -606,7 +612,7 @@ def test_product_fills_the_real_template(tmp_path: Path, key: str) -> None:
     inflate the number.
     """
     config = _shipped_assets_config(tmp_path)
-    template = Image.open(config.asset_paths[key]).convert("RGBA")
+    template = Image.open(_asset(config, key)).convert("RGBA")
     canvas_h = template.size[1]
 
     square = to_square_canvas(
@@ -623,10 +629,10 @@ def test_product_fills_the_real_template(tmp_path: Path, key: str) -> None:
     assert width <= config.canonical_side, "product must not be wider than the canvas"
 
 
-@pytest.mark.parametrize("key", ["digimall_template", "alfamall_template"])
+@pytest.mark.parametrize("key", ["digi", "alfa"])
 def test_wide_product_fills_the_real_template(tmp_path: Path, key: str) -> None:
     config = _shipped_assets_config(tmp_path)
-    template = Image.open(config.asset_paths[key]).convert("RGBA")
+    template = Image.open(_asset(config, key)).convert("RGBA")
     width, height = template.size
 
     square = to_square_canvas(
@@ -642,10 +648,10 @@ def test_wide_product_fills_the_real_template(tmp_path: Path, key: str) -> None:
     assert top >= header_safe_margin(template, config), f"{key}: product reached into the logo area"
 
 
-@pytest.mark.parametrize("key", ["digimall_template", "alfamall_template"])
+@pytest.mark.parametrize("key", ["digi", "alfa"])
 def test_product_is_centred_and_never_glued_to_the_bottom(tmp_path: Path, key: str) -> None:
     config = _shipped_assets_config(tmp_path)
-    template = Image.open(config.asset_paths[key]).convert("RGBA")
+    template = Image.open(_asset(config, key)).convert("RGBA")
     width, height = template.size
     margin = header_safe_margin(template, config)
 
