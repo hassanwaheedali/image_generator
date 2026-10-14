@@ -4,7 +4,7 @@
     FREEIMAGE_API_KEY=... python main.py --input sheet.xlsx --workers 4
     python main.py --check-image path/to/hero.png      # which gate stops this file, no crawl
 
-Fail-fast order: assets -> config (incl. API key) -> sheet -> checkpoint -> run.
+Fail-fast order: config (incl. API key) -> sheet -> platform availability -> run.
 """
 
 from __future__ import annotations
@@ -13,6 +13,8 @@ import argparse
 import logging
 import sys
 import threading
+from collections.abc import Callable
+from itertools import combinations
 from pathlib import Path
 
 from config import ConfigError, PipelineConfig, load_config_file, load_env_file
@@ -42,7 +44,13 @@ from pipeline import (
     csv_escape,
     write_output_csvs,
 )
-from platforms import PlatformPlan, resolve_platforms
+from platforms import (
+    DEFAULT_SPECS,
+    PLATFORM_KEYS,
+    PlatformPlan,
+    parse_platform_keys,
+    resolve_platforms,
+)
 from protocols import ImageHost
 from sources import SourceChain
 
@@ -82,7 +90,17 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="TITLE",
         help="with --check-image: judge the row title too, so the colour gate is applied as in that row",
     )
-    parser.add_argument("--assets-dir", default="assets", help="folder with the two templates and two banners")
+    parser.add_argument(
+        "--assets-dir",
+        default="assets",
+        help="folder with one subfolder per platform, each holding its template and closing banner",
+    )
+    parser.add_argument(
+        "--platforms",
+        default=None,
+        metavar="KEYS",
+        help="comma-separated platforms to publish (website, alfa, digi); skips the startup prompt",
+    )
     parser.add_argument(
         "--output-dir",
         default=None,
@@ -93,7 +111,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="checkpoint and banner cache folder (default: state_<input file name>, or state)",
     )
-    parser.add_argument("--dry-run", action="store_true", help="do everything except uploads and platform CSVs")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="do everything except upload; the import sheets list no URLs",
+    )
     parser.add_argument(
         "--direct",
         action="store_true",
@@ -278,18 +300,63 @@ def resolve_input_path(input_arg: str | None, input_dir: Path) -> Path:
     )
 
 
-def check_assets(config: PipelineConfig) -> None:
-    """Fail fast, listing every missing asset and the folder that was searched."""
-    missing = [path for path in config.asset_paths.values() if not path.exists()]
-    if missing:
-        listing = "\n".join(f"  - missing: {path}" for path in missing)
-        raise SystemExit(
-            f"asset check failed - searched in {config.assets_dir.resolve()}:\n{listing}\n"
-            "expected files: "
-            + ", ".join(
-                path.name for path in config.asset_paths.values()
-            )
-        )
+def _display_name(key: str) -> str:
+    return next(spec.display_name for spec in DEFAULT_SPECS if spec.key == key)
+
+
+def platform_groups() -> tuple[tuple[str, ...], ...]:
+    """The menu's selectable groups: every platform, then each single, then each pair.
+
+    Generated from the platform table rather than written out, so adding a fourth
+    platform adds its menu lines by themselves.
+    """
+    groups: list[tuple[str, ...]] = [PLATFORM_KEYS]
+    for size in range(1, len(PLATFORM_KEYS)):
+        groups.extend(combinations(PLATFORM_KEYS, size))
+    return tuple(groups)
+
+
+def _group_label(keys: tuple[str, ...]) -> str:
+    names = [_display_name(key) for key in keys]
+    if len(keys) == len(PLATFORM_KEYS):
+        return f"all ({', '.join(names)})"
+    if len(names) == 1:
+        return f"{names[0]} only"
+    return " + ".join(names)
+
+
+def select_platforms(
+    raw: str | None,
+    *,
+    interactive: bool,
+    emit: Callable[[str], None] = print,
+    read: Callable[[], str] = input,
+) -> tuple[str, ...] | None:
+    """Which platforms this run publishes, or ``None`` to take the config default.
+
+    ``--platforms`` wins outright; otherwise a terminal is asked once.  An empty or
+    unparsable answer means **everything** (owner decision D6): the prompt must never
+    be able to stop a run, and ``python main.py --input sheet.csv --workers 36`` has to
+    keep working with nothing but an extra Enter.
+    """
+    if raw is not None:
+        keys = parse_platform_keys(raw)
+        if not keys:
+            raise ConfigError("--platforms must name at least one of: " + ", ".join(PLATFORM_KEYS))
+        return keys
+    if not interactive:
+        return None
+    emit("Run for which platform(s)?")
+    for number, group in enumerate(platform_groups(), start=1):
+        hint = "   [Enter]" if number == 1 else ""
+        emit(f"  {number} = {_group_label(group)}{hint}")
+    try:
+        answer = read().strip()
+    except EOFError:
+        return None
+    if not answer.isdigit() or not 1 <= int(answer) <= len(groups := platform_groups()):
+        return None
+    return groups[int(answer) - 1]
 
 
 def _build_image_host(config: PipelineConfig) -> ImageHost:
@@ -549,10 +616,6 @@ def main(argv: list[str] | None = None) -> int:
         "freeimage key: %s",
         "set" if config.api_key else ("not needed (dry-run)" if config.dry_run else "MISSING"),
     )
-    check_assets(config)
-    platforms = resolve_platforms(config)
-    for notice in platforms.notices:
-        LOG.info("%s", notice)
     try:
         input_path = resolve_input_path(args.input, config.input_dir)
     except ConfigError as exc:
@@ -566,6 +629,22 @@ def main(argv: list[str] | None = None) -> int:
         config.dry_run,
         config.workers,
     )
+
+    # Asked after the sheet is named, so the person choosing can see what they are choosing for.
+    try:
+        requested = select_platforms(args.platforms, interactive=sys.stdin.isatty())
+    except ConfigError as exc:
+        print(f"configuration error: {exc}", file=sys.stderr)
+        return 2
+    platforms = resolve_platforms(config, requested)
+    for notice in platforms.notices:
+        LOG.info("%s", notice)
+    if not platforms.platforms:
+        raise SystemExit(
+            "nothing to publish: no platform has its artwork in "
+            f"{config.assets_dir.resolve()} - see the platform lines above for the exact files"
+        )
+    LOG.info("publishing on: %s", ", ".join(platform.display_name for platform in platforms.platforms))
 
     try:
         tasks, warnings = merge_duplicate_titles(read_input(input_path, direct=config.direct_mode))
@@ -599,7 +678,9 @@ def main(argv: list[str] | None = None) -> int:
             entry = checkpoint.get(key)
             if entry is None:
                 return False
-            return entry.is_resume_done(hash_source_urls(t.source_urls))
+            return entry.is_resume_done(
+                hash_source_urls(t.source_urls), platforms.keys
+            )
 
         pending_count = 0
         selected_tasks: list[ProductTask] = []

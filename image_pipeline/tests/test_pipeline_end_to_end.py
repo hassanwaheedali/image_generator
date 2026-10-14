@@ -379,12 +379,12 @@ def test_empty_urls_row_and_changed_url_are_retried(tmp_path: Path) -> None:
         layout=CHECKPOINT_LAYOUT,
     )
     # same URLs -> done
-    assert entry.is_resume_done(hash_source_urls(("https://old.example/p",))) is True
+    assert entry.is_resume_done(hash_source_urls(("https://old.example/p",)), ("alfa", "digi")) is True
     # changed Source URL -> retry
-    assert entry.is_resume_done(hash_source_urls(("https://new.example/p",))) is False
+    assert entry.is_resume_done(hash_source_urls(("https://new.example/p",)), ("alfa", "digi")) is False
     # empty URL list with an ok status -> retry
     empty = CheckpointEntry("X", "", Status.OK, (), "", "")
-    assert empty.is_resume_done(hash_source_urls(())) is False
+    assert empty.is_resume_done(hash_source_urls(()), ("alfa", "digi")) is False
 
 
 def test_duplicate_titles_are_merged() -> None:

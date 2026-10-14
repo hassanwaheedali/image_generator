@@ -6,6 +6,7 @@ logged and serialised without aliasing surprises.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -326,8 +327,9 @@ class CheckpointEntry:
             name_prefix=str(payload.get("name_prefix", "")),
         )
 
-    def is_resume_done(self, source_url_hash: str) -> bool:
-        """Done = current layout, ok/partial, publicly published URLs, unchanged sources.
+    def is_resume_done(self, source_url_hash: str, platform_keys: Sequence[str]) -> bool:
+        """Done = current layout, ok/partial, a hosted URL on **every** platform this run
+        publishes, and unchanged source URLs.
 
         A ``--dry-run`` entry carries ``file://`` local paths instead of real uploads;
         resuming one into a live run would publish local paths to the platforms, so
@@ -337,14 +339,22 @@ class CheckpointEntry:
 
         An older layout never resumes either: its URLs cannot be attributed to the
         platforms this run publishes (see :data:`CHECKPOINT_LAYOUT`).
+
+        Covering the whole plan is what makes "done" mean something to a shop: an entry
+        published by a ``--platforms digi`` run has nothing for Alfamall, so a run that
+        publishes Alfamall re-processes the row instead of leaving its sheet short.
         """
         if self.layout != CHECKPOINT_LAYOUT:
             return False
         if self.status not in (Status.OK, Status.PARTIAL):
             return False
-        urls = tuple(url for _, per_platform in self.platform_urls for url in per_platform)
-        if not urls:
+        if self.source_url_hash != source_url_hash:
             return False
-        if not all(url.startswith(("http://", "https://")) for url in urls):
+        per_platform = dict(self.platform_urls)
+        if not platform_keys or not all(per_platform.get(key) for key in platform_keys):
             return False
-        return self.source_url_hash == source_url_hash
+        return all(
+            url.startswith(("http://", "https://"))
+            for key in platform_keys
+            for url in per_platform[key]
+        )

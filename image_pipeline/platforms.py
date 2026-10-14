@@ -175,6 +175,12 @@ class PlatformPlan:
     def by_key(self, key: str) -> ResolvedPlatform | None:
         return next((p for p in self.platforms if p.key == key), None)
 
+    @property
+    def keys(self) -> tuple[str, ...]:
+        """The platform keys this run publishes, in plan order - what a row must cover
+        to count as done when a run resumes."""
+        return tuple(platform.key for platform in self.platforms)
+
 
 def resolve_platforms(
     config: PipelineConfig, requested: Sequence[str] | None = None
@@ -184,8 +190,8 @@ def resolve_platforms(
     A missing *template* drops that platform with a notice instead of killing the run:
     Website ships before its artwork exists, and a missing DigiMall template must not
     stop Alfamall publishing.  A missing *banner* on a KEEP platform drops the banner
-    for the whole run and no product fails - today ``main.check_assets`` aborts the
-    entire run for it, which is not what the owner expects.
+    for the whole run and no product fails.  Both are startup notices, never errors -
+    the old entry point aborted the entire run when one image was missing.
 
     Resolving once here, rather than per product, is what stops 36 workers from
     printing the same sentence 1800 times.

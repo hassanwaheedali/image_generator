@@ -2375,7 +2375,7 @@ class BatchRunner:
         entry = self._checkpoint.get(key)
         if entry is None:
             return False
-        return entry.is_resume_done(hash_source_urls(task.source_urls))
+        return entry.is_resume_done(hash_source_urls(task.source_urls), self._deps.platforms.keys)
 
     def _run_one(self, task: ProductTask) -> tuple[ProductResult, list[AcceptedImage]]:
         return self._processor(task, self._deps, self._config, self._cancel)

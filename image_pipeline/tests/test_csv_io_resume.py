@@ -40,6 +40,11 @@ def _keys(*tokens: str, keywords: tuple[str, ...] = ()) -> ModelKeys:
     return ModelKeys(cleaned_title="t", tokens=tokens, title_key="t", keywords=keywords)
 
 
+#: The platforms a run publishes, so resume can be judged against a plan the way the
+#: pipeline does it.
+_PLAN = ("alfa", "digi")
+
+
 def write_sheet(path: Path, header: str, rows: list[list[str]]) -> None:
     path.write_text(
         "\ufeff" + header + "\n" + "\n".join(",".join(row) for row in rows) + "\n",
@@ -161,7 +166,7 @@ def test_checkpoint_round_trip_keeps_latest(tmp_path: Path) -> None:
     entry = entries["haier hsu-12hfpaa"]
     assert entry.status is Status.OK
     assert entry.timestamp == "2026-01-02T00:00:00Z"
-    assert entry.is_resume_done("abc123") and not entry.is_resume_done("other")
+    assert entry.is_resume_done("abc123", _PLAN) and not entry.is_resume_done("other", _PLAN)
 
 
 def test_checkpoint_ignores_garbage_lines(tmp_path: Path) -> None:
@@ -352,7 +357,7 @@ def test_dry_run_checkpoint_entries_are_never_resumed() -> None:
         timestamp="2026-10-08T19:21:00",
         layout=CHECKPOINT_LAYOUT,
     )
-    assert dry.is_resume_done("abc") is False
+    assert dry.is_resume_done("abc", ("digi",)) is False
 
     live = CheckpointEntry(
         title="Homage HRF-47662-GD",
@@ -363,8 +368,28 @@ def test_dry_run_checkpoint_entries_are_never_resumed() -> None:
         timestamp="2026-10-08T19:21:00",
         layout=CHECKPOINT_LAYOUT,
     )
-    assert live.is_resume_done("abc") is True
-    assert live.is_resume_done("different-hash") is False
+    assert live.is_resume_done("abc", ("digi",)) is True
+    assert live.is_resume_done("different-hash", ("digi",)) is False
+
+
+def test_a_row_published_on_part_of_the_plan_is_not_done(tmp_path: Path) -> None:
+    """A digi-only run's checkpoint cannot satisfy a run that also publishes Alfamall.
+
+    Resuming it as "done" would leave ``alfa/alfamall_product_images.csv`` silently short
+    by that row, which is the one failure mode a shop cannot spot.
+    """
+    entry = CheckpointEntry(
+        title="Haier HSU-12HFPAA",
+        source_url_hash="abc",
+        status=Status.OK,
+        platform_urls=(("digi", ("https://iili.io/1.jpg",)),),
+        reason="",
+        timestamp="2026-10-14T00:00:00",
+        layout=CHECKPOINT_LAYOUT,
+    )
+    assert entry.is_resume_done("abc", ("digi",)) is True
+    assert entry.is_resume_done("abc", _PLAN) is False
+    assert entry.is_resume_done("abc", ()) is False
 
 
 def test_a_pre_platform_checkpoint_is_never_resumed() -> None:
@@ -384,7 +409,7 @@ def test_a_pre_platform_checkpoint_is_never_resumed() -> None:
     )
     assert old.layout != CHECKPOINT_LAYOUT
     assert old.platform_urls == ()
-    assert old.is_resume_done("abc") is False
+    assert old.is_resume_done("abc", _PLAN) is False
 
 
 def test_checkpoint_round_trip_carries_the_layout_and_every_platform(tmp_path: Path) -> None:
@@ -403,4 +428,4 @@ def test_checkpoint_round_trip_carries_the_layout_and_every_platform(tmp_path: P
     entry = load_checkpoint(path)["midea 12hrfn1 qc6"]
     assert entry.layout == CHECKPOINT_LAYOUT
     assert entry.platform_urls == result.platform_urls   # order preserved, per platform
-    assert entry.is_resume_done("h1") is True
+    assert entry.is_resume_done("h1", _PLAN) is True
