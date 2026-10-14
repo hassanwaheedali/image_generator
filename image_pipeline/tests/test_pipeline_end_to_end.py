@@ -142,7 +142,8 @@ def test_ok_product_urls_are_real_images_then_banner(tmp_path: Path) -> None:
     assert host.uploads[-2].startswith("digimall-closing-banner")
     assert host.uploads[-1].startswith("alfamall-closing-banner")
     for accepted in images:
-        assert accepted.digi_path.exists() and accepted.alfa_path.exists()
+        assert len(accepted.final_paths) == 2
+        assert all(path.exists() for _, path in accepted.final_paths)
         assert accepted.raw_path.exists() and accepted.square_path.exists()
 
 
@@ -863,8 +864,7 @@ def test_a_live_run_refuses_to_publish_a_local_path(tmp_path: Path) -> None:
             dedup_key="k",
             raw_path=image_file,
             square_path=image_file,
-            digi_path=image_file,
-            alfa_path=image_file,
+            final_paths=(("digi", image_file), ("alfa", image_file)),
         )
     ]
     result = ProductResult(task_index=0, title="Haier HSU-12HFPAA Inverter AC", status=Status.OK)

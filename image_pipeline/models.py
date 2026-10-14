@@ -178,14 +178,30 @@ class ImageDecision:
 
 @dataclass(frozen=True)
 class AcceptedImage:
-    """A fully processd, locally saved image (not yet uploaded)."""
+    """A fully processed, locally saved image (not yet uploaded).
+
+    ``final_paths`` is an ordered ``(platform key, path)`` tuple: one entry per platform the
+    run selected, in the order the platforms were resolved.  Ordered pairs rather than a dict
+    so the instance stays frozen and hashable - the same idiom ``ModelKeys.variant_facts``
+    already uses.
+    """
 
     source_url: str
     dedup_key: str
     raw_path: Path
     square_path: Path
-    digi_path: Path
-    alfa_path: Path
+    final_paths: tuple[tuple[str, Path], ...]
+
+    def final_path(self, key: str) -> Path:
+        """The composed final for one platform.
+
+        Raises instead of returning ``None``: a platform with no final means the row would
+        publish half-filled, and S14 requires every selected platform or none at all.
+        """
+        for platform, path in self.final_paths:
+            if platform == key:
+                return path
+        raise KeyError(f"no final image for platform {key!r}")
 
 
 @dataclass(frozen=True)

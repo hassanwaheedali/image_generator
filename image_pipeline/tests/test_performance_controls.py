@@ -19,8 +19,7 @@ def test_early_stop_when_image_found_flag() -> None:
         dedup_key="hero",
         raw_path=Path("/tmp/raw.jpg"),
         square_path=Path("/tmp/square.jpg"),
-        digi_path=Path("/tmp/digi.jpg"),
-        alfa_path=Path("/tmp/alfa.jpg"),
+        final_paths=(("digi", Path("/tmp/digi.jpg")), ("alfa", Path("/tmp/alfa.jpg"))),
     )
 
     assert not _row_is_done([], cfg_early)

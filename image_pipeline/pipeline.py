@@ -292,19 +292,17 @@ def finalize_and_upload(
     try:
         for index, image in enumerate(images, start=1):
             stem = f"{safe_slug(task.title)}-{index:02d}"
+            digi_final = image.final_path("digi")
+            alfa_final = image.final_path("alfa")
             if config.dry_run:
-                digi_urls.append(f"file://{image.digi_path.resolve()}")
-                alfa_urls.append(f"file://{image.alfa_path.resolve()}")
+                digi_urls.append(f"file://{digi_final.resolve()}")
+                alfa_urls.append(f"file://{alfa_final.resolve()}")
                 continue
             digi_urls.append(
-                deps.image_host.upload(
-                    image.digi_path.read_bytes(), f"{stem}-digimall.jpg"
-                )
+                deps.image_host.upload(digi_final.read_bytes(), f"{stem}-digimall.jpg")
             )
             alfa_urls.append(
-                deps.image_host.upload(
-                    image.alfa_path.read_bytes(), f"{stem}-alfamall.jpg"
-                )
+                deps.image_host.upload(alfa_final.read_bytes(), f"{stem}-alfamall.jpg")
             )
     except PermanentAPIError:
         # Invalid key / quota / forbidden: retrying cannot help and nothing may be
@@ -1928,8 +1926,7 @@ def _compose_and_save(
             dedup_key=dedup_key(candidate.url),
             raw_path=raw_path,
             square_path=square_path,
-            digi_path=digi_path,
-            alfa_path=alfa_path,
+            final_paths=(("digi", digi_path), ("alfa", alfa_path)),
         )
     )
     dedup.add(image, candidate.url, fingerprint=fingerprint)
