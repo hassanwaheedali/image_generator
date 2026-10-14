@@ -27,12 +27,16 @@ class Decision(str, Enum):
 
 
 class ImageRole(str, Enum):
-    """Which sub-folder of the audit tree a local file belongs to."""
+    """Which sub-folder of the audit tree a local file belongs to.
+
+    The audit tree is the evidence that never goes to a shop.  Composited finals are *not*
+    a role: they live under ``images/<platform key>/`` and are addressed by that key (see
+    ``AcceptedImage.final_paths``), so a fourth platform needs no new member here.
+    """
 
     RAW = "raw"
     ISOLATED = "isolated"
-    FINAL_DIGIMALL = "final_digimall"
-    FINAL_ALFAMALL = "final_alfamall"
+    REJECTED = "rejected"
 
 
 @dataclass(frozen=True)

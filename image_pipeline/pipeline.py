@@ -40,9 +40,12 @@ from config import (
     PipelineConfig,
 )
 from csv_io import (
+    MAX_PREFIX_CHARS,
     append_checkpoint,
     atomic_write_csv,
     atomic_write_text,
+    filename_prefix,
+    guard_windows_name,
     hash_source_urls,
     safe_slug,
     save_banner_cache,
@@ -98,6 +101,7 @@ from page_verification import (
     strip_unwanted_regions,
     verify_page,
 )
+from platforms import PLATFORM_KEYS, PlatformPlan
 from protocols import BinaryResponse, ImageFetcher, ImageHost, PageFetcher, SourceSearcher
 from url_filters import (
     dedup_key,
@@ -130,6 +134,9 @@ class PipelineDeps:
     decisions: DecisionLog
     banner_cache: dict[str, str]
     banner_cache_lock: threading.Lock
+    #: Which platforms this run publishes and what each does with its banner, decided
+    #: once at startup.  Workers read it; nobody may change it mid-run.
+    platforms: PlatformPlan
     #: Optional: finds candidate pages when the sheet's URLs did not solve a row.
     #: ``None`` (or ``config.fallback_enabled=False``) keeps the original behaviour.
     source_searcher: SourceSearcher | None = None
@@ -174,8 +181,40 @@ GALLERY_IMAGE_SOURCES: frozenset[str] = CURATED_GALLERY_SOURCES - {"dom_audit"}
 # --------------------------------------------------------------------------- #
 # helpers
 # --------------------------------------------------------------------------- #
-def _image_dir(config: PipelineConfig, title: str, role: ImageRole) -> Path:
-    return config.images_dir / safe_slug(title) / role.value
+def _final_path_overhead(config: PipelineConfig) -> int:
+    """Characters every final path spends outside the product folder name.
+
+    Measured against the widest platform key in the table and the longest filename the
+    pipeline can write (``<48-char prefix>_99.jpg``), so the budget holds for a platform
+    that is not enabled in this run too.
+    """
+    widest_key = max(PLATFORM_KEYS, key=len)
+    longest_name = 1 + MAX_PREFIX_CHARS + len("_99.jpg")
+    return len(str(config.images_dir)) + 1 + len(widest_key) + 1 + longest_name + 1
+
+
+def _product_folder(config: PipelineConfig, title: str) -> str:
+    """Per-product folder name, shortened to keep the deepest path inside the budget.
+
+    Only the slug shrinks, and it keeps a hash tail so two long titles cannot collide on
+    one truncated name.  The model-code filename prefix is never touched - that is the
+    string the owner reads in the CSV, while the folder is only a place to look.
+    """
+    slug = safe_slug(title)
+    budget = config.max_output_path_chars - _final_path_overhead(config)
+    if len(slug) <= budget:
+        return slug
+    digest = sha256_bytes(title.encode("utf-8"))[:8]
+    keep = max(8, budget - len(digest) - 1)
+    return guard_windows_name(f"{slug[:keep]}-{digest}")
+
+
+def _audit_dir(config: PipelineConfig, title: str, role: ImageRole) -> Path:
+    return config.audit_dir / _product_folder(config, title) / role.value
+
+
+def _platform_dir(config: PipelineConfig, title: str, platform_key: str) -> Path:
+    return config.images_dir / platform_key / _product_folder(config, title)
 
 
 def _layout_rescue_verdict(
@@ -242,17 +281,29 @@ def _dump_rejected(
     Owner request, 2026-10-10 - "if rejected, where can we find [it]": a candidate that a
     pixel gate refuses leaves nothing on disk, so "the official product image was never
     scraped" cannot be checked by eye and the argument turns into reasoning about code.
-    Written to ``output/images/<product>/rejected/<rule>-<hash>.jpg``.  Off by default:
+    Written to ``output/audit/<product>/rejected/<rule>-<hash>.jpg``.  Off by default:
     this is a debugging aid, never delivery output.
     """
-    folder = _image_dir(config, title, ImageRole.RAW).parent / "rejected"
+    folder = _audit_dir(config, title, ImageRole.REJECTED)
     folder.mkdir(parents=True, exist_ok=True)
     name = f"{rule_id}-{dedup_key(url)[:10]}.jpg"
     save_image_atomic(image, folder / name, jpeg_quality=config.jpeg_quality)
 
 
-def _save_local(image: Image.Image, config: PipelineConfig, title: str, role: ImageRole, name: str) -> Path:
-    path = _image_dir(config, title, role) / name
+def _save_audit(
+    image: Image.Image, config: PipelineConfig, title: str, role: ImageRole, name: str
+) -> Path:
+    """Write one evidence file under ``audit/<product>/<role>/``."""
+    path = _audit_dir(config, title, role) / name
+    save_image_atomic(image, path, jpeg_quality=config.jpeg_quality)
+    return path
+
+
+def _save_final(
+    image: Image.Image, config: PipelineConfig, title: str, platform_key: str, name: str
+) -> Path:
+    """Write one publishable picture under ``images/<platform>/<product>/``."""
+    path = _platform_dir(config, title, platform_key) / name
     save_image_atomic(image, path, jpeg_quality=config.jpeg_quality)
     return path
 
@@ -982,6 +1033,7 @@ def _salvage_row(
         seen_keys.add(dedup_key(offer.candidate.url))
         _compose_and_save(
             task=task,
+            keys=keys,
             candidate=offer.candidate,
             used_url=offer.used_url,
             source_label=offer.source_label,
@@ -1836,6 +1888,7 @@ def _consume_candidates(
         seen_keys.add(dedup_key(candidate.url))
         _compose_and_save(
             task=task,
+            keys=keys,
             candidate=candidate,
             used_url=used_url,
             source_label=source_label,
@@ -1870,6 +1923,7 @@ def _probe_dimensions(
 def _compose_and_save(
     *,
     task: ProductTask,
+    keys: ModelKeys,
     candidate: ImageCandidate,
     used_url: str,
     source_label: str,
@@ -1880,7 +1934,7 @@ def _compose_and_save(
     accepted: list[AcceptedImage],
     fingerprint: ImageFingerprint | None = None,
 ) -> None:
-    """Stage 5: isolate, 1:1 centre, light unsharp, both templates, save locally."""
+    """Stage 5: isolate, 1:1 centre, light unsharp, every selected template, save locally."""
     isolated, degraded = isolate_main_product(image, config)
     square = to_square_canvas(
         isolated,
@@ -1895,8 +1949,8 @@ def _compose_and_save(
         threshold=config.unsharp_threshold,
     )
     index = len(accepted) + 1
-    raw_path = _save_local(image, config, task.title, ImageRole.RAW, f"{index:02d}-raw.jpg")
-    square_path = _save_local(
+    raw_path = _save_audit(image, config, task.title, ImageRole.RAW, f"{index:02d}-raw.jpg")
+    square_path = _save_audit(
         square, config, task.title, ImageRole.ISOLATED, f"{index:02d}-square.jpg"
     )
     bbox = product_content_bbox(
@@ -1904,29 +1958,23 @@ def _compose_and_save(
         white_level=config.product_content_white_level,
         min_ratio=config.product_content_min_ratio,
     )
-    digi_prepared = _load_prepared_template(config, "digimall_template")
-    alfa_prepared = _load_prepared_template(config, "alfamall_template")
-    digi_path = _save_local(
-        apply_template(square, digi_prepared.base, config, bbox=bbox, prepared=digi_prepared),
-        config,
-        task.title,
-        ImageRole.FINAL_DIGIMALL,
-        f"{index:02d}-digimall.jpg",
-    )
-    alfa_path = _save_local(
-        apply_template(square, alfa_prepared.base, config, bbox=bbox, prepared=alfa_prepared),
-        config,
-        task.title,
-        ImageRole.FINAL_ALFAMALL,
-        f"{index:02d}-alfamall.jpg",
-    )
+    # One stem shared by every platform: the same photograph is then comparable across
+    # ``digi/``, ``alfa/`` and ``website/`` by filename alone (owner decision 2026-10-13).
+    name = f"{filename_prefix(keys, task.title)}_{index}.jpg"
+    final_paths: list[tuple[str, Path]] = []
+    for platform in deps.platforms.platforms:
+        prepared = _load_prepared_template(config, platform.template_path)
+        composite = apply_template(square, prepared.base, config, bbox=bbox, prepared=prepared)
+        final_paths.append(
+            (platform.key, _save_final(composite, config, task.title, platform.key, name))
+        )
     accepted.append(
         AcceptedImage(
             source_url=candidate.url,
             dedup_key=dedup_key(candidate.url),
             raw_path=raw_path,
             square_path=square_path,
-            final_paths=(("digi", digi_path), ("alfa", alfa_path)),
+            final_paths=tuple(final_paths),
         )
     )
     dedup.add(image, candidate.url, fingerprint=fingerprint)
@@ -1948,9 +1996,8 @@ _PREPARED_TEMPLATE_CACHE: dict[tuple[str, float, int, int], PreparedTemplate] = 
 _PREPARED_LOCK = threading.Lock()
 
 
-def _load_asset(config: PipelineConfig, key: str) -> Image.Image:
+def _load_asset(path: Path) -> Image.Image:
     """Load a template once per run.  Templates are read-only, never per-product data."""
-    path = config.asset_paths[key]
     cache_key = str(path)
     with _ASSET_LOCK:
         cached = _ASSET_CACHE.get(cache_key)
@@ -1961,9 +2008,8 @@ def _load_asset(config: PipelineConfig, key: str) -> Image.Image:
         return cached
 
 
-def _load_prepared_template(config: PipelineConfig, key: str) -> PreparedTemplate:
+def _load_prepared_template(config: PipelineConfig, path: Path) -> PreparedTemplate:
     """Load and prepare a template once per run with double-checked locking."""
-    path = config.asset_paths[key]
     cache_key = (
         str(path),
         config.template_top_scan_ratio,
@@ -1976,8 +2022,7 @@ def _load_prepared_template(config: PipelineConfig, key: str) -> PreparedTemplat
     with _PREPARED_LOCK:
         cached = _PREPARED_TEMPLATE_CACHE.get(cache_key)
         if cached is None:
-            raw = _load_asset(config, key)
-            cached = prepare_template(raw, config)
+            cached = prepare_template(_load_asset(path), config)
             _PREPARED_TEMPLATE_CACHE[cache_key] = cached
         return cached
 
@@ -2073,14 +2118,17 @@ folder is always the result of the **last** run - never a mix of runs.
   rule id (S1..S15) that decided it.
 - `pipeline_run.log` - the full log of the run.
 
-**Pictures** - `images/<product>/`, one folder per row:
-- `raw/` - the photos exactly as downloaded (proof of what the source showed);
-- `isolated/` - after background knock-out, 1:1 squaring and sharpening (1080x1080);
-- `final_digimall/` - the final DigiMall picture (product on the DigiMall template);
-- `final_alfamall/` - the final AlfaMall picture.
+**Pictures**:
+- `images/digimall/<product>/`, `images/alfamall/<product>/` - the final pictures, one
+  folder per shop, product on that shop's template.  These are the publishable set; a
+  folder can be zipped and handed over as it stands.
+- `audit/<product>/` - the evidence that never goes to a shop:
+  `raw/` the photos exactly as downloaded (proof of what the source showed) and
+  `isolated/` after background knock-out, 1:1 squaring and sharpening (1080x1080).
 
 `<product>` is a slug of the row title (`dawlance-semi-automatic-washing-machine-10kg-dw-7500c`),
-so the picture sets can be matched back to the CSVs by eye.
+and the pictures are named `<MODEL_CODE>_1.jpg`, `_2.jpg`, ... so the same photograph is
+the same filename in every platform folder and can be matched back to the CSVs by eye.
 
 ## This run
 

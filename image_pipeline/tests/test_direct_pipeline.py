@@ -174,6 +174,7 @@ def test_batch_runner_uses_the_injected_processor(tmp_path: Path) -> None:
         decisions=DecisionLog(tmp_path / "decisions.jsonl"),
         banner_cache={},
         banner_cache_lock=threading.Lock(),
+        platforms=synthetic_platforms(_assets(tmp_path)),
         source_searcher=None,
     )
     calls: list[int] = []
@@ -207,6 +208,7 @@ from conftest import (  # noqa: E402
     FakeImageHost,
     FakePageFetcher,
     make_assets,
+    synthetic_platforms,
 )
 
 from decisions import DecisionLog  # noqa: E402
@@ -228,6 +230,7 @@ def _direct_deps(tmp_path: Path, images: dict[str, bytes]) -> tuple[PipelineDeps
         decisions=DecisionLog(tmp_path / "decisions.jsonl"),
         banner_cache={},
         banner_cache_lock=threading.Lock(),
+        platforms=synthetic_platforms(_assets(tmp_path)),
         source_searcher=None,
     )
     return deps, fetcher

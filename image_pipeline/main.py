@@ -42,6 +42,7 @@ from pipeline import (
     csv_escape,
     write_output_csvs,
 )
+from platforms import PlatformPlan, resolve_platforms
 from protocols import ImageHost
 from sources import SourceChain
 
@@ -341,7 +342,9 @@ def _build_image_host(config: PipelineConfig) -> ImageHost:
     )
 
 
-def build_deps(config: PipelineConfig, decisions: DecisionLog) -> PipelineDeps:
+def build_deps(
+    config: PipelineConfig, decisions: DecisionLog, platforms: PlatformPlan
+) -> PipelineDeps:
     limiter = DomainRateLimiter(config.domain_min_interval_s)
     host = _build_image_host(config)
     # Direct mode (Option 2) never searches: the row supplies its own images.
@@ -357,6 +360,7 @@ def build_deps(config: PipelineConfig, decisions: DecisionLog) -> PipelineDeps:
         decisions=decisions,
         banner_cache=load_banner_cache(config.banner_cache_path),
         banner_cache_lock=threading.Lock(),
+        platforms=platforms,
         source_searcher=searcher,
     )
 
@@ -546,6 +550,9 @@ def main(argv: list[str] | None = None) -> int:
         "set" if config.api_key else ("not needed (dry-run)" if config.dry_run else "MISSING"),
     )
     check_assets(config)
+    platforms = resolve_platforms(config)
+    for notice in platforms.notices:
+        LOG.info("%s", notice)
     try:
         input_path = resolve_input_path(args.input, config.input_dir)
     except ConfigError as exc:
@@ -610,7 +617,7 @@ def main(argv: list[str] | None = None) -> int:
     good_rows = [task for task in tasks if task.title and task.source_urls]
 
     decisions = DecisionLog(config.decisions_path)
-    deps = build_deps(config, decisions)
+    deps = build_deps(config, decisions, platforms)
     runner = BatchRunner(
         config,
         deps,

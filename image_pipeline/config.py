@@ -682,6 +682,11 @@ class PipelineConfig:
     #: Reject upscaled, low-fidelity images whose high-frequency spectral energy
     #: and edge gradients are depleted after compositing onto the square canvas.
     canvas_blur_guard_enabled: bool = True
+    #: Which platform's artwork the guard composites its preview on.  The two
+    #: thresholds below were calibrated against that template's bands, so the
+    #: reference is named instead of assumed.  A run that does not include it
+    #: falls back to its first platform rather than skipping the gate.
+    canvas_blur_reference: str = "digi"
     canvas_blur_hf_threshold: float = 0.102
     canvas_blur_edge_threshold: float = 48.0
 
@@ -909,6 +914,10 @@ class PipelineConfig:
             raise ConfigError(
                 "enabled_platforms must name at least one of: " + ", ".join(PLATFORM_KEYS)
             )
+        if self.canvas_blur_reference not in PLATFORM_KEYS:
+            raise ConfigError(
+                "canvas_blur_reference must name one of: " + ", ".join(PLATFORM_KEYS)
+            )
         if self.max_output_path_chars < 120:
             raise ConfigError("max_output_path_chars must be >= 120")
 
@@ -1069,7 +1078,18 @@ class PipelineConfig:
 
     @property
     def images_dir(self) -> Path:
+        """Publishable pictures only: ``images/<platform key>/<product>/``.
+
+        Kept free of audit artefacts so a platform folder can be zipped and handed over
+        with no filtering, and so a product that slugs to ``digi`` cannot collide with the
+        platform folder of the same name on Windows' case-insensitive filesystem.
+        """
         return self.output_dir / "images"
+
+    @property
+    def audit_dir(self) -> Path:
+        """The never-published evidence tree: ``audit/<product>/{raw,isolated,rejected}/``."""
+        return self.output_dir / "audit"
 
     @property
     def decisions_path(self) -> Path:

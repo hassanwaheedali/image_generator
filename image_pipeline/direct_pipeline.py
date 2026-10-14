@@ -3,7 +3,7 @@
 The sheet row supplies the product's own image URLs; the row trusts them.  Per row:
 URL de-duplication -> download -> bytes validation -> furniture cleanup ->
 S19 branded-template guard -> white-background gates -> colour rule -> pixel
-dedup -> isolate/square/sharpen -> both templates -> upload -> CSVs.
+dedup -> isolate/square/sharpen -> every selected template -> upload -> CSVs.
 
 Every stage calls the Option 1 machinery (nothing is forked); the only new
 logic is about the blur check after downloading the picture, gate order and the S19 call.
@@ -18,6 +18,7 @@ import logging
 import threading
 from collections import Counter
 from dataclasses import replace
+from pathlib import Path
 
 from compositing import apply_template, isolate_main_product, sharpen, to_square_canvas
 from config import PipelineConfig
@@ -51,6 +52,21 @@ from pipeline import (
 from url_filters import dedup_key, detect_brand, display_brand
 
 LOG = logging.getLogger("pipeline.direct")
+
+
+def _blur_reference_template(config: PipelineConfig, deps: PipelineDeps) -> Path:
+    """The artwork S13.blur composites its preview on (``config.canvas_blur_reference``).
+
+    The guard's two thresholds were measured against one template's bands, and a template
+    changes the reading (its own edges are part of the FFT energy and the gradient mean),
+    so the reference is a named platform rather than whatever the plan happens to lead
+    with.  A run without that platform still judges on its first platform - skipping the
+    gate because a shop was not selected would be the wrong way to fail open.
+    """
+    platform = deps.platforms.by_key(config.canvas_blur_reference)
+    if platform is None:
+        platform = deps.platforms.platforms[0]
+    return platform.template_path
 
 
 def process_direct_product(
@@ -223,7 +239,9 @@ def process_direct_product(
 
         # Blur guard (Option 2): reject images that lack high-frequency details when composited on canvas.
         if config.canvas_blur_guard_enabled:
-            digi_prepared = _load_prepared_template(config, "digimall_template")
+            reference_prepared = _load_prepared_template(
+                config, _blur_reference_template(config, deps)
+            )
             isolated, _ = isolate_main_product(image, config)
             square = to_square_canvas(
                 isolated,
@@ -237,7 +255,9 @@ def process_direct_product(
                 percent=config.unsharp_percent,
                 threshold=config.unsharp_threshold,
             )
-            preview = apply_template(square, digi_prepared.base, config, prepared=digi_prepared)
+            preview = apply_template(
+                square, reference_prepared.base, config, prepared=reference_prepared
+            )
             blurry, hf_val, edge_val = is_canvas_blurry(preview, config)
             if blurry:
                 rejections["S13.blur"] += 1
@@ -260,6 +280,7 @@ def process_direct_product(
         seen_keys.add(key)
         _compose_and_save(
             task=task,
+            keys=keys,
             candidate=ImageCandidate(
                 url=url, page_url="", source="direct", order=len(accepted) + 1, matches_model=True
             ),

@@ -17,6 +17,7 @@ from PIL import Image, ImageDraw
 from config import PipelineConfig
 from decisions import DecisionLog
 from models import ModelKeys, PageCandidate, SourceSearchReport
+from platforms import PlatformPlan, resolve_platforms
 from protocols import BinaryResponse, PageResponse
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -248,6 +249,17 @@ def make_assets(folder: Path) -> None:
 @pytest.fixture()
 def decisions(tmp_path: Path) -> DecisionLog:
     return DecisionLog(tmp_path / "out" / "decisions.jsonl")
+
+
+def synthetic_platforms(assets_dir: Path) -> PlatformPlan:
+    """The run plan for the synthetic tree: AlfaMall + DigiMall, Website skipped.
+
+    Built by the production resolver rather than hand-assembled, so a change to the
+    platform table or to the missing-asset rule shows up in the tests instead of being
+    papered over by a fixture.
+    """
+    make_assets(assets_dir)
+    return resolve_platforms(PipelineConfig(assets_dir=assets_dir, dry_run=True))
 
 
 def load_fixture(name: str) -> str:

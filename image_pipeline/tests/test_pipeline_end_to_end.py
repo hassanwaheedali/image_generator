@@ -20,6 +20,7 @@ from conftest import (
     make_assets,
     png_bytes,
     second_angle_image,
+    synthetic_platforms,
     third_angle_image,
 )
 from PIL import Image, ImageDraw
@@ -112,6 +113,7 @@ def build_deps(
         decisions=DecisionLog(tmp_path / "out" / "decisions.jsonl"),
         banner_cache={},
         banner_cache_lock=threading.Lock(),
+        platforms=synthetic_platforms(tmp_path / "assets"),
     )
     return deps, page_fetcher, image_fetcher, image_host
 
@@ -779,7 +781,7 @@ def test_output_folder_explains_itself(tmp_path: Path) -> None:
     assert "rows: 2 | ok: 1 | partial: 0 | failed: 1" in readme
     assert "pictures published: 1 per platform, plus the closing banner" in readme  # banner uncounted
     assert "digimall_product_images.csv" in readme
-    assert "final_alfamall" in readme
+    assert "images/alfamall/" in readme
 
 
 # --------------------------------------------------------------------------- #
@@ -2349,12 +2351,40 @@ def test_official_gallery_never_rescues_an_emblem_or_a_caption_sheet(tmp_path: P
     ) == (False, "")
 
 
+def test_finals_are_per_platform_and_share_one_stem(tmp_path: Path) -> None:
+    """The publishable tree: ``images/<platform>/<product>/<code>_N.jpg``, evidence in ``audit/``.
+
+    One stem on every platform is the point - the owner compares the same photograph across
+    the shops by filename alone - and the audit files must not sit inside a platform folder,
+    because a platform folder is zipped and handed over as it stands.
+    """
+    config = live_config(tmp_path)
+    deps, _, _, _ = build_deps(
+        tmp_path, {HAIER_PAGE: load_fixture("product_ok")}, gallery_images()
+    )
+    title = "Haier HSU-12HFPAA Inverter AC"
+    result, accepted = process_product(task(0, title, (HAIER_PAGE,)), deps, config)
+    assert accepted, result.reason
+    slug = safe_slug(title)
+
+    assert [key for key, _ in accepted[0].final_paths] == ["alfa", "digi"]
+    names = {path.name for _, path in accepted[0].final_paths}
+    assert len(names) == 1, names
+    for platform_key, path in accepted[0].final_paths:
+        assert path.parent == config.images_dir / platform_key / slug
+        assert path.name.endswith("_1.jpg")
+        assert path.exists()
+
+    assert accepted[0].raw_path.parent == config.audit_dir / slug / "raw"
+    assert accepted[0].square_path.parent == config.audit_dir / slug / "isolated"
+
+
 def test_keep_rejected_writes_the_pixels_that_died(tmp_path: Path) -> None:
     """The owner asked where a rejection can be found: the log has the sentence, and with
     ``--keep-rejected`` the bytes land next to the published folder, named by the rule."""
     config = live_config(tmp_path, keep_rejected_images=True)
     _dump_rejected(_emblem_sheet(), config, "Frost 18W Classic White", "https://x/a.png", "S20")
-    folder = config.output_dir / "images" / safe_slug("Frost 18W Classic White") / "rejected"
+    folder = config.audit_dir / safe_slug("Frost 18W Classic White") / "rejected"
     written = sorted(folder.glob("*.jpg"))
     assert len(written) == 1
     assert written[0].name.startswith("S20-")
@@ -2387,7 +2417,7 @@ def test_a_pasted_marketing_panel_is_cut_before_the_row_is_judged(tmp_path: Path
     ]
     assert any(line["rule_id"] == "S7.panel" for line in lines), lines
     assert accepted, [line["detail"] for line in lines]
-    saved = sorted((config.output_dir / "images" / safe_slug(result.title) / "raw").glob("*.jpg"))
+    saved = sorted((config.audit_dir / safe_slug(result.title) / "raw").glob("*.jpg"))
     assert saved, result.title
     with PILImage.open(saved[0]) as published:
         assert published.size[1] < fixture.size[1]          # the panel is gone from the file too
@@ -2465,7 +2495,7 @@ def test_a_cut_out_brand_png_publishes_with_a_white_ground(tmp_path: Path) -> No
     ]
     assert not [line for line in lines if line["rule_id"].startswith("S16")], lines
 
-    saved = sorted((config.output_dir / "images" / safe_slug(result.title) / "raw").glob("*.jpg"))
+    saved = sorted((config.audit_dir / safe_slug(result.title) / "raw").glob("*.jpg"))
     assert saved, result.title
     with PILImage.open(saved[0]) as published:
         spots = (
