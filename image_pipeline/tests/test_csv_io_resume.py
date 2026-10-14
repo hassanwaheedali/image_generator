@@ -14,6 +14,7 @@ from csv_io import (
     append_jsonl,
     atomic_write_csv,
     atomic_write_text,
+    filename_prefix,
     find_column,
     hash_source_urls,
     load_banner_cache,
@@ -25,7 +26,11 @@ from csv_io import (
     save_banner_cache,
     save_image_atomic,
 )
-from models import ProductResult, ProductTask, Status
+from models import ModelKeys, ProductResult, ProductTask, Status
+
+
+def _keys(*tokens: str, keywords: tuple[str, ...] = ()) -> ModelKeys:
+    return ModelKeys(cleaned_title="t", tokens=tokens, title_key="t", keywords=keywords)
 
 
 def write_sheet(path: Path, header: str, rows: list[list[str]]) -> None:
@@ -127,14 +132,6 @@ def test_atomic_csv_replaces_previous_content(tmp_path: Path) -> None:
     assert target.read_text(encoding="utf-8") == "A\n9\n"
 
 
-def test_save_image_atomic(tmp_path: Path) -> None:
-    path = tmp_path / "img" / "one.jpg"
-    save_image_atomic(clean_product_image(200, 200), path, jpeg_quality=90)
-    assert path.exists()
-    assert Image.open(path).size == (200, 200)
-    assert [item.name for item in path.parent.iterdir()] == ["one.jpg"]
-
-
 # --------------------------------------------------------------------------- #
 # checkpoint + banner cache
 # --------------------------------------------------------------------------- #
@@ -184,6 +181,133 @@ def test_safe_slug_fallbacks() -> None:
     assert safe_slug("***") .startswith("product-")
     assert safe_slug("Haier HSU-12HFPAA") == "haier-hsu-12hfpaa"
     assert len(safe_slug("x" * 300)) <= 80
+
+
+# --------------------------------------------------------------------------- #
+# Windows reserved device names: a folder called "con" cannot be deleted
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("title", ["CON", "nul", "PRN", "aux", "Com1", "LPT9"])
+def test_safe_slug_neutralises_windows_device_names(title: str) -> None:
+    assert safe_slug(title) == f"_{title.lower()}"
+
+
+def test_safe_slug_leaves_a_word_that_merely_starts_with_a_device_name() -> None:
+    """`con` is reserved; `console` is not.  The guard must match the whole name."""
+    assert safe_slug("Console Table") == "console-table"
+    assert safe_slug("Auxiliary Pump") == "auxiliary-pump"
+    assert safe_slug("Nulled") == "nulled"
+
+
+# --------------------------------------------------------------------------- #
+# filename_prefix - the stem shared by every platform's copy of a product
+# --------------------------------------------------------------------------- #
+def test_filename_prefix_uses_every_model_token_in_order() -> None:
+    """D7: the owner chose all tokens, so the Excel-visible prefix names the variant."""
+    keys = _keys("12HRFN1", "QC6")
+    assert filename_prefix(keys, "Midea 12HRFN1 QC6 1 Ton GO EASY T3 Inverter AC") == "12HRFN1_QC6"
+
+
+def test_filename_prefix_keeps_case_and_in_token_separators() -> None:
+    assert filename_prefix(_keys("DW-7500C"), "DW-7500C") == "DW-7500C"
+    assert filename_prefix(_keys("HSU.12HFPAA"), "HSU.12HFPAA") == "HSU.12HFPAA"
+
+
+def test_filename_prefix_strips_characters_that_are_illegal_in_a_filename() -> None:
+    assert filename_prefix(_keys("AB/CD:EF"), "AB/CD:EF") == "ABCDEF"
+    assert filename_prefix(_keys("A B"), "A B") == "AB"
+
+
+def test_filename_prefix_is_a_single_token_when_the_title_has_one() -> None:
+    assert filename_prefix(_keys("55S80EUX"), "Haier 55S80EUX") == "55S80EUX"
+
+
+def test_filename_prefix_truncates_at_a_token_boundary_never_mid_token() -> None:
+    """A half-printed model code is worse than a shorter whole one."""
+    tokens = tuple(f"TOK{i:02d}XXXX" for i in range(10))          # 9 chars each
+    prefix = filename_prefix(_keys(*tokens), "t")
+    assert len(prefix) <= 48
+    assert prefix.split("_") == list(tokens)[: len(prefix.split("_"))]
+    assert not prefix.endswith("_")
+
+
+def test_filename_prefix_hard_slices_a_first_token_that_is_alone_over_the_cap() -> None:
+    assert filename_prefix(_keys("X" * 90), "t") == "X" * 48
+
+
+def test_filename_prefix_guards_a_reserved_joined_result() -> None:
+    assert filename_prefix(_keys("CON"), "CON") == "_CON"
+    assert filename_prefix(_keys("COM1"), "COM1") == "_COM1"
+
+
+def test_filename_prefix_does_not_guard_a_reserved_word_inside_a_longer_stem() -> None:
+    """Only the final stem is a filesystem name, so `AUX_1` is legal and must stay readable.
+
+    Guarding every token would rename real model codes - "AUX" is a legitimate series word.
+    """
+    assert filename_prefix(_keys("AUX", "1"), "AUX 1") == "AUX_1"
+    assert filename_prefix(_keys("CONSOLE"), "CONSOLE") == "CONSOLE"
+
+
+def test_filename_prefix_never_ends_with_a_dot() -> None:
+    """Windows refuses a trailing dot, whatever precedes it."""
+    assert filename_prefix(_keys("ABC."), "ABC.") == "ABC"
+
+
+def test_filename_prefix_falls_back_to_keywords_plus_a_hash() -> None:
+    """A row that passed rule 4.1 with no model code still needs a stable, unique stem."""
+    keys = _keys(keywords=("dawlance", "dual", "pro", "30", "inverter"))
+    prefix = filename_prefix(keys, "Dawlance Dual Pro 30 Inverter T3")
+    assert prefix.startswith("dawlance-dual-pro-30-inverter-")
+    assert len(prefix) <= 48
+    other = filename_prefix(keys, "Dawlance Dual Pro 30 Inverter T4")
+    assert other != prefix                      # the hash suffix separates equal keywords
+    assert filename_prefix(keys, "Dawlance Dual Pro 30 Inverter T3") == prefix
+
+
+def test_filename_prefix_falls_back_to_a_hash_when_there_is_nothing_to_use() -> None:
+    prefix = filename_prefix(_keys(), "???")
+    assert prefix.startswith("product-")
+    assert len(prefix) == len("product-") + 8
+
+
+def test_filename_prefix_ignores_tokens_that_sanitise_to_nothing() -> None:
+    assert filename_prefix(_keys("::", "12X", "//"), "12X") == "12X"
+
+
+def test_filename_prefix_is_deterministic() -> None:
+    keys = _keys("12HRFN1", "QC6")
+    assert filename_prefix(keys, "Midea 12HRFN1 QC6") == filename_prefix(keys, "Midea 12HRFN1 QC6")
+
+
+# --------------------------------------------------------------------------- #
+# save_image_atomic - the suffix decides the format (F4)
+# --------------------------------------------------------------------------- #
+def test_save_image_atomic_writes_jpeg_for_a_jpg_suffix(tmp_path: Path) -> None:
+    path = tmp_path / "img" / "one.jpg"
+    save_image_atomic(clean_product_image(200, 200), path, jpeg_quality=90)
+    opened = Image.open(path)
+    assert opened.format == "JPEG"
+    assert opened.size == (200, 200)
+    assert [item.name for item in path.parent.iterdir()] == ["one.jpg"]
+
+
+def test_save_image_atomic_never_puts_jpeg_bytes_in_a_png_file(tmp_path: Path) -> None:
+    """The bug: a quality argument used to win over the suffix, mislabelling the file."""
+    path = tmp_path / "one.png"
+    save_image_atomic(clean_product_image(120, 120), path, jpeg_quality=90)
+    assert Image.open(path).format == "PNG"
+
+
+def test_save_image_atomic_defaults_to_jpeg_for_a_jpg_suffix(tmp_path: Path) -> None:
+    path = tmp_path / "one.jpg"
+    save_image_atomic(clean_product_image(80, 80), path)
+    assert Image.open(path).format == "JPEG"
+
+
+def test_save_image_atomic_leaves_no_temp_file_behind(tmp_path: Path) -> None:
+    path = tmp_path / "one.png"
+    save_image_atomic(clean_product_image(60, 60), path, jpeg_quality=90)
+    assert sorted(item.name for item in tmp_path.iterdir()) == ["one.png"]
 
 
 def test_decisions_log_is_jsonl(tmp_path: Path) -> None:

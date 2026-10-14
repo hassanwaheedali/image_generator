@@ -1,8 +1,12 @@
-"""Sheet reading, atomic writers, slugs, checkpoint and banner cache.
+"""Sheet reading, atomic writers, slugs and filename prefixes, checkpoint, banner cache.
 
 All disk writes are atomic: write a temp file in the destination folder, ``fsync``
 it, then ``os.replace`` onto the target.  A crash can therefore never leave a
 half-written CSV.
+
+This module also owns every rule for turning a product title into a name on disk
+(``safe_slug`` for folders, ``filename_prefix`` for files), because a name that is
+illegal or merely ambiguous on Windows is a run-stopping bug, not a cosmetic one.
 """
 
 from __future__ import annotations
@@ -24,7 +28,7 @@ from typing import Any
 
 from PIL import Image
 
-from models import CheckpointEntry, ProductResult, ProductTask
+from models import CheckpointEntry, ModelKeys, ProductResult, ProductTask
 
 LOG = logging.getLogger("pipeline.csv_io")
 
@@ -41,6 +45,21 @@ IMAGE_URL_ALIASES: tuple[str, ...] = (
 )
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
+#: Characters a model-code prefix may keep.  Dots and dashes stay because real codes carry
+#: them (``DW-7500C``, ``HSU.12HFPAA``) and the owner reads this prefix in Excel.
+_PREFIX_ILLEGAL_RE = re.compile(r"[^A-Za-z0-9._-]+")
+#: Longest filename prefix.  With the run folder, platform folder, 80-char slug and
+#: ``_NN.jpg`` this keeps the worst-case Windows path inside MAX_PATH (see plan §2.2.1).
+MAX_PREFIX_CHARS = 48
+_FALLBACK_JPEG_QUALITY = 95
+
+#: Windows reserves these device names for *any* extension, and a folder called ``con``
+#: cannot be created, listed or deleted normally - so it must never reach the disk.
+WINDOWS_RESERVED_NAMES = frozenset({
+    "con", "prn", "aux", "nul",
+    *(f"com{i}" for i in range(1, 10)),
+    *(f"lpt{i}" for i in range(1, 10)),
+})
 
 
 # --------------------------------------------------------------------------- #
@@ -156,13 +175,70 @@ def hash_source_urls(urls: Sequence[str]) -> str:
     return sha256_bytes("\n".join(urls).encode("utf-8"))[:16]
 
 
+def guard_windows_name(name: str) -> str:
+    """Make ``name`` usable as a Windows folder name or file stem.
+
+    Device names are reserved whatever the extension (``CON``, ``CON.jpg`` and ``CON.tar.gz``
+    all mean the console), and a trailing dot is rejected outright.  Both are neutralised
+    here rather than at each call site, because every name the pipeline invents ends up on
+    disk under one of these two roles.
+    """
+    if name.split(".", 1)[0].strip().lower() in WINDOWS_RESERVED_NAMES:
+        return f"_{name}"
+    return name.rstrip(".")
+
+
 def safe_slug(title: str, *, max_length: int = 80) -> str:
     """Filesystem-safe slug; falls back to a short hash for unusable titles."""
     slug = _SLUG_RE.sub("-", title.strip().lower()).strip("-")
     slug = slug[:max_length].strip("-")
     if not slug:
-        slug = f"product-{sha256_bytes(title.encode('utf-8'))[:8]}"
-    return slug
+        return f"product-{sha256_bytes(title.encode('utf-8'))[:8]}"
+    return guard_windows_name(slug)
+
+
+def _prefix_token(token: str) -> str:
+    """One model token reduced to characters a filename may carry."""
+    return _PREFIX_ILLEGAL_RE.sub("", token)
+
+
+def _join_within_budget(tokens: Sequence[str], limit: int) -> str:
+    """Join ``tokens`` with ``_``, dropping whole trailing tokens past ``limit``.
+
+    Never cut inside a token: a truncated model code prints as a *different* model, while a
+    shorter whole one is still findable.  The first token alone over the limit is hard-sliced
+    - a 48-character code is already pathological and losing it entirely is worse.
+    """
+    if len(tokens[0]) > limit:
+        return tokens[0][:limit]
+    joined = tokens[0]
+    for token in tokens[1:]:
+        candidate = f"{joined}_{token}"
+        if len(candidate) > limit:
+            break
+        joined = candidate
+    return joined
+
+
+def filename_prefix(keys: ModelKeys, title: str) -> str:
+    """The filename stem every platform shares for one product's images.
+
+    All model tokens in title order (owner decision D7), so ``Midea 12HRFN1 QC6 1 Ton
+    GO EASY T3 Inverter AC`` -> ``12HRFN1_QC6`` and the finals read ``12HRFN1_QC6_1.jpg``.
+    Using the same stem on all platforms is deliberate: it makes the same photograph
+    comparable across ``digi/``, ``alfa/`` and ``website/`` by filename alone.
+
+    Rows with no model code fall back to their keywords plus a hash of the title, so two
+    keyword-only rows can never collide on the same stem.
+    """
+    tokens = tuple(clean for clean in (_prefix_token(token) for token in keys.tokens) if clean)
+    if tokens:
+        return guard_windows_name(_join_within_budget(tokens, MAX_PREFIX_CHARS))
+    digest = sha256_bytes(title.encode("utf-8"))
+    if keys.keywords:
+        words = safe_slug("-".join(keys.keywords), max_length=40)
+        return guard_windows_name(f"{words}-{digest[:6]}")
+    return f"product-{digest[:8]}"
 
 
 # --------------------------------------------------------------------------- #
@@ -216,17 +292,21 @@ def append_jsonl(path: Path, payload: Mapping[str, Any]) -> None:
 
 
 def save_image_atomic(image: Image.Image, path: Path, *, jpeg_quality: int | None = None) -> None:
-    """Save an image atomically (tmp file + ``os.replace``)."""
+    """Save an image atomically (tmp file + ``os.replace``).
+
+    The **suffix chooses the format**; ``jpeg_quality`` only applies to ``.jpg``/``.jpeg``.
+    A quality argument that won over the suffix used to write JPEG bytes into a file named
+    ``.png`` - which Pillow, Excel and every image viewer still open happily, so nothing
+    downstream would ever report it.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     suffix = path.suffix.lower() or ".png"
     tmp = path.parent / f".{path.name}.{uuid.uuid4().hex}.tmp{suffix}"
     try:
-        if jpeg_quality is not None or suffix in (".jpg", ".jpeg"):
+        if suffix in (".jpg", ".jpeg"):
             from compositing import to_jpeg_bytes
 
-            tmp.write_bytes(
-                to_jpeg_bytes(image, quality=jpeg_quality or 95)
-            )
+            tmp.write_bytes(to_jpeg_bytes(image, quality=jpeg_quality or _FALLBACK_JPEG_QUALITY))
         else:
             image.save(tmp)
         os.replace(tmp, path)
