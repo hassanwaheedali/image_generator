@@ -38,6 +38,18 @@ MULTI_WORD_BAD_KEYWORDS: tuple[str, ...] = (
     "og images", "og image", "social card", "share image", "meta image",
 )
 
+#: Media nouns that turn a channel word into an app-export artefact: shops export the
+#: owner's phone photos through messengers verbatim (``WhatsApp_Image_2026-04-10_at_
+#: 11.05.40_AM.jpg`` - the live Midea gallery, 2026-10-14), while every designed graphic
+#: (banner, badge, contact block) carries a human-curated name without a camera stamp.
+#: Generic vocabulary, not a per-shop or per-product exception.
+_EXPORT_MEDIA_TOKENS: frozenset[str] = frozenset(
+    {"image", "images", "img", "imgs", "photo", "photos", "pic", "pics", "picture"}
+)
+
+#: Camera timestamp shape inside a filename: 20YY-MM-DD / 20YY.MM.DD / 20YYMMDD.
+_CAMERA_TIMESTAMP_RE = re.compile(r"20\d\d[._-]?\d{1,2}[._-]?\d{1,2}")
+
 #: Resize suffixes stripped by canonicalisation (section 6.2).
 _SIZE_SUFFIX_RE = re.compile(
     r"[-_]\d{2,4}x\d{2,4}|[-_](?:medium|large|grande|thumb|thumbnail|compact|small|scaled)"
@@ -239,19 +251,29 @@ def has_bad_keyword(url: str, extra_keywords: Iterable[str] = ()) -> bool:
     Whole-token equality only, so ``cartridge`` is not rejected by ``cart`` and
     ``silicon`` is not rejected by ``icon``.  ``banner2`` is rejected by
     ``banner`` because a keyword also matches itself plus digits.
+
+    One exemption is structural, not per-shop: a keyword that heads an *app-export
+    artefact* - a media noun and a camera timestamp follow it (``WhatsApp_Image_
+    2026-04-10_at_11.05.40_AM.jpg``) - names a raw phone photo, which is exactly the
+    kind of real product picture S5 exists to keep out.  The same word in a curated
+    graphic name (``whatsapp-order-banner.png``) still blocks, and any other keyword
+    later in an export name (``..._logo_2026-04-10.jpg``) still blocks.
     """
     tokens = url_path_tokens(url)
     if not tokens:
         return False
-    token_set = set(tokens)
     keywords = set(BAD_URL_KEYWORDS)
     keywords.update(k.lower() for k in extra_keywords)
+    export_shape = bool(_CAMERA_TIMESTAMP_RE.search(urlsplit(url).path.lower()))
     for keyword in keywords:
-        if keyword in token_set:
-            return True
-        # keyword plus digits ("banner2") is the same blocker
-        pattern = re.compile(rf"^{re.escape(keyword)}\d+$")
-        if any(pattern.match(token) for token in tokens):
+        # the keyword alone or the keyword plus digits ("banner2") is the same blocker
+        pattern = re.compile(rf"^{re.escape(keyword)}\d*$")
+        for index, token in enumerate(tokens):
+            if not pattern.match(token):
+                continue
+            following = tokens[index + 1] if index + 1 < len(tokens) else ""
+            if export_shape and following in _EXPORT_MEDIA_TOKENS:
+                continue
             return True
     for phrase in (*MULTI_WORD_BAD_KEYWORDS, *(extra_keywords or ())):
         phrase_tokens = tuple(t for t in _TOKEN_SPLIT_RE.split(phrase.lower()) if t)

@@ -55,6 +55,21 @@ def test_keyword_needs_full_token(url: str) -> None:
     assert not has_bad_keyword(url)
 
 
+def test_app_export_photo_name_is_not_a_designed_graphic() -> None:
+    """S5 structural exemption: <channel> <media noun> <camera stamp> is a raw photo.
+
+    The live Midea gallery ships owner phone photos exported through WhatsApp
+    (2026-10-14); the same word in a curated graphic name must still block.
+    """
+    export = "https://cdn.shop/files/WhatsApp_Image_2026-04-10_at_11.05.40_AM.jpg"
+    assert not has_bad_keyword(export)
+    # curated contact/marketing graphics keep blocking - no media noun + stamp shape
+    assert has_bad_keyword("https://cdn.shop/files/whatsapp-order-banner.png")
+    assert has_bad_keyword("https://cdn.shop/files/whatsapp-contact-2026-04-10.png")
+    # another keyword later in the same export name still blocks it
+    assert has_bad_keyword("https://cdn.shop/files/whatsapp_image_logo_2026-04-10.jpg")
+
+
 # --------------------------------------------------------------------------- #
 # S11 - fetchability
 # --------------------------------------------------------------------------- #
