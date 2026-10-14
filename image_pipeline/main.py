@@ -491,6 +491,37 @@ def _check_local_images(
     return exit_code
 
 
+def _learn_tier_differentiators(config: PipelineConfig, tasks: list[ProductTask]) -> None:
+    """Install the tier words the catalogue data itself proves (see model_matching)."""
+    import csv
+
+    from model_matching import learn_series_differentiators
+    from url_filters import detect_brand
+
+    pairs: list[tuple[str | None, str]] = []
+    corpus = config.series_learning_corpus.strip()
+    if corpus:
+        path = Path(corpus)
+        if not path.is_absolute():
+            path = Path(__file__).resolve().parent / path
+        try:
+            with path.open(newline="", encoding="utf-8-sig") as handle:
+                pairs.extend(
+                    (row.get("Brand"), row.get("Original_Title") or "")
+                    for row in csv.DictReader(handle)
+                )
+        except OSError as exc:
+            LOG.warning("series learning corpus unreadable (%s): %s", path, exc)
+    for task in tasks:
+        first_url = task.source_urls[0] if task.source_urls else ""
+        pairs.append((detect_brand(first_url, task.title), task.title))
+    learned = learn_series_differentiators(pairs, extra=config.extra_series_differentiators)
+    LOG.info(
+        "series differentiators learned from %d title(s): %s",
+        len(pairs), ", ".join(sorted(learned)) or "none",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.check_image:
@@ -541,6 +572,10 @@ def main(argv: list[str] | None = None) -> int:
     # series word belongs to another product, whatever the page's status (Orient run
     # 2026-10-10: the Pulse row published the Innova file).  Computed over the whole
     # sheet before ``--limit`` trims the view.
+    # ``_learn_tier_differentiators`` runs first: sibling rows prove which short words
+    # (``+`` of ``Avante+``, ``Pro`` of ``Acce Pro``) separate two sold variants, and
+    # those words must already be name words when the sibling terms are read out.
+    _learn_tier_differentiators(config, tasks)
     from model_matching import annotate_sibling_terms
 
     tasks = annotate_sibling_terms(tasks)

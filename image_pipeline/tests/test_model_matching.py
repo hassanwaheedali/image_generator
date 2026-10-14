@@ -1001,3 +1001,124 @@ def test_a_whatsapp_export_filename_accuses_no_product_line() -> None:
     )
     pulse = build_model_keys("Pulse 19C Ultra White T3 | Orient Electronics Pakistan")
     assert url_names_other_product_line(innova, pulse)
+
+
+# --------------------------------------------------------------------------- #
+# learned series differentiators (owner 2026-10-14: Avante vs Avante+, Acce vs Acce Pro)
+# --------------------------------------------------------------------------- #
+@pytest.fixture(autouse=True)
+def _no_learned_differentiators():
+    """The learned set is run state: every test starts and ends with none in force."""
+    from model_matching import set_series_differentiators
+
+    set_series_differentiators(())
+    yield
+    set_series_differentiators(())
+
+
+#: Two *series lines* that each show the plain/tier pair - the learner needs evidence
+#: from two lines before a word becomes a differentiator (one line can be a title
+#: accident; the owner's master stock file is exactly this shape: Avante + Avante+,
+#: Extreme + Extreme Plus).
+TIER_SIBLINGS = (
+    ("Dawlance", "Dawlance Avante Freezer-On-Top Refrigerator 9 Cu Ft (9149-WB)"),
+    ("Dawlance", "Dawlance AVANTE+ Freezer-On-Top Refrigerator 12 Cu Ft (9193-WB)"),
+    ("Haier", "Haier Extreme Freezer-On-Top Refrigerator 5 Cu Ft"),
+    ("Haier", "Haier Extreme Plus Freezer-On-Top Refrigerator 7 Cu Ft"),
+)
+
+
+def test_two_sibling_lines_teach_that_avante_and_avante_plus_differ() -> None:
+    """Sibling rows prove the tier: identical name words, one tier candidate apart."""
+    from model_matching import learn_series_differentiators
+
+    learned = learn_series_differentiators(TIER_SIBLINGS)
+    assert "plus" in learned
+    plus_row = build_model_keys(TIER_SIBLINGS[1][1])
+    # a plain-Avante page is not proof for the Avante+ row, nor the reverse
+    assert score_match(plus_row, "Dawlance Avante Refrigerator", "dawlance").series_veto
+    plain_row = build_model_keys(TIER_SIBLINGS[0][1])
+    assert score_match(plain_row, "Dawlance AVANTE+ Refrigerator", "dawlance").series_veto
+    # the same tier on both sides is a match, not a contradiction
+    assert not score_match(plus_row, "Dawlance AVANTE+ Refrigerator", "dawlance").series_veto
+
+
+def test_plus_symbol_and_the_word_plus_extract_identically() -> None:
+    from model_matching import learn_series_differentiators
+
+    learn_series_differentiators(TIER_SIBLINGS)
+    glued = build_model_keys("Dawlance AVANTE+ Freezer-On-Top Refrigerator").name_words
+    word = build_model_keys("Dawlance Avante Plus Freezer-On-Top Refrigerator").name_words
+    assert "plus" in glued and "plus" in word
+    assert set(glued) == set(word)
+
+
+def test_pro_after_a_series_word_is_learned_even_with_capacity_between() -> None:
+    from model_matching import learn_series_differentiators, series_differentiators
+
+    learn_series_differentiators((
+        ("Dawlance", "Dawlance Frost Inverter Air Conditioner"),
+        ("Dawlance", "Dawlance Frost 20 Pro Inverter Air Conditioner"),
+        ("Haier", "Haier Acce Inverter Air Conditioner"),
+        ("Haier", "Haier Acce Pro Inverter Air Conditioner"),
+    ))
+    assert "pro" in series_differentiators()  # the digit is transparent to adjacency
+    row = build_model_keys("Dawlance Frost 20 Pro Inverter Air Conditioner")
+    assert "pro" in row.name_words
+    assert score_match(row, "Dawlance Frost Inverter 20 Air Conditioner", "dawlance").series_veto
+
+
+def test_unlearned_tier_word_changes_nothing() -> None:
+    """Fail open: without sibling evidence the standing noise rules decide."""
+    keys = build_model_keys("Dawlance Frost Pro Inverter Air Conditioner")
+    assert "pro" not in keys.name_words
+    assert not score_match(keys, "Dawlance Frost Inverter", "dawlance").series_veto
+
+
+def test_page_naming_no_line_still_never_vetoes_after_learning() -> None:
+    from model_matching import learn_series_differentiators
+
+    learn_series_differentiators(TIER_SIBLINGS)
+    row = build_model_keys("Dawlance AVANTE+ Freezer-On-Top Refrigerator 12 Cu Ft")
+    # a terse code-and-category page says nothing about the line (Midea family route)
+    assert not score_match(row, "Dawlance 9193-WB Refrigerator", "dawlance").series_veto
+
+
+def test_one_line_or_one_row_teaches_nothing() -> None:
+    from model_matching import learn_series_differentiators
+
+    # a single sibling pair is one series line: not enough corroboration
+    assert not learn_series_differentiators(TIER_SIBLINGS[:2])
+    assert not learn_series_differentiators((
+        ("Dawlance", "Dawlance AVANTE+ Freezer-On-Top Refrigerator 12 Cu Ft"),
+    ))
+    assert not learn_series_differentiators((  # brand-less rows cannot pair
+        (None, "Avante Freezer-On-Top Refrigerator"),
+        (None, "AVANTE+ Freezer-On-Top Refrigerator"),
+    ))
+
+
+def test_learned_word_without_a_shared_series_never_tiers_apart() -> None:
+    """The wrong-promotion guard: one-sided tier words speak only inside one series."""
+    from model_matching import _tier_mismatch, learn_series_differentiators
+
+    learn_series_differentiators(TIER_SIBLINGS)
+    assert not _tier_mismatch(("cryo",), ("extreme", "plus"))  # nothing shared
+    assert _tier_mismatch(("avante", "plus"), ("avante",))     # same line, one tier up
+
+
+def test_learning_is_deterministic_and_model_codes_are_not_tier_evidence() -> None:
+    from model_matching import learn_series_differentiators
+
+    first = learn_series_differentiators(TIER_SIBLINGS)
+    assert learn_series_differentiators(TIER_SIBLINGS) == first  # idempotent
+    assert "wb" not in first  # stock columns are code, never tier (9193-WB)
+    assert "daw" not in first  # abbreviations of brands/words are no tier either
+
+    code_rows = (
+        ("Dawlance", "Dawlance Semi Automatic Washing Machine 10kg (DW-7500C)"),
+        ("Dawlance", "Dawlance Semi Automatic Washing Machine 12kg (DW-7500C)"),
+    )
+    before = build_model_keys(code_rows[0][1]).name_words
+    assert not learn_series_differentiators(code_rows)  # a kg difference names no tier
+    assert build_model_keys(code_rows[0][1]).name_words == before

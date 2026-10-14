@@ -328,6 +328,17 @@ class PipelineConfig:
     #: Extra generic / category words that must not trigger a series substitution veto.
     extra_generic_name_words: tuple[str, ...] = ()
 
+    #: Catalogue CSV (columns ``Brand`` and ``Original_Title``) whose sibling rows teach
+    #: the matcher which tier words separate different products (``Avante`` vs
+    #: ``Avante+``).  Relative paths resolve against the pipeline directory; "" disables
+    #: the external corpus (learning then uses the run's own sheet only).
+    series_learning_corpus: str = (
+        "tests/fixtures/test_files/"
+        "Classified_Stock_Inventory_Master - KiaChahiye 12-10-2026 - Classified Stock.csv"
+    )
+    #: Tier words the owner wants in force regardless of what the corpus proves.
+    extra_series_differentiators: tuple[str, ...] = ()
+
     # ----- simplified matching (customer decisions 2026-10-05, plan §3.6) ---
 
     # Loose about recognizing the product, strict about publishing a wrong image.
@@ -387,6 +398,7 @@ class PipelineConfig:
             "shandaarbuy.pk": "shopify",
             "electrociti.pk": "shopify",
             "whitehouse.com.pk": "shopify",
+            "japanelectronics.com.pk": "shopify",
             "www.almumtaz.com.pk": "woo",
             "hadielectronics.com.pk": "woo",
             "cityelectronics.com.pk": "woo",
@@ -418,6 +430,7 @@ class PipelineConfig:
         "https://jalalelectronics.com",
         "https://electrociti.pk",
         "https://whitehouse.com.pk",
+        "https://japanelectronics.com.pk",
     )
     retail_woo_sources: tuple[str, ...] = (
         "https://www.alfatah.com.pk",

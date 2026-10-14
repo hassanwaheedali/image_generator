@@ -449,6 +449,236 @@ def register_generic_name_words(words: Iterable[str]) -> None:
     _DYNAMIC_GENERIC_NAME_WORDS.update(w.strip().lower() for w in words if w.strip())
 
 
+#: Tier words proven by sibling rows to separate *different products of one series*
+#: (``Avante`` vs ``Avante+``, ``Acce`` vs ``Acce Pro``).  Never hand-written:
+#: :func:`learn_series_differentiators` derives it per run from the catalogue data.
+_SERIES_DIFFERENTIATORS: frozenset[str] = frozenset()
+
+#: The ``+`` symbol is the written form of this word (``AVANTE+`` == ``Avante Plus``).
+_PLUS_WORD = "plus"
+
+#: Trailing punctuation a sheet cell glues onto a ``+`` token (``"Avante+,"``).
+_PLUS_TRAILING = "()\"',;."
+
+
+def _glued_plus(token: str) -> str | None:
+    """The word a ``+`` is glued to (``AVANTE+`` -> ``avante``), else ``None``.
+
+    Both title readers use this: the ``+`` and the word ``plus`` are the same tier,
+    and an extraction that sees only one of the two spellings makes siblings look
+    different (``AVANTE+`` row vs ``Avante Plus`` page must not veto).
+    """
+    core = token.strip(_PLUS_TRAILING)
+    glued = re.fullmatch(r"([A-Za-z]{2,})\+", core)
+    return glued.group(1).lower() if glued is not None else None
+
+
+#: A candidate that prefixes a brand or category word the corpus uses at least this
+#: often is an abbreviation of it (``INV`` of ``inverter``, ``DAW`` of ``Dawlance``),
+#: not a tier word.  ``pro`` is safe from this rule because ``processor`` names no
+#: known brand or category.
+_ABBREVIATION_MIN_COUNT = 5
+
+
+def set_series_differentiators(words: Iterable[str]) -> None:
+    """Install the differentiator set for this run (replaces, never unions).
+
+    Title keys are cached and their name words depend on this set, so installing a
+    new set invalidates the cache - a title built before learning must not keep the
+    pre-learning words after it.
+    """
+    global _SERIES_DIFFERENTIATORS
+    _SERIES_DIFFERENTIATORS = frozenset(w.strip().lower() for w in words if w.strip())
+    _build.cache_clear()
+
+
+def series_differentiators() -> frozenset[str]:
+    """The tier words currently in force (for tests and callers that report state)."""
+    return _SERIES_DIFFERENTIATORS
+
+
+def _keep_name_segment(normalized: str, standalone: bool = True) -> bool:
+    """Whether a pure-alphabetic, already-lowercased segment names the product line.
+
+    A learned differentiator is kept however short or "generic" it is, but only when
+    the segment stands alone in its token: inside ``9173WB`` the ``WB`` is a piece of
+    an internal code, not the tier word the learner was proven against.  Everything
+    else follows the standing rule (>= 4 letters, not category/marketing noise, not a
+    colour).
+    """
+    if is_colour_word(normalized):
+        return False
+    if standalone and normalized in _SERIES_DIFFERENTIATORS:
+        return True
+    if len(normalized) < 4:
+        return False
+    return normalized not in _GENERIC_NAME_WORDS and normalized not in _DYNAMIC_GENERIC_NAME_WORDS
+
+
+def _name_segments(
+    title: str,
+) -> tuple[tuple[str, ...], tuple[str, ...], dict[str, str]]:
+    """``(name words, tier candidates, anchors)`` of a title, in order.
+
+    Name words are :func:`_name_words`.  Tier candidates are the words a *sibling* row
+    could prove to be a differentiator (:func:`learn_series_differentiators`): a pure
+    alphabetic segment of 2-4 letters sitting directly after a name word
+    (``Acce Pro`` -> ``pro``; capacity digits are transparent, ``Frost 20 Pro`` still
+    yields ``pro``), or a ``+`` glued onto a name word (``AVANTE+`` -> ``plus``).
+    Colour words and code fragments are never candidates, so a candidate list can only
+    ever hold short tier markers - which is what makes the sibling-pair proof sound.
+    ``anchors`` maps each candidate to the name word it qualifies (``pro`` -> ``acce``),
+    which the learner needs to tell a tier from a code fragment glued to nothing.
+    """
+    base: list[str] = []
+    candidates: list[str] = []
+    anchors: dict[str, str] = {}
+    last_named = False
+    last_name_word = ""
+    for token in title.split():
+        # A token mixing letters and digits is a part number (``(9193-WB)``); its short
+        # alphabetic pieces are code fragments, never tier words (same principle as the
+        # Midea code-fragment rule).  Pure-digit tokens (``20``) stay transparent.
+        code_token = any(c.isdigit() for c in token) and any(c.isalpha() for c in token)
+        standalone = not any(c.isdigit() for c in token)
+        for raw in re.split(r"[^A-Za-z0-9]+", token):
+            if not raw or not raw.isalpha():
+                continue
+            normalized = raw.lower()
+            if _keep_name_segment(normalized, standalone):
+                if normalized not in base:
+                    base.append(normalized)
+                last_named = True
+                last_name_word = normalized
+                continue
+            if (
+                not code_token
+                and last_named
+                and not is_colour_word(normalized)
+                and 2 <= len(normalized) <= 4
+                and normalized not in candidates
+            ):
+                candidates.append(normalized)
+                anchors.setdefault(normalized, last_name_word)
+                # Only a *name* word anchors a tier: ``GD`` in ``AVANTE GD INV DAW`` is
+                # itself a stock-code fragment and must not teach the next short word.
+                last_named = False
+                continue
+            last_named = False
+        anchor = _glued_plus(token)
+        if anchor is not None and anchor in base and _PLUS_WORD not in candidates:
+            candidates.append(_PLUS_WORD)
+            anchors.setdefault(_PLUS_WORD, anchor)
+    return tuple(base), tuple(candidates), anchors
+
+
+def _tier_pair_rows(
+    pairs: Iterable[tuple[str | None, str]],
+) -> tuple[
+    dict[str, list[tuple[frozenset[str], frozenset[str], dict[str, str]]]],
+    Counter[str],
+    set[str],
+]:
+    """Scan the catalogue once: rows grouped by brand, word frequencies, brand keys."""
+    grouped: dict[str, list[tuple[frozenset[str], frozenset[str], dict[str, str]]]] = {}
+    word_freq: Counter[str] = Counter()
+    brand_keys: set[str] = set()
+    for brand, title in pairs:
+        for word in re.split(r"[^A-Za-z0-9]+", title):
+            if word.isalpha() and word:
+                word_freq[word.lower()] += 1
+        key = normalize_key(brand or "")
+        if len(key) < 4 or not title.strip():
+            continue
+        brand_keys.add(key)
+        base, candidates, anchors = _name_segments(title)
+        if not base:
+            continue
+        grouped.setdefault(key, []).append((frozenset(base), frozenset(candidates), anchors))
+    return grouped, word_freq, brand_keys
+
+
+def _tier_pair_evidence(
+    grouped: dict[str, list[tuple[frozenset[str], frozenset[str], dict[str, str]]]],
+) -> dict[str, set[tuple[str, frozenset[str]]]]:
+    """Words whose sibling rows differ by exactly that one tier word, per series line.
+
+    The word must be anchored to a *series* word, never to the brand itself: a
+    ``HAIER WB`` / ``HAIER`` pair teaches nothing because ``WB`` is a stock column,
+    while an ``Avante`` / ``AVANTE+`` pair is exactly how a tier is written.
+    """
+    evidence: dict[str, set[tuple[str, frozenset[str]]]] = {}
+    for brand_key, rows in grouped.items():
+        for base_a, candidates_a, anchors_a in rows:
+            for base_b, candidates_b, anchors_b in rows:
+                difference = candidates_a ^ candidates_b
+                if base_a != base_b or len(difference) != 1:
+                    continue
+                word = next(iter(difference))
+                anchor = (anchors_a if word in candidates_a else anchors_b).get(word, "")
+                if not anchor or anchor == brand_key or anchor in KNOWN_BRANDS:
+                    continue
+                evidence.setdefault(word, set()).add((brand_key, base_a))
+    return evidence
+
+
+def _is_tier_word(
+    word: str,
+    lines: set[tuple[str, frozenset[str]]],
+    word_freq: Counter[str],
+    brand_keys: set[str],
+) -> bool:
+    """Whether one candidate word survives the structural guards (see the learner)."""
+    if len(lines) < 2 or len(word) < 3:
+        return False
+    if word in brand_keys or word in KNOWN_BRANDS:
+        return False
+    noise_words = _GENERIC_NAME_WORDS | _DYNAMIC_GENERIC_NAME_WORDS
+    return not any(
+        longer != word
+        and longer.startswith(word)
+        and count >= _ABBREVIATION_MIN_COUNT
+        and (longer in KNOWN_BRANDS or longer in noise_words)
+        for longer, count in word_freq.items()
+    )
+
+
+def learn_series_differentiators(
+    pairs: Iterable[tuple[str | None, str]],
+    *,
+    extra: Iterable[str] = (),
+) -> frozenset[str]:
+    """Derive the tier words from the catalogue itself and install them.
+
+    Two same-brand rows whose name words are *identical* but whose tier candidates
+    differ by *exactly one* word is sibling evidence that the word names a different
+    product: ``Dawlance Avante Freezer-On-Top Refrigerator 9 Cu Ft`` beside
+    ``Dawlance AVANTE+ Freezer-On-Top Refrigerator 12 Cu Ft`` evidence ``plus``.
+    The structural guards that keep stock-code noise out of the set are split across
+    :func:`_tier_pair_evidence` (series anchor) and :func:`_is_tier_word`: at least
+    three letters (``GD``/``WB`` columns are noise everywhere, and the never-learned
+    short word simply keeps the old lenient behaviour: fail-open), no abbreviation of
+    a common brand or category word (``INV`` of ``inverter``), and evidence from
+    **two different series lines** - one pair can be a title accident, while a tier
+    that repeats across ``Acce Pro``, ``Frost Pro`` and ``Chrome Pro`` is how the
+    market spells a variant.
+
+    Anything without that evidence stays noise, and a wrongly learned word can still
+    only veto a text that shares the row's series name (see :func:`_tier_mismatch`),
+    never an unrelated product.  The installed set replaces the previous one, so runs
+    are deterministic.
+    """
+    set_series_differentiators(())          # the static lists decide the learning
+    grouped, word_freq, brand_keys = _tier_pair_rows(pairs)
+    learned = {
+        word
+        for word, lines in _tier_pair_evidence(grouped).items()
+        if _is_tier_word(word, lines, word_freq, brand_keys)
+    }
+    set_series_differentiators(learned | {w.strip().lower() for w in extra if w.strip()})
+    return _SERIES_DIFFERENTIATORS
+
+
 def _name_words(title: str) -> tuple[str, ...]:
     """The positional "name" words of a title: series lines and unknown colourways.
 
@@ -467,20 +697,24 @@ def _name_words(title: str) -> tuple[str, ...]:
     """
     out: list[str] = []
     for token in title.split():
+        standalone = not any(c.isdigit() for c in token)
         for segment in re.split(r"[^A-Za-z0-9]+", token):
             if not segment.isalpha():
                 continue
             normalized = segment.lower()
-            if len(normalized) < 4:
-                continue
-            if (
-                normalized in _GENERIC_NAME_WORDS
-                or normalized in _DYNAMIC_GENERIC_NAME_WORDS
-                or is_colour_word(normalized)
-                or normalized in out
-            ):
+            if normalized in out or not _keep_name_segment(normalized, standalone):
                 continue
             out.append(normalized)
+        anchor = _glued_plus(token)
+        # ``AVANTE+`` names the same product as ``Avante Plus``: the ``plus`` half of
+        # the spelling is read too (only once learned - otherwise it stays noise).
+        if (
+            anchor is not None
+            and anchor in out
+            and _PLUS_WORD not in out
+            and _keep_name_segment(_PLUS_WORD)
+        ):
+            out.append(_PLUS_WORD)
     return tuple(out)
 
 
@@ -1728,6 +1962,23 @@ def _name_word_confidence(row_words: tuple[str, ...], page_words: tuple[str, ...
     return matched / len(row_words)
 
 
+def _tier_mismatch(row_words: tuple[str, ...], page_words: tuple[str, ...]) -> bool:
+    """True when a learned tier word names one product and not the other.
+
+    ``Avante`` row vs ``AVANTE+`` page (or the reverse) is a different product, not a
+    terser title: the sheet itself proved the word separates two sold variants.  The
+    guard is the shared series name - the one-sided word only speaks when both texts
+    already name the same line (``avante`` on both sides), so a wrongly learned word
+    can never veto an unrelated product.
+    """
+    if not _SERIES_DIFFERENTIATORS:
+        return False
+    row_set, page_set = set(row_words), set(page_words)
+    if not (row_set & page_set - _SERIES_DIFFERENTIATORS):
+        return False
+    return bool((row_set ^ page_set) & _SERIES_DIFFERENTIATORS)
+
+
 def _name_word_substitution(row_words: tuple[str, ...], page_words: tuple[str, ...]) -> bool:
     """True when the page *replaces* a row name word instead of merely adding words.
 
@@ -1738,10 +1989,14 @@ def _name_word_substitution(row_words: tuple[str, ...], page_words: tuple[str, .
     marketing word (``Inverter``) is the same product, and a terse title that prints only
     the code and colour simply omits the line name.  Only a *substitution* - a word on
     each side that the other lacks - says the two texts describe different products.
-    A page that carries no name word at all says nothing and never vetoes.
+    A page that carries no name word at all says nothing and never vetoes.  The one
+    exception is a learned tier word (``plus`` of ``Avante+``), which the sheet itself
+    proved separates two sold variants - see :func:`_tier_mismatch`.
     """
     if not row_words or not page_words:
         return False
+    if _tier_mismatch(row_words, page_words):
+        return True
     row_only = [word for word in row_words if not any(similar(word, page) for page in page_words)]
     page_only = [page for page in page_words if not any(similar(page, word) for word in row_words)]
     return bool(row_only and page_only)
