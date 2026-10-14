@@ -228,6 +228,11 @@ class ProductResult:
     #: the run resolved its platforms - the same idiom ``AcceptedImage.final_paths`` uses,
     #: so the instance stays frozen and a fourth platform needs no new field.
     platform_urls: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    #: Filename stem shared by every platform's pictures for this product
+    #: (``12HRFN1_QC6`` -> ``12HRFN1_QC6_1.jpg``).  Carried on the result so the import
+    #: sheets can name the files each URL belongs to; stored in the checkpoint so a
+    #: resumed row still fills its ``images`` column.
+    name_prefix: str = ""
     reason: str = ""
     pages_tried: int = 0
     pages_rejected: int = 0
@@ -254,6 +259,7 @@ class ProductResult:
             "source_url_hash": self.source_url_hash,
             "status": self.status.value,
             "platform_urls": [[key, list(urls)] for key, urls in self.platform_urls],
+            "name_prefix": self.name_prefix,
             "reason": self.reason,
             "pages_tried": self.pages_tried,
             "pages_rejected": self.pages_rejected,
@@ -297,6 +303,8 @@ class CheckpointEntry:
     brand: str = ""
     #: Layout this line was written in; see :data:`CHECKPOINT_LAYOUT`.  Absent means 1.
     layout: int = 1
+    #: The shared filename stem, so a resumed row still writes its ``images`` column.
+    name_prefix: str = ""
 
     @staticmethod
     def from_dict(payload: dict[str, object]) -> CheckpointEntry:
@@ -315,6 +323,7 @@ class CheckpointEntry:
             timestamp=str(payload.get("timestamp", "")),
             brand=str(payload.get("brand", "")),
             layout=raw_layout if isinstance(raw_layout, int) else 1,
+            name_prefix=str(payload.get("name_prefix", "")),
         )
 
     def is_resume_done(self, source_url_hash: str) -> bool:

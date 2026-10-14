@@ -29,7 +29,10 @@ DEFAULT_DIGIMALL_BANNER = "digi/last.png"
 DEFAULT_ALFAMALL_BANNER = "alfa/last.png"
 
 # Output CSV headers.  Changing the header is a one-constant change.
-OUTPUT_HEADER: tuple[str, ...] = ("Title", "Brand", "Image_Urls")
+#: ``Image_Urls`` serves the hosted-import mode; ``images`` serves the CSV-only mode
+#: where the owner zips ``images/<platform>/`` and imports the bare filenames
+#: (owner decision D3: one sheet carries both).
+OUTPUT_HEADER: tuple[str, ...] = ("Title", "Brand", "Image_Urls", "images")
 FAILED_HEADER: tuple[str, str] = ("Title", "Reason")
 REPORT_HEADER: tuple[str, ...] = (
     "Title",
@@ -1098,14 +1101,6 @@ class PipelineConfig:
     @property
     def log_path(self) -> Path:
         return self.output_dir / "pipeline_run.log"
-
-    @property
-    def digimall_csv(self) -> Path:
-        return self.output_dir / "digimall_product_images.csv"
-
-    @property
-    def alfamall_csv(self) -> Path:
-        return self.output_dir / "alfamall_product_images.csv"
 
     @property
     def failed_csv(self) -> Path:

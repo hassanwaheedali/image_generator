@@ -336,6 +336,10 @@ def finalize_and_upload(
         return _discard(
             result, result.reason or "no image passed the quality gates"
         )
+    # The stem the pictures were written under.  Recomputing it here rather than
+    # reading it back off the paths keeps the sheet's ``images`` column and the files
+    # on disk derived from one call, so they cannot drift apart.
+    prefix = filename_prefix(keys, task.title)
 
     try:
         per_platform = _upload_finals(task, images, deps, config, platforms)
@@ -352,7 +356,7 @@ def finalize_and_upload(
         return _discard(result, "upload produced no URL")
 
     try:
-        _append_banners(task, keys, images, deps, config, platforms, per_platform)
+        _append_banners(task, prefix, images, deps, config, platforms, per_platform)
     except PermanentAPIError:
         LOG.error("[fatal] image host rejected the closing banner permanently for %r", task.title)
         raise
@@ -373,6 +377,7 @@ def finalize_and_upload(
         result,
         status=status,
         platform_urls=published,
+        name_prefix=prefix,
         images_accepted=len(images),
         reason="",
     )
@@ -412,7 +417,7 @@ def _upload_finals(
 
 def _append_banners(
     task: ProductTask,
-    keys: ModelKeys,
+    prefix: str,
     images: list[AcceptedImage],
     deps: PipelineDeps,
     config: PipelineConfig,
@@ -425,7 +430,7 @@ def _append_banners(
     each product has to contain the picture the CSV points at, so the bytes are written per
     row under the same ``<code>_N.jpg`` stem - the banner is simply the last index.
     """
-    name = f"{filename_prefix(keys, task.title)}_{len(images) + 1}.jpg"
+    name = f"{prefix}_{len(images) + 1}.jpg"
     for platform in platforms:
         banner_path = platform.banner_path if platform.appends_banner else None
         if banner_path is None:
@@ -2057,35 +2062,58 @@ def _load_prepared_template(config: PipelineConfig, path: Path) -> PreparedTempl
 # --------------------------------------------------------------------------- #
 # outputs
 # --------------------------------------------------------------------------- #
+def _platform_csv_path(config: PipelineConfig, platform: ResolvedPlatform) -> Path:
+    """One import sheet per shop, in the shop's own folder under the run folder."""
+    return config.output_dir / platform.key / platform.csv_filename
+
+
+def _image_column(prefix: str, count: int) -> str:
+    """The bare filenames one row published, as the CSV-only import mode needs them.
+
+    The count comes from the URL list, because the two are produced by the same write:
+    one URL is exactly one file, and the closing banner is simply the last index.  So the
+    ``images`` column can never claim a picture the ``Image_Urls`` column does not have.
+    """
+    if not prefix or count <= 0:
+        return ""
+    return ", ".join(f"{prefix}_{index}.jpg" for index in range(1, count + 1))
+
+
+def _platform_row(
+    result: ProductResult, key: str, *, dry_run: bool
+) -> tuple[str, str, str, str]:
+    """One output sheet line.  A dry run has nothing hosted, so its URL column is empty
+    while the filenames it did write are still listed."""
+    urls = result.urls_for(key)
+    return (
+        result.title,
+        result.brand,
+        "" if dry_run else "|".join(urls),
+        _image_column(result.name_prefix, len(urls)),
+    )
+
+
 def write_output_csvs(
     results: list[ProductResult],
     config: PipelineConfig,
-    *,
-    include_platform_csvs: bool = True,
+    platforms: PlatformPlan,
 ) -> None:
-    """Write the platform CSVs, the failed CSV and the run report (all atomic).
+    """Write one import sheet per publishing platform, the failed CSV and the report.
 
     Rows always follow input order.  ``ok``/``partial`` rows go to the platform
-    CSVs, only ``failed`` rows go to ``failed_products.csv``.
+    CSVs, only ``failed`` rows go to ``failed_products.csv``.  A ``--dry-run`` writes
+    the sheets too (owner decision 2026-10-13): the ``images`` column names the files it
+    did produce, and ``Image_Urls`` stays empty because nothing was uploaded.
     """
     ordered = sorted(results, key=lambda result: result.task_index)
-    if include_platform_csvs:
+    for platform in platforms.platforms:
         atomic_write_csv(
-            config.digimall_csv,
+            _platform_csv_path(config, platform),
             OUTPUT_HEADER,
             (
-                (result.title, result.brand, "|".join(result.urls_for("digi")))
+                _platform_row(result, platform.key, dry_run=config.dry_run)
                 for result in ordered
-                if result.urls_for("digi")
-            ),
-        )
-        atomic_write_csv(
-            config.alfamall_csv,
-            OUTPUT_HEADER,
-            (
-                (result.title, result.brand, "|".join(result.urls_for("alfa")))
-                for result in ordered
-                if result.urls_for("alfa")
+                if result.urls_for(platform.key)
             ),
         )
     atomic_write_csv(
@@ -2105,7 +2133,7 @@ def write_output_csvs(
             if "flagged" in result.note.lower()
         ),
     )
-    _write_output_readme(ordered, config, include_platform_csvs=include_platform_csvs)
+    _write_output_readme(ordered, config, platforms)
     atomic_write_csv(
         config.report_csv,
         REPORT_HEADER,
@@ -2124,16 +2152,14 @@ def write_output_csvs(
 
 
 #: Plain-English map of the run folder.  Written on every run so the folder explains
-#: itself to whoever opens it next (no tribal knowledge required).
+#: itself to whoever opens it next (no tribal knowledge required).  The platform blocks
+#: are generated from the plan, so a fourth platform documents itself without an edit here.
 _OUTPUT_README = """# Run output - what is in here
 {dry_note}
 Generated by `main.py`.  Everything is rewritten from scratch on every run, so this
 folder is always the result of the **last** run - never a mix of runs.
 
-**Import files** (give these to the shops):
-- `digimall_product_images.csv` - import file for DigiMall: `Title,Brand,Image_Urls`,
-  URLs pipe-separated, the last one is always the closing banner.
-- `alfamall_product_images.csv` - the same for AlfaMall, with its own image set.
+{import_block}
 
 **Reports** (read these, do not import them):
 - `failed_products.csv` - rows that produced nothing usable: `Title,Reason`.
@@ -2145,13 +2171,7 @@ folder is always the result of the **last** run - never a mix of runs.
   rule id (S1..S15) that decided it.
 - `pipeline_run.log` - the full log of the run.
 
-**Pictures**:
-- `images/digimall/<product>/`, `images/alfamall/<product>/` - the final pictures, one
-  folder per shop, product on that shop's template.  These are the publishable set; a
-  folder can be zipped and handed over as it stands.
-- `audit/<product>/` - the evidence that never goes to a shop:
-  `raw/` the photos exactly as downloaded (proof of what the source showed) and
-  `isolated/` after background knock-out, 1:1 squaring and sharpening (1080x1080).
+{picture_block}
 
 `<product>` is a slug of the row title (`dawlance-semi-automatic-washing-machine-10kg-dw-7500c`),
 and the pictures are named `<MODEL_CODE>_1.jpg`, `_2.jpg`, ... so the same photograph is
@@ -2160,7 +2180,7 @@ the same filename in every platform folder and can be matched back to the CSVs b
 ## This run
 
 - rows: {rows} | ok: {ok} | partial: {partial} | failed: {failed}
-- pictures published: {images} per platform, plus the closing banner
+- pictures published: {published}
 - status meanings: **ok** = published with at least {min_images} image(s), **partial** = published but
   flagged (fewer images than target, or a human should glance at the note column),
   **failed** = nothing published for that row (see `failed_products.csv`).
@@ -2170,23 +2190,65 @@ picture it cannot prove belongs to that exact model (see `README.md`, rule S1).
 """
 
 
+def _import_block(platforms: PlatformPlan) -> str:
+    """The import-sheet bullets - one per platform that actually published."""
+    lines = ["**Import files** (give these to the shops):"]
+    if not platforms.platforms:
+        lines.append("- none: this run published on no platform (see the terminal notices).")
+        return "\n".join(lines)
+    columns = ", ".join(OUTPUT_HEADER)
+    for platform in platforms.platforms:
+        banner = "the last entry is its closing banner" if platform.appends_banner else "no closing banner"
+        lines.append(
+            f"- `{platform.key}/{platform.csv_filename}` - {platform.display_name}: "
+            f"`{columns}`, URLs pipe-separated, {banner}."
+        )
+    return "\n".join(lines)
+
+
+def _picture_block(platforms: PlatformPlan) -> str:
+    """The publishable folders this run filled, then the evidence tree it never publishes."""
+    lines = ["**Pictures**:"]
+    lines.extend(
+        f"- `images/{platform.key}/<product>/` - {platform.display_name}'s final "
+        "pictures on its own template.  These are the publishable set; a folder can be "
+        "zipped and handed over as it stands."
+        for platform in platforms.platforms
+    )
+    lines.append(
+        "- `audit/<product>/` - the evidence that never goes to a shop: `raw/` the photos "
+        "exactly as downloaded (proof of what the source showed) and `isolated/` after "
+        "background knock-out, 1:1 squaring and sharpening (1080x1080)."
+    )
+    return "\n".join(lines)
+
+
+def _published_counts(results: list[ProductResult], platforms: PlatformPlan) -> str:
+    """Product pictures per platform, banner excluded - the count the shops import against."""
+    if not platforms.platforms:
+        return "nothing (no platform was selected)"
+    return ", ".join(
+        f"{platform.display_name} "
+        f"{sum(max(0, len(r.urls_for(platform.key)) - (1 if platform.appends_banner else 0)) for r in results)}"
+        for platform in platforms.platforms
+    )
+
+
 def _write_output_readme(
     results: list[ProductResult],
     config: PipelineConfig,
-    *,
-    include_platform_csvs: bool,
+    platforms: PlatformPlan,
 ) -> None:
     """Write ``output/README.md``: the run folder explains itself."""
     ok = sum(1 for result in results if result.status is Status.OK)
     partial = sum(1 for result in results if result.status is Status.PARTIAL)
     failed = sum(1 for result in results if result.status is Status.FAILED)
-    # every row's last URL is the banner, so the product pictures are one fewer per published row
-    images = sum(max(0, len(result.urls_for("digi")) - 1) for result in results)
     dry_note = (
-        ""
-        if include_platform_csvs
-        else "\n**This folder was written by a --dry-run:** no uploads happened and the import "
-        "CSVs below are left as they were by the last real run.\n"
+        "\n**This folder was written by a `--dry-run`:** nothing was uploaded, so every import "
+        "sheet here has an empty `Image_Urls` column.  A dry run overwrites the last real run's "
+        "sheets - do not hand this one to a shop.\n"
+        if config.dry_run
+        else ""
     )
     try:
         atomic_write_text(
@@ -2196,8 +2258,10 @@ def _write_output_readme(
                 ok=ok,
                 partial=partial,
                 failed=failed,
-                images=images,
+                published=_published_counts(results, platforms),
                 dry_note=dry_note,
+                import_block=_import_block(platforms),
+                picture_block=_picture_block(platforms),
                 min_images=config.min_required_images,
             ),
         )
@@ -2251,6 +2315,7 @@ class BatchRunner:
                         brand=entry.brand or display_brand(None, task.title),
                         status=entry.status,
                         platform_urls=entry.platform_urls,
+                        name_prefix=entry.name_prefix,
                         reason=entry.reason,
                         note="resumed from checkpoint",
                         source_url_hash=entry.source_url_hash,
@@ -2327,9 +2392,7 @@ class BatchRunner:
 
     def _write_outputs(self) -> None:
         write_output_csvs(
-            list(self._results.values()),
-            self._config,
-            include_platform_csvs=not self._config.dry_run,
+            list(self._results.values()), self._config, self._deps.platforms
         )
 
     def _sorted_results(self) -> list[ProductResult]:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import io
 import json
 import threading
@@ -60,6 +61,7 @@ from pipeline import (
     process_product,
     write_output_csvs,
 )
+from platforms import PlatformPlan
 from sources import SourceChain
 
 HAIER_PAGE = "https://www.haier.com/pk/hsu-12hfpaa.shtml"
@@ -118,6 +120,11 @@ def build_deps(
         platforms=synthetic_platforms(tmp_path / "assets"),
     )
     return deps, page_fetcher, image_fetcher, image_host
+
+
+def _plan(tmp_path: Path) -> PlatformPlan:
+    """The plan the fake asset tree resolves to: Alfamall and DigiMall, no Website artwork."""
+    return synthetic_platforms(tmp_path / "assets")
 
 
 def task(index: int, title: str, urls: tuple[str, ...]) -> ProductTask:
@@ -296,8 +303,10 @@ def test_output_rows_preserve_input_order(tmp_path: Path) -> None:
         ProductResult(task_index=0, title="A", status=Status.OK, platform_urls=_urls("u1", "a1")),
         ProductResult(task_index=1, title="B", status=Status.PARTIAL, platform_urls=_urls("u2", "a2")),
     ]
-    write_output_csvs(results, config)
-    lines = config.digimall_csv.read_text(encoding="utf-8").strip().splitlines()
+    write_output_csvs(results, config, _plan(tmp_path))
+    lines = (config.output_dir / "digi" / "digimall_product_images.csv").read_text(
+        encoding="utf-8"
+    ).strip().splitlines()
     assert [line.split(",")[0] for line in lines] == ["Title", "A", "B"]
     failed = config.failed_csv.read_text(encoding="utf-8").strip().splitlines()
     assert len(failed) == 2 and failed[1].startswith("C")
@@ -789,12 +798,12 @@ def test_output_folder_explains_itself(tmp_path: Path) -> None:
         ),
         ProductResult(task_index=1, title="Bad Row", status=Status.FAILED, reason="no page matched"),
     ]
-    write_output_csvs(results, config)
+    write_output_csvs(results, config, _plan(tmp_path))
     readme = (config.output_dir / "README.md").read_text(encoding="utf-8")
     assert "rows: 2 | ok: 1 | partial: 0 | failed: 1" in readme
-    assert "pictures published: 1 per platform, plus the closing banner" in readme  # banner uncounted
-    assert "digimall_product_images.csv" in readme
-    assert "images/alfamall/" in readme
+    assert "pictures published: Alfamall 1, Digimall 1" in readme  # banner uncounted
+    assert "digi/digimall_product_images.csv" in readme
+    assert "images/alfa/<product>/" in readme
 
 
 # --------------------------------------------------------------------------- #
@@ -812,17 +821,24 @@ def test_output_csv_has_title_brand_and_pipe_separated_urls(tmp_path: Path) -> N
                 ("digi", ("https://i.example/1.jpg", "https://i.example/2.jpg")),
                 ("alfa", ("https://a.example/1.jpg", "https://a.example/2.jpg")),
             ),
+            name_prefix="HSU-12HFPAA",
         )
     ]
-    write_output_csvs(results, config)
-    lines = config.digimall_csv.read_text(encoding="utf-8").strip().splitlines()
-    assert lines[0] == "Title,Brand,Image_Urls"
+    write_output_csvs(results, config, _plan(tmp_path))
+    lines = (config.output_dir / "digi" / "digimall_product_images.csv").read_text(
+        encoding="utf-8"
+    ).strip().splitlines()
+    assert lines[0] == "Title,Brand,Image_Urls,images"
     assert lines[1] == (
-        "Haier HSU-12HFPAA Inverter AC,Haier,https://i.example/1.jpg|https://i.example/2.jpg"
+        'Haier HSU-12HFPAA Inverter AC,Haier,https://i.example/1.jpg|https://i.example/2.jpg,'
+        '"HSU-12HFPAA_1.jpg, HSU-12HFPAA_2.jpg"'
     )
     assert " " not in lines[1].split(",")[2]
-    alfa = config.alfamall_csv.read_text(encoding="utf-8").strip().splitlines()
-    assert alfa[0] == "Title,Brand,Image_Urls"
+    alfa = (config.output_dir / "alfa" / "alfamall_product_images.csv").read_text(
+        encoding="utf-8"
+    ).strip().splitlines()
+    assert alfa[0] == "Title,Brand,Image_Urls,images"
+    assert alfa[1].endswith('"HSU-12HFPAA_1.jpg, HSU-12HFPAA_2.jpg"')
 
 
 def test_brand_column_is_filled_from_the_sheet_when_the_url_is_unknown(tmp_path: Path) -> None:
@@ -921,8 +937,9 @@ def test_resume_keeps_the_brand_column(tmp_path: Path) -> None:
     )
     results = BatchRunner(config, deps, tasks, {}).run()
     assert results[0].brand == "Haier"
-    write_output_csvs(results, config)
-    first_line = config.digimall_csv.read_text(encoding="utf-8").splitlines()[1]
+    write_output_csvs(results, config, deps.platforms)
+    digi_sheet = config.output_dir / "digi" / "digimall_product_images.csv"
+    first_line = digi_sheet.read_text(encoding="utf-8").splitlines()[1]
     assert first_line.split(",")[1] == "Haier"
 
     # a second run against the same checkpoint: nothing is reprocessed
@@ -931,8 +948,8 @@ def test_resume_keeps_the_brand_column(tmp_path: Path) -> None:
     resumed = BatchRunner(config, deps, tasks, checkpoint).run()
     assert resumed[0].note == "resumed from checkpoint"
     assert resumed[0].brand == "Haier", "the brand was lost on resume"
-    write_output_csvs(resumed, config)
-    again = config.digimall_csv.read_text(encoding="utf-8").splitlines()[1]
+    write_output_csvs(resumed, config, deps.platforms)
+    again = digi_sheet.read_text(encoding="utf-8").splitlines()[1]
     assert again.split(",")[1] == "Haier", f"Brand column empty after resume: {again}"
 
 
@@ -1459,7 +1476,7 @@ def test_relaxed_fallback_publishes_the_pictures_and_flags_the_row(tmp_path: Pat
     assert any(line["rule_id"] == "S15.relaxed" for line in decisions)
 
     # the review queue is written for the human pass
-    write_output_csvs([result], config, include_platform_csvs=False)
+    write_output_csvs([result], config, _plan(tmp_path))
     review = (config.review_csv).read_text(encoding="utf-8")
     assert RELAXED_TITLE in review and "flagged: relaxed fallback match" in review
 
@@ -1633,7 +1650,7 @@ def test_a_tolerated_sheet_page_is_published_with_a_flag_when_nothing_else_match
     assert result.status is Status.PARTIAL              # published, but never silently "ok"
     assert "tolerated spelling" in result.note
     assert "page shows DW7500, sheet model is DW-7500C" in result.note
-    write_output_csvs([result], config, include_platform_csvs=False)
+    write_output_csvs([result], config, _plan(tmp_path))
     review = config.review_csv.read_text(encoding="utf-8")
     assert WRONG_LINK_TITLE in review
     decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
@@ -2410,6 +2427,55 @@ def test_finals_are_per_platform_and_share_one_stem(tmp_path: Path) -> None:
 
     assert accepted[0].raw_path.parent == config.audit_dir / slug / "raw"
     assert accepted[0].square_path.parent == config.audit_dir / slug / "isolated"
+
+
+def _sheet_rows(path: Path) -> list[list[str]]:
+    """A written import sheet, read back the way a shop would read it."""
+    return list(csv.reader(io.StringIO(path.read_text(encoding="utf-8"))))
+
+
+def test_the_import_sheet_names_the_files_it_published(tmp_path: Path) -> None:
+    """One sheet serves both import modes (owner decision D3): the hosted URLs and the
+    bare filenames, and the two must describe the same pictures - in the same order."""
+    config = live_config(tmp_path)
+    deps, _, _, _ = build_deps(
+        tmp_path, {HAIER_PAGE: load_fixture("product_ok")}, gallery_images()
+    )
+    title = "Haier HSU-12HFPAA Inverter AC"
+    result, accepted = process_product(task(0, title, (HAIER_PAGE,)), deps, config)
+    assert result.status is Status.OK
+    write_output_csvs([result], config, deps.platforms)
+
+    for key in ("alfa", "digi"):
+        header, row = _sheet_rows(config.output_dir / key / f"{key}mall_product_images.csv")
+        assert header == ["Title", "Brand", "Image_Urls", "images"]
+        assert row[0] == title and row[1] == "Haier"
+        urls = row[2].split("|")
+        names = row[3].split(", ")
+        assert len(urls) == len(names) == len(accepted) + 1  # + closing banner
+        assert names[-1].endswith(f"_{len(accepted) + 1}.jpg")
+        for name in names:
+            assert (config.images_dir / key / safe_slug(title) / name).is_file(), name
+
+
+def test_a_dry_run_sheet_lists_files_but_no_urls(tmp_path: Path) -> None:
+    """Owner decision 2026-10-13: a dry run still writes the sheets, with ``images`` filled
+    and ``Image_Urls`` empty - and the README says so, so nobody imports a preview."""
+    config = live_config(tmp_path, dry_run=True)
+    deps, _, _, _ = build_deps(
+        tmp_path, {HAIER_PAGE: load_fixture("product_ok")}, gallery_images()
+    )
+    result, accepted = process_product(
+        task(0, "Haier HSU-12HFPAA Inverter AC", (HAIER_PAGE,)), deps, config
+    )
+    assert result.status is Status.OK
+    write_output_csvs([result], config, deps.platforms)
+
+    _, row = _sheet_rows(config.output_dir / "digi" / "digimall_product_images.csv")
+    assert row[2] == ""
+    assert len(row[3].split(", ")) == len(accepted) + 1
+    readme = (config.output_dir / "README.md").read_text(encoding="utf-8")
+    assert "--dry-run" in readme and "empty `Image_Urls` column" in readme
 
 
 def test_keep_rejected_writes_the_pixels_that_died(tmp_path: Path) -> None:

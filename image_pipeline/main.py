@@ -649,7 +649,7 @@ def main(argv: list[str] | None = None) -> int:
         return 4
 
     everything = sorted([*results, *empty_row_results(bad_rows)], key=lambda item: item.task_index)
-    write_output_csvs(everything, config, include_platform_csvs=not config.dry_run)
+    write_output_csvs(everything, config, platforms)
     _write_failed_helper_csvs(everything, tasks, config)
     summarize(everything, config)
     return 0
