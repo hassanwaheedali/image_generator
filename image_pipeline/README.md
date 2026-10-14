@@ -30,17 +30,20 @@ pip install -e ".[dev]"        # runtime deps + pytest/mypy/ruff (pyproject.toml
 
 Python **3.10+** is required (`pyproject.toml: requires-python = ">=3.10"`).
 
-Then create the four fixed assets (placeholders are included so a first run works out of the box):
+Then check the artwork: one folder per platform, its template and its closing banner inside.
 
 ```
-assets/DigiMall.png    assets/AlfaMall.png     # 1200x1200 templates (brand header + footer)
-assets/digi_last.png   assets/alfa_last.png    # 1200x420 closing banners, appended LAST
+assets/website/template.png   assets/alfa/template.png   assets/digi/template.png
+assets/alfa/last.png          assets/digi/last.png       # closing banners, appended LAST
 ```
 
-Swap any of the four files for the real brand art under the same name and nothing else changes - the
-paths are `PipelineConfig.digimall_template_name` / `alfamall_template_name` / `digimall_banner_name` /
-`alfamall_banner_name`.  The two shipped banners are the closing banners that get appended **last** to
-every imported row.
+Swap any file for the real brand art under the same name and nothing else changes.
+`platforms.py` looks for `<stem>.png` then `<stem>.jpg` inside `assets/<platform>/`, so a
+platform whose template is missing is skipped with a startup notice instead of stopping the
+run, and a KEEP platform whose `last.png` is missing publishes without a banner.  Website
+has no banner slot: its policy drops it, so `assets/website/last.png` is never looked for.
+The set of platforms lives in `platforms.DEFAULT_SPECS` - a fourth platform is a row there
+plus a folder here, not more code paths.
 
 ### The API key — paste it into `secrets.env`
 
