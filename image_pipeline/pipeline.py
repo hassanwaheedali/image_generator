@@ -11,6 +11,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import shutil
 import threading
 from collections import Counter
 from collections.abc import Callable
@@ -215,6 +216,25 @@ def _audit_dir(config: PipelineConfig, title: str, role: ImageRole) -> Path:
 
 def _platform_dir(config: PipelineConfig, title: str, platform_key: str) -> Path:
     return config.images_dir / platform_key / _product_folder(config, title)
+
+
+def clear_stale_product_files(config: PipelineConfig, deps: PipelineDeps, title: str) -> None:
+    """Delete this product's pictures from an earlier run before the row starts.
+
+    A row that published five pictures last time and publishes three now leaves two
+    files behind in ``images/<platform>/<product>/``.  The import sheet names three, the
+    folder holds five, and the owner's zip-and-import mode ships pictures the sheet never
+    listed - with the audit tree rotting the same way.  Cleaning at row start is what
+    keeps "what is on disk" equal to "what this run published".
+
+    Only folders named from *this* title are touched, and only for the platforms this run
+    publishes: a ``--platforms digi`` re-run must not erase Alfamall's delivered pictures.
+    A file that refuses to delete (Windows locks one while a viewer has it open) is not
+    worth losing the row over, because every file this run publishes is overwritten by name.
+    """
+    shutil.rmtree(config.audit_dir / _product_folder(config, title), ignore_errors=True)
+    for platform in deps.platforms.platforms:
+        shutil.rmtree(_platform_dir(config, title, platform.key), ignore_errors=True)
 
 
 def _layout_rescue_verdict(
@@ -2378,6 +2398,9 @@ class BatchRunner:
         return entry.is_resume_done(hash_source_urls(task.source_urls), self._deps.platforms.keys)
 
     def _run_one(self, task: ProductTask) -> tuple[ProductResult, list[AcceptedImage]]:
+        # Rows skipped by the checkpoint never reach here, so a resumed product keeps
+        # the pictures its completed run published.
+        clear_stale_product_files(self._config, self._deps, task.title)
         return self._processor(task, self._deps, self._config, self._cancel)
 
     def _record(self, result: ProductResult) -> None:
