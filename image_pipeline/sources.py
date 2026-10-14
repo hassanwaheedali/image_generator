@@ -193,7 +193,7 @@ def shop_spellings(token: str) -> list[str]:
     return spellings
 
 
-def search_terms(keys: ModelKeys, *, brand: str | None = None, limit: int = 3) -> tuple[str, ...]:
+def search_terms(keys: ModelKeys, *, brand: str | None = None, limit: int = 3, title: str = "") -> tuple[str, ...]:
     """The terms a shop is searched for: always the **sheet's own** model keys.
 
     All spellings of the first key are tried before the next key - the *term* is still the
@@ -203,13 +203,17 @@ def search_terms(keys: ModelKeys, *, brand: str | None = None, limit: int = 3) -
     Orient Megatron row (owner run 2026-10-12).  The bare spelling stays as the fallback,
     so a shop that indexes the code alone is still found - and the page's own brand gate
     remains the hard stop.
+
+    A row that carries **no model code at all** is searched by its own keywords instead
+    (see :func:`_keyword_terms`); before this it was never searchable - live 2026-10-14:
+    the ``AVANTE+ ... (9173)`` row silently queried zero sources.
     """
     terms: list[str] = []
 
-    def add(term: str) -> bool:
+    def add(term: str, *, cap: int = limit) -> bool:
         if term not in terms:
             terms.append(term)
-        return len(terms) >= limit
+        return len(terms) >= cap
 
     for token in keys.tokens:
         for spelling in shop_spellings(token):
@@ -217,7 +221,49 @@ def search_terms(keys: ModelKeys, *, brand: str | None = None, limit: int = 3) -
                 return tuple(terms)
             if add(spelling):
                 return tuple(terms)
+    if not terms:
+        # A code-less row gets one more query than a coded one: the bare number
+        # stays as the last spelling for shops that index the code alone.
+        for term in _keyword_terms(keys, brand=brand, title=title):
+            if add(term, cap=limit + 1):
+                break
     return tuple(terms)
+
+
+#: How a shop spells a tier: ``AVANTE+`` - the symbol, never the word "Plus" (owner 2026-10-14).
+_SERIES_PLUS_RE = re.compile(r"([A-Za-z]{2,})\+")
+
+
+def _series_spelling(keywords: tuple[str, ...], brand: str | None, title: str) -> str:
+    """The series word for a query, in the spelling a shop's own search answers to."""
+    series = next((w.title() for w in keywords if w.isalpha() and w != (brand or "").lower()), "")
+    glued = _SERIES_PLUS_RE.search(title)
+    if glued and (not series or series.lower() == glued.group(1).lower()):
+        return glued.group(1).title() + "+"
+    return series
+
+
+def _keyword_terms(keys: ModelKeys, *, brand: str | None, title: str) -> list[str]:
+    """Queries for a code-less row, built from its own keywords (max 4).
+
+    The words are the sheet's own (``('dawlance','avante','12','gem','9173')``), so a term
+    is never something read off a page.  Most specific first: ``Brand Series+ Number`` >
+    ``Brand Series+`` > ``Brand Number`` > bare spellings.
+    """
+    numbers = [word for word in keys.keywords if any(char.isdigit() for char in word)]
+    number = max(numbers, key=len) if numbers else ""
+    series = _series_spelling(keys.keywords, brand, title)
+    prefix = brand.title() if brand else ""
+
+    def joined(*parts: str) -> str:
+        return " ".join(part for part in parts if part)
+
+    out: list[str] = []
+    for term in (joined(prefix, series, number), joined(prefix, series),
+                 joined(prefix, number), number, series):
+        if term and term not in out:
+            out.append(term)
+    return out[:4]
 
 
 def _as_report(found: list[PageCandidate], tried: list[str]) -> SourceSearchReport:
@@ -423,9 +469,10 @@ class SourceChain:
         keys: ModelKeys,
     ) -> tuple[list[PageCandidate], SourceSearchReport]:
         """Candidate pages for this row, official brand sources first."""
-        terms = search_terms(keys, brand=brand)
+        terms = search_terms(keys, brand=brand, title=title)
         if not terms:
-            return [], SourceSearchReport(())
+            # Never silent: the row had neither a model code nor keywords to search with.
+            return [], SourceSearchReport((), note="no search terms built - fallback search skipped")
         tried: list[str] = []
         found: list[PageCandidate] = []
         seen: set[str] = set()

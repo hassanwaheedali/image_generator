@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
+from urllib.parse import quote_plus
 
 from config import PipelineConfig
 from model_matching import build_model_keys
@@ -94,6 +95,60 @@ def test_search_terms_carry_the_brand_when_it_is_known() -> None:
         "DW-7500C",
         "Dawlance DW7500C",
     )
+
+
+def test_a_code_less_row_searches_by_its_own_words() -> None:
+    """Live 2026-10-14: ``AVANTE+ ... Gem Black (9173)`` carried no model token, so the
+    fallback queried zero sources and failed silently.  The row's own keywords now build
+    the query, most specific first, and the series keeps the shop's ``+`` spelling
+    (owner: ``no one writes plus but instead they write +``)."""
+    title = "Dawlance AVANTE+ Inverter Freezer-On-Top Refrigerator 12 Cu Ft Gem Black (9173)"
+    keys = build_model_keys(title)
+    assert not keys.tokens and keys.keywords
+    assert search_terms(keys, brand="dawlance", title=title) == (
+        "Dawlance Avante+ 9173",
+        "Dawlance Avante+",
+        "Dawlance 9173",
+        "9173",
+    )
+    # the tier is never spelled out as a word, and the ``+`` survives URL encoding
+    terms = search_terms(keys, brand="dawlance", title=title)
+    assert not any("plus" in term.lower() for term in terms)
+    assert "Avante%2B" in quote_plus(terms[0])
+
+
+def test_a_code_less_row_never_searches_capacity_or_marketing_noise() -> None:
+    title = "Dawlance Frost 20 Inverter Split Air Conditioner 1.5 Ton White (Cool Only)"
+    keys = build_model_keys(title)
+    assert not keys.tokens
+    assert search_terms(keys, brand="dawlance", title=title) == (
+        "Dawlance Frost 20",
+        "Dawlance Frost",
+        "Dawlance 20",
+        "20",
+    )
+
+
+def test_a_coded_row_ignores_the_keyword_fallback_entirely() -> None:
+    """Regression guard: a row with a real model code searches exactly as before,
+    even when its title is passed along."""
+    title = "Haier 50 Inch QLED Google LED TV (H50S80EUX)"
+    keys = build_model_keys(title)
+    assert keys.tokens
+    assert search_terms(keys, title=title) == ("H50S80EUX",)
+    assert search_terms(keys, brand="haier", title=title) == ("Haier H50S80EUX", "H50S80EUX")
+
+
+def test_zero_search_terms_is_never_silent(tmp_path: Path) -> None:
+    """A row with neither a code nor keywords must say so in the report note -
+    before, ``find_candidates`` returned ``[]`` with an empty note and the run
+    log just read "0 candidate page(s)" (live 2026-10-14)."""
+    chain, _ = _chain_fixture(tmp_path)
+    keys = build_model_keys("Refrigerator")
+    assert not keys.tokens and not keys.keywords
+    found, report = chain.find_candidates(title="Refrigerator", brand=None, keys=keys)
+    assert found == []
+    assert report.note == "no search terms built - fallback search skipped"
 
 
 def test_shopify_suggest_parsing() -> None:
@@ -465,6 +520,12 @@ def test_shandaarbuy_is_a_default_retail_shopify_source(tmp_path: Path) -> None:
     found, report = chain.find_candidates(title=keys.cleaned_title, brand="tcl", keys=keys)
     assert any("shandaarbuy" in candidate.url for candidate in found)
     assert "shandaarbuy.pk:shopify:1" in report.tried
+
+
+def test_japanelectronics_is_a_default_retail_shopify_source(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    assert "https://japanelectronics.com.pk" in config.retail_shopify_sources
+    assert config.source_platforms.get("japanelectronics.com.pk") == "shopify"
 
 
 #: The real shape of Orient's own file names (from their cached sitemap, 272 urls).
