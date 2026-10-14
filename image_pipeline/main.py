@@ -10,14 +10,23 @@ Fail-fast order: config (incl. API key) -> sheet -> platform availability -> run
 from __future__ import annotations
 
 import argparse
+import hashlib
 import logging
 import sys
 import threading
 from collections.abc import Callable
+from dataclasses import replace
 from itertools import combinations
 from pathlib import Path
 
-from config import ConfigError, PipelineConfig, load_config_file, load_env_file
+from config import (
+    DEFAULT_OUTPUT_ROOT,
+    DEFAULT_STATE_ROOT,
+    ConfigError,
+    PipelineConfig,
+    load_config_file,
+    load_env_file,
+)
 from csv_io import (
     atomic_write_csv,
     hash_source_urls,
@@ -104,12 +113,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-dir",
         default=None,
-        help="where the CSVs, images and logs go (default: output_<input file name>, or output)",
+        help="where the CSVs, images and logs go (default: output/<sheet>-<hash>)",
     )
     parser.add_argument(
         "--state-dir",
         default=None,
-        help="checkpoint and banner cache folder (default: state_<input file name>, or state)",
+        help="checkpoint and banner cache folder (default: state/<sheet>-<hash>)",
     )
     parser.add_argument(
         "--dry-run",
@@ -184,11 +193,9 @@ def configure_logging(config: PipelineConfig, level: str) -> None:
 
 
 def build_config(args: argparse.Namespace) -> PipelineConfig:
-    # Each input sheet gets its own folders, so two sheets never mix their outputs/checkpoints.
+    # Each sheet gets its own run folder, but naming it needs the *resolved* sheet path,
+    # which only exists after this config is built - see name_run_folders().
     file_cfg = load_config_file(Path(args.config) if getattr(args, "config", None) else None)
-    stem = Path(args.input).stem if args.input else ""
-    output_dir = args.output_dir or (str(Path("output") / stem) if stem else "output")
-    state_dir = args.state_dir or (str(Path("state") / stem) if stem else "state")
 
     early_stop = bool(getattr(args, "early_stop", False)) or bool(file_cfg.get("early_stop_when_image_found", False))
     limit_gallery = bool(getattr(args, "limit_gallery", False)) or bool(file_cfg.get("limit_gallery_iteration", False))
@@ -212,10 +219,13 @@ def build_config(args: argparse.Namespace) -> PipelineConfig:
     )
     fallback_max_pages_per_source = int(file_cfg.get("fallback_max_pages_per_source", 3))
 
+    pinned_output = Path(args.output_dir) if args.output_dir else DEFAULT_OUTPUT_ROOT
+    pinned_state = Path(args.state_dir) if args.state_dir else DEFAULT_STATE_ROOT
+
     return PipelineConfig(
         assets_dir=Path(args.assets_dir),
-        output_dir=Path(output_dir),
-        state_dir=Path(state_dir),
+        output_dir=pinned_output,
+        state_dir=pinned_state,
         input_dir=Path(args.input_dir),
         dry_run=bool(args.dry_run),
         direct_mode=bool(args.direct),
@@ -298,6 +308,45 @@ def resolve_input_path(input_arg: str | None, input_dir: Path) -> Path:
         f"no input sheet specified and none found in '{input_dir}' or 'uploads/'. "
         "Place your .csv or .xlsx file in the 'input/' folder or specify --input <path>."
     )
+
+
+def run_folder(input_path: Path) -> str:
+    """This sheet's run folder name: ``website_ac-3f9a2c``.
+
+    The stem alone made two sheets called ``website_ac.csv`` share one folder and so one
+    ``checkpoint.jsonl``: the second run resumed the first one's rows as if they were its
+    own.  Six hex characters of the *resolved* path keep them apart and stay deterministic,
+    so re-running the same sheet still resumes.  ``resolve()`` is what makes the hash
+    spelling-proof: on Windows it returns the on-disk case and separators, so
+    ``--input INPUT/Website_AC.CSV`` and ``--input input/website_ac.csv`` are one folder.
+    """
+    identity = str(input_path.resolve())
+    return f"{input_path.stem}-{hashlib.sha256(identity.encode()).hexdigest()[:6]}"
+
+
+def name_run_folders(
+    config: PipelineConfig, args: argparse.Namespace, input_path: Path
+) -> PipelineConfig:
+    """Put this run's output and state under ``<root>/<sheet>-<hash>``.
+
+    Named from the resolved file rather than from the text after ``--input``, so
+    ``website_ac.csv`` and ``input/website_ac.csv`` keep sharing one checkpoint.  An
+    explicit ``--output-dir`` or ``--state-dir`` is used exactly as given.
+    """
+    folder = run_folder(input_path)
+    if args.output_dir is None:
+        config = replace(config, output_dir=DEFAULT_OUTPUT_ROOT / folder)
+    if args.state_dir is None:
+        config = replace(config, state_dir=DEFAULT_STATE_ROOT / folder)
+        legacy = DEFAULT_STATE_ROOT / input_path.stem
+        if (legacy / "checkpoint.jsonl").is_file():
+            LOG.warning(
+                "a previous run checkpointed in %s; this one reads %s, so its already "
+                "published rows will be processed again unless you move that folder",
+                legacy,
+                config.state_dir,
+            )
+    return config
 
 
 def _display_name(key: str) -> str:
@@ -609,6 +658,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"configuration error: {exc}", file=sys.stderr)
         return 2
 
+    try:
+        input_path = resolve_input_path(args.input, config.input_dir)
+    except ConfigError as exc:
+        print(f"configuration error: {exc}", file=sys.stderr)
+        return 2
+    # Named before logging starts: the log file and the checkpoint both live in this
+    # sheet's own folder, so a stray un-hashed folder must never be created for it.
+    config = name_run_folders(config, args, input_path)
+
     configure_logging(config, args.log_level)
     if env_path is not None:
         LOG.info("secrets: loaded %s", env_path)
@@ -616,12 +674,6 @@ def main(argv: list[str] | None = None) -> int:
         "freeimage key: %s",
         "set" if config.api_key else ("not needed (dry-run)" if config.dry_run else "MISSING"),
     )
-    try:
-        input_path = resolve_input_path(args.input, config.input_dir)
-    except ConfigError as exc:
-        print(f"configuration error: {exc}", file=sys.stderr)
-        return 2
-
     LOG.info("input: %s", input_path.resolve())
     LOG.info(
         "mode: %s | dry-run: %s | workers: %d",

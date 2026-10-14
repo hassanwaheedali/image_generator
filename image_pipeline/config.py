@@ -217,14 +217,21 @@ def _read_apilayer_upload_url() -> str:
     return os.environ.get("APILAYER_UPLOAD_URL", "").strip() or DEFAULT_APILAYER_UPLOAD_URL
 
 
+#: The two roots a run is written under when the caller pins no folder.  Relative on
+#: purpose: the owner launches from the repo root and reads these names in the file
+#: explorer, and ``main.name_run_folders`` puts each sheet's own folder inside them.
+DEFAULT_OUTPUT_ROOT = Path("output")
+DEFAULT_STATE_ROOT = Path("state")
+
+
 @dataclass(frozen=True)
 class PipelineConfig:
     """Immutable run configuration.  One instance is shared by all workers."""
 
     # ----- paths -----------------------------------------------------------
     assets_dir: Path = Path("assets")
-    output_dir: Path = Path("output")
-    state_dir: Path = Path("state")
+    output_dir: Path = DEFAULT_OUTPUT_ROOT
+    state_dir: Path = DEFAULT_STATE_ROOT
     input_dir: Path = Path("input")
     #: Windows MAX_PATH is 260 and Excel's own limit is lower in practice.  The deepest
     #: path a run writes is ``output/<run>/images/<platform>/<slug>/<prefix>_NN.jpg``;
