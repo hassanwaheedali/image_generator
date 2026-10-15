@@ -2188,7 +2188,7 @@ folder is always the result of the **last** run - never a mix of runs.
 - `review_products.csv` - the manual-review queue: rows that published something but
   carry a flag (a relaxed fallback match, a colour/variant difference): `Title,Status,Note`.
 - `decisions.jsonl` - the audit trail: one JSON object per accept/reject with the
-  rule id (S1..S15) that decided it.
+  rule id (`S1`..`S21`, plus scoped sub-rules like `S15.relaxed`) that decided it.
 - `pipeline_run.log` - the full log of the run.
 
 {picture_block}
