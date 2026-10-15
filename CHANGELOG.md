@@ -23,6 +23,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refrigerator, washing machine, yellow sale template) and over a loopback-HTTP `--dry-run`.
 
 ### Fixed
+- **The crop keeps the whole product, and only the primary image is background-cleaned (owner
+  sample 2026-10-15).** Three holes in one path. (1) `_single_body_box` reached only
+  `isolation_neighbor_distance_px` (35px), so the air cooler whose white shell is invisible to
+  the difference mask lost the half the mask could see: grille and black water tank sat 39px
+  apart in a 990px frame and the crop published the top half alone. The reach now scales with
+  the body (`isolation_neighbor_size_ratio`), and a body far away is kept when it is big enough
+  to be a second unit beside the first (`isolation_product_frame_ratio`) — so a shot of three
+  products keeps all three, while a 1.2% corner logo still never widens the crop. (2) The crop
+  is padded 6px, so its corners land on the product's own pale shell; the corner median then
+  reports the *body* as the wall and the flood erases it from the inside out — image 01 of
+  `dawlance-single-door-deep-freezer-df-400-eds` lost 97.8% of its ink, three Kenwood cassettes
+  ~53.7%. `clean_outer_studio_background` is now keyed on the wall colour measured *before* the
+  crop and stops at the product's own edge, the largest per-channel step in the frame
+  (`studio_edge_barrier`), then chokes the camera's blended rim (`studio_defringe_px`) and
+  smooths the cut (`studio_matte_sigma`) so the outline is hard and even. (3) Keying now runs on
+  image 01 of a row only — `isolate_main_product` gained `clean_background`, and
+  `pipeline._compose_and_save` passes `index == 1` — because on detail shots it destroyed pale
+  bodies and bought nothing back. Measured over the 697 crops of the live tree: erased products
+  4 → 0, none newly broken; the cooler crop went 384x478 → 435x753.
 - **A product's own edge line is not a shop layout seam (owner run 2026-10-15).** `S7.seam`
   trims a thin full-width divider when one side of it is empty — which the bottom edge of an
   air conditioner's body also is. It cut 520px off the Dawlance Dual Pro T3 hero and 366px off

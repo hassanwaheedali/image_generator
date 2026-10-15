@@ -1791,3 +1791,141 @@ def test_clean_outer_studio_background_handles_dynamic_shades_and_gradients(
         # Inner product panel must remain intact, not flooded by outer background whitening
         assert arr[300, 300, 0] <= 235, f"{name}: inner panel was corrupted"
 
+
+def _split_shell_product() -> Image.Image:
+    """The owner's air-cooler sample of 2026-10-15, to scale.
+
+    A white shell the difference mask cannot see carries a dark grille, and below a pale
+    gap a black water tank.  The gap is 39px in a 990px frame - four pixels past the fixed
+    merge reach - so the crop took the grille alone and published the top half of the
+    product.  A corner logo sits far away and small.
+    """
+    image = Image.new("RGB", (990, 990), (230, 242, 233))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((311, 130, 683, 596), fill=(90, 90, 95))  # grille
+    draw.rectangle((284, 635, 707, 871), fill=(12, 12, 14))  # water tank
+    draw.rectangle((17, 19, 183, 110), fill=(20, 120, 40))  # corner logo
+    return image
+
+
+def test_isolate_main_product_keeps_the_lower_half_of_a_split_shell_product(
+    config: PipelineConfig,
+) -> None:
+    isolated, degraded = isolate_main_product(_split_shell_product(), config)
+    assert degraded is False
+    array = np.asarray(isolated, dtype=int)
+    tank = (array.max(axis=2) < 40).sum()
+    assert tank >= 0.15 * array.shape[0] * array.shape[1], "the water tank was cropped away"
+
+
+def test_isolate_main_product_does_not_widen_the_crop_for_a_distant_badge(
+    config: PipelineConfig,
+) -> None:
+    isolated, _ = isolate_main_product(_split_shell_product(), config)
+    array = np.asarray(isolated, dtype=int)
+    logo = (np.abs(array - np.array([20, 120, 40])).max(axis=2) < 30).sum()
+    assert logo == 0, "a corner logo pulled the crop off the product"
+
+
+def test_isolate_main_product_keeps_a_second_unit_standing_beside_the_first(
+    config: PipelineConfig,
+) -> None:
+    """Two units in one frame are two products, not one product and its background."""
+    image = Image.new("RGB", (1200, 700), (228, 232, 238))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((120, 120, 380, 560), fill=(40, 40, 45))
+    draw.rectangle((820, 120, 1080, 560), fill=(40, 40, 45))
+    isolated, _ = isolate_main_product(image, config)
+    array = np.asarray(isolated, dtype=int)
+    columns = np.where((array.max(axis=2) < 120).any(axis=0))[0]
+    assert columns.size and columns.max() - columns.min() > 600, "the second unit was cropped out"
+
+
+def test_isolate_main_product_keeps_all_three_units_of_a_multi_product_frame(
+    config: PipelineConfig,
+) -> None:
+    image = Image.new("RGB", (1500, 600), (226, 230, 236))
+    draw = ImageDraw.Draw(image)
+    for left in (100, 650, 1200):
+        draw.rectangle((left, 90, left + 200, 500), fill=(38, 38, 44))
+    isolated, _ = isolate_main_product(image, config)
+    array = np.asarray(isolated, dtype=int)
+    columns = np.where((array.max(axis=2) < 120).any(axis=0))[0]
+    bands = int((np.diff(columns) > 1).sum()) + 1
+    assert bands == 3, f"expected three products, the crop kept {bands}"
+
+
+def test_clean_outer_studio_background_spares_a_pale_body_the_corners_land_on(
+    config: PipelineConfig,
+) -> None:
+    """A crop padded to the product lands its corners on the product's own white shell.
+
+    Keyed on those corners, the wall colour *is* the shell and the flood ate the body from
+    the inside out: image 01 of ``dawlance-single-door-deep-freezer-df-400-eds`` lost 97.8%
+    of its ink.  The step where the shell meets the wall is what tells them apart.
+    """
+    from compositing import clean_outer_studio_background
+
+    steps = np.linspace(0.0, 1.0, 600)[:, None, None]
+    base = (1.0 - steps) * np.array([218.0, 224.0, 232.0]) + steps * np.array([226.0, 230.0, 238.0])
+    array = np.broadcast_to(base, (600, 600, 3)).copy()
+    array[90:510, 90:510] = [240.0, 240.0, 240.0]  # pale body shell
+    array[200:400, 200:400] = [60.0, 60.0, 64.0]  # dark inner panel
+    cleaned = np.asarray(clean_outer_studio_background(Image.fromarray(array.astype(np.uint8)), config))
+    assert (cleaned[:20, :20] == 255).all(), "the studio wall was not whitened"
+    shell = cleaned[120:180, 120:180]
+    assert (shell < 255).any(), "the product's own pale shell was erased"
+    assert (cleaned[250:350, 250:350] == np.array([60, 60, 64])).all()
+
+
+def test_clean_outer_studio_background_uses_the_wall_colour_it_is_given(
+    config: PipelineConfig,
+) -> None:
+    """Post-crop corners can be all product; the caller knows the wall from before the crop."""
+    from compositing import clean_outer_studio_background
+
+    array = np.full((600, 600, 3), 250.0)
+    array[:26, :] = [215.0, 222.0, 232.0]  # a strip of wall left at the top of the crop
+    image = Image.fromarray(array.astype(np.uint8))
+    wall = (215, 222, 232)
+
+    blind = np.asarray(clean_outer_studio_background(image, config))
+    assert (blind[:26, :, 0] == 215).all(), "corner sampling should have given up on near-white"
+    keyed = np.asarray(clean_outer_studio_background(image, config, background=wall))
+    assert (keyed[:20, :, :] == 255).all(), "the wall strip was left uncleaned"
+    assert (keyed[300, 300] == 250).all(), "the body was whitened along with the wall"
+
+
+def test_isolate_main_product_leaves_the_wall_alone_when_cleaning_is_disabled(
+    config: PipelineConfig,
+) -> None:
+    """Owner rule 2026-10-15: only the primary image of a row is background-cleaned."""
+    image = _split_shell_product()
+    cleaned, _ = isolate_main_product(image, config)
+    plain, degraded = isolate_main_product(image, config, clean_background=False)
+    assert degraded is False
+    assert plain.size == cleaned.size
+    mint = np.array([230, 242, 233])
+    plain_mint = float((np.asarray(plain, dtype=int) == mint).all(axis=2).mean())
+    cleaned_mint = float((np.asarray(cleaned, dtype=int) == mint).all(axis=2).mean())
+    assert plain_mint > 0.05, "the crop held no wall at all - the test proves nothing"
+    assert cleaned_mint < plain_mint / 4, "the wall was left in place"
+
+
+def test_clean_outer_studio_background_stands_down_on_a_wall_that_is_already_white(
+    config: PipelineConfig,
+) -> None:
+    """The gate is the owner's rule: key the rare coloured studio wall, never a white one."""
+    from compositing import clean_outer_studio_background
+
+    def studio(levels: int) -> Image.Image:
+        image = Image.new("RGB", (400, 400), (255 - levels,) * 3)
+        ImageDraw.Draw(image).rectangle((150, 150, 250, 250), fill=(40, 40, 44))
+        return image
+
+    assert config.studio_already_white_levels == 20.0
+    untouched = np.asarray(clean_outer_studio_background(studio(15), config))
+    assert int(untouched[0, 0, 0]) == 240, "a wall already white was re-keyed"
+    keyed = np.asarray(clean_outer_studio_background(studio(40), config))
+    assert int(keyed[0, 0, 0]) == 255, "a coloured wall was left on the picture"
+

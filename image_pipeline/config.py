@@ -695,6 +695,41 @@ class PipelineConfig:
     isolation_min_foreground_fraction: float = 0.03
     isolation_min_component_ratio: float = 0.02
     isolation_neighbor_distance_px: float = 35.0
+    #: Re-join a product's own parts up to this share of the body's short side.  The gap
+    #: that splits them is pale studio wall the difference mask reads as background, so it
+    #: scales with the photograph - a fixed pixel count cannot serve a 300px thumbnail and a
+    #: 4000px hero shot at once.  Owner sample 2026-10-15: an air cooler's grille and its
+    #: black water tank sat 39px apart in a 990px frame, 4px outside the fixed reach above,
+    #: and the crop published the top half of the product alone.
+    isolation_neighbor_size_ratio: float = 0.15
+    #: A body this far from the main one is only kept in the crop if it is this share of the
+    #: frame - big enough to be a second product standing beside the first, so a shot of
+    #: three units keeps all three.  A corner badge or an energy sticker is a fraction of
+    #: this and must not widen the crop: the owner's cooler sample carries a 1.2% logo.
+    isolation_product_frame_ratio: float = 0.04
+    #: Largest per-channel step that counts as the product's own edge, blocking the studio
+    #: flood.  A wall fades slowly across a frame; the line where it meets the product is
+    #: sharp.  Needed because a tolerance wide enough to span a studio gradient also spans a
+    #: pale body - ``dawlance-single-door-deep-freezer-df-400-eds`` has its white body 16
+    #: levels from its wall, and colour alone cannot separate them.  0 disables the barrier.
+    studio_edge_barrier: float = 3.0
+    #: How far the studio key reaches from the wall colour, in levels.  Wide enough to span
+    #: a lit wall and its gradient; it is also what lets the key step onto a pale body when
+    #: the wall colour was measured on that body in the first place.
+    studio_clean_tolerance: float = 30.0
+    #: Pixels of the product's own edge taken with the wall.  A photograph has no hard
+    #: boundary: the last row of wall and the first row of product are a blend of the two,
+    #: and leaving that ramp is what makes a cut outline read as soft and ragged (owner
+    #: review 2026-10-15).  One pixel removes the blend; more starts to thin the product.
+    studio_defringe_px: int = 1
+    #: Blur applied to the wall matte before it is taken back at half strength, which is
+    #: what evens out the cut without moving it.  0 keeps the raw flood boundary.
+    studio_matte_sigma: float = 1.5
+    #: How close to pure white the wall must be for the cleaner to call it already clean and
+    #: stand down.  Keying is for the rare coloured studio wall - the owner's Super Asia
+    #: cooler sits 25 levels from white - never for a picture already on white, where it can
+    #: only damage the product.  Measured 2026-10-15: 726 of 726 image-01 raws stand down.
+    studio_already_white_levels: float = 20.0
     #: Radius that bridges a product's own soft outline before the body is measured, as a
     #: share of the image's short side.  A white shell on a white background is *hollow*
     #: to a difference mask (its shading is below the threshold), and a hollow body splits
@@ -998,6 +1033,20 @@ class PipelineConfig:
                 raise ConfigError(f"{name} must be in (0, 1]")
         if self.isolation_neighbor_distance_px < 0:
             raise ConfigError("isolation_neighbor_distance_px must be >= 0")
+        if not 0.0 <= self.isolation_neighbor_size_ratio <= 1.0:
+            raise ConfigError("isolation_neighbor_size_ratio must be in [0, 1]")
+        if not 0.0 < self.isolation_product_frame_ratio <= 1.0:
+            raise ConfigError("isolation_product_frame_ratio must be in (0, 1]")
+        if self.studio_edge_barrier < 0:
+            raise ConfigError("studio_edge_barrier must be >= 0")
+        if not 0.0 < self.studio_clean_tolerance <= 128.0:
+            raise ConfigError("studio_clean_tolerance must be in (0, 128]")
+        if not 0 <= self.studio_defringe_px <= 8:
+            raise ConfigError("studio_defringe_px must be in [0, 8]")
+        if not 0.0 <= self.studio_matte_sigma <= 8.0:
+            raise ConfigError("studio_matte_sigma must be in [0, 8]")
+        if not 0.0 <= self.studio_already_white_levels <= 128.0:
+            raise ConfigError("studio_already_white_levels must be in [0, 128]")
         if not 0.0 < self.isolation_merge_radius_ratio <= 0.25:
             raise ConfigError("isolation_merge_radius_ratio must be in (0, 0.25]")
         if not 0.0 < self.isolation_multi_body_ratio <= 1.0:

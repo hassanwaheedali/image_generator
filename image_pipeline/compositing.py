@@ -178,16 +178,32 @@ def _fallback_mask(rgb: Image.Image, config: PipelineConfig) -> np.ndarray:
 
 
 def _single_body_box(mask: np.ndarray, config: PipelineConfig) -> tuple[int, int, int, int] | None:
-    """Bbox of the product body: the largest silhouette plus its attached companions."""
+    """Bbox of the product: the largest silhouette, its own parts, and any companion unit.
+
+    The gap that splits a product apart is pale studio wall the difference mask reads as
+    background, so it grows with the photograph - a fixed pixel reach cannot serve a 300px
+    thumbnail and a 4000px hero shot at once (owner sample 2026-10-15: an air cooler's
+    grille and black water tank sat 39px apart in a 990px frame, 4px outside the fixed
+    reach, and the crop published the top half of the product alone).  Beyond that reach a
+    body is only kept when it is big enough to be a *second unit standing beside the first*,
+    so a shot of three products keeps all three; a corner logo is a fraction of that size
+    and must not widen the crop.
+    """
     boxes, areas = _solid_bodies(mask, config)
     if not boxes:
         return None
+    main = boxes[0]
     largest = areas[0]
-    kept = [boxes[0]]
+    reach = max(
+        config.isolation_neighbor_distance_px,
+        config.isolation_neighbor_size_ratio * min(main[2] - main[0], main[3] - main[1]),
+    )
+    companion_area = config.isolation_product_frame_ratio * float(mask.shape[0] * mask.shape[1])
+    kept = [main]
     for index in range(1, len(boxes)):
         if areas[index] < largest * config.isolation_min_component_ratio:
             continue
-        if _box_distance(boxes[index], boxes[0]) <= config.isolation_neighbor_distance_px:
+        if _box_distance(boxes[index], main) <= reach or areas[index] >= companion_area:
             kept.append(boxes[index])
     return (
         min(box[0] for box in kept),
@@ -197,17 +213,23 @@ def _single_body_box(mask: np.ndarray, config: PipelineConfig) -> tuple[int, int
     )
 
 
-def clean_outer_studio_background(rgb: Image.Image, config: PipelineConfig) -> Image.Image:
-    """Whiten edge-connected studio background (any shade).
+def clean_outer_studio_background(
+    rgb: Image.Image,
+    config: PipelineConfig,
+    *,
+    background: tuple[int, int, int] | None = None,
+) -> Image.Image:
+    """Whiten edge-connected studio background (any shade), never the product itself.
 
-    Simple approach:
-    1. Sample corner patches to get median background colour.
-    2. Mark every pixel within ``tolerance`` of that colour as background candidate.
-    3. Keep only pixels reachable from the image border (edge-connected flood-fill).
-    4. Replace those pixels with pure white.
-
-    Preserves all inner product pixels (white panels, bezels, vents) because the
-    flood-fill cannot cross the product boundary.
+    1. Take the wall colour measured *before* the crop when the caller has it - a crop
+       padded to the product lands its corners on the product's own pale shell, and a
+       corner median of that reports the body as background and erases it (live 2026-10-15:
+       image 01 of ``dawlance-single-door-deep-freezer-df-400-eds`` lost 97.8% of its ink).
+    2. Mark every pixel within ``tolerance`` of that colour as a background candidate.
+    3. Block the candidates on the product's own edges: a wall fades slowly across a frame,
+       the line where it meets the product is sharp, and a tolerance wide enough to span the
+       gradient also spans a pale body.
+    4. Whiten only what is reachable from the border.
     """
     try:
         from scipy import ndimage
@@ -219,33 +241,43 @@ def clean_outer_studio_background(rgb: Image.Image, config: PipelineConfig) -> I
     if h < 8 or w < 8:
         return rgb
 
-    # --- 1. Background colour from corners ---------------------------------- #
-    s = max(4, int(min(w, h) * config.corner_patch_ratio))
-    corner_pixels = np.concatenate(
-        [
-            arr[:s, :s].reshape(-1, 3),
-            arr[:s, -s:].reshape(-1, 3),
-            arr[-s:, :s].reshape(-1, 3),
-            arr[-s:, -s:].reshape(-1, 3),
-        ],
-        axis=0,
-    )
-    bg_color = np.median(corner_pixels, axis=0)  # shape (3,)
+    # --- 1. Background colour: pre-crop wall, else this image's corners ------ #
+    if background is None:
+        s = max(4, int(min(w, h) * config.corner_patch_ratio))
+        corner_pixels = np.concatenate(
+            [
+                arr[:s, :s].reshape(-1, 3),
+                arr[:s, -s:].reshape(-1, 3),
+                arr[-s:, :s].reshape(-1, 3),
+                arr[-s:, -s:].reshape(-1, 3),
+            ],
+            axis=0,
+        )
+        bg_color = np.median(corner_pixels, axis=0)  # shape (3,)
+    else:
+        bg_color = np.array(background, dtype=float)
 
-    # If corners are already near-white (within 20 levels of 255), nothing to do.
-    # This guards against post-crop images whose corners land on a faint product
-    # area (e.g. 243-grey shell) being mistakenly whitened.
-    if float(np.abs(bg_color - 255.0).max()) <= 20.0:
+    # If the wall is already near-white, nothing to do.  This is the owner's "only when
+    # needed": a clear picture with a white background is published untouched instead of
+    # being re-keyed, because on that picture keying can only reach the product itself.
+    if float(np.abs(bg_color - 255.0).max()) <= config.studio_already_white_levels:
         return rgb
 
     # --- 2. Candidate pixels: within tolerance of bg_color ------------------ #
-    # Use a generous fixed tolerance (30 levels) so gradients and lighting
-    # variation don't leave grey fringes around the product.
-    tol = 30.0
     diff = np.abs(arr - bg_color).max(axis=2)  # L-inf distance per pixel
-    bg_candidates = diff <= tol
+    bg_candidates = diff <= config.studio_clean_tolerance
 
-    # --- 3. Edge-connected flood-fill --------------------------------------- #
+    # --- 3. Edge barrier: a sharp local step is the product, not the wall --- #
+    # Not dilated: every pixel the barrier widens is a pixel of wall left visible as a
+    # grey seam around the product (owner review 2026-10-15 of the air cooler's outline).
+    if config.studio_edge_barrier > 0:
+        gy, gx = np.gradient(arr, axis=(0, 1))
+        step = np.maximum(np.abs(gx), np.abs(gy)).max(axis=2)
+        bg_candidates = np.logical_and(bg_candidates, step < config.studio_edge_barrier)
+        if not bg_candidates.any():
+            return rgb
+
+    # --- 4. Edge-connected flood-fill --------------------------------------- #
     edge_seeds = np.zeros((h, w), dtype=bool)
     edge_seeds[0, :] = edge_seeds[-1, :] = edge_seeds[:, 0] = edge_seeds[:, -1] = True
 
@@ -256,15 +288,32 @@ def clean_outer_studio_background(rgb: Image.Image, config: PipelineConfig) -> I
     if not edge_labels:
         return rgb
 
-    # --- 4. Whiten ---------------------------------------------------------- #
     is_outer_bg = np.isin(labels, list(edge_labels))
+
+    # --- 5. Hard edge: take the camera's own blend with the wall ------------- #
+    # A photograph has no hard boundary.  The last row of wall and the first row of
+    # product are a blend of the two, and a flood that stops exactly where the colour
+    # stops matching leaves that ramp behind - which is what reads as a soft, ragged
+    # outline (owner review 2026-10-15).  Choking the wall by a pixel removes the blend;
+    # the opening takes out the single-pixel teeth the JPEG noise leaves on the cut.
+    if config.studio_defringe_px > 0:
+        is_outer_bg = ndimage.binary_dilation(is_outer_bg, iterations=int(config.studio_defringe_px))
+    # Then smooth the cut the way the matting libraries do it: blur the matte and take it
+    # back at half strength.  The single-pixel teeth the flood leaves from JPEG noise ride
+    # out the blur, the silhouette does not - the boundary that comes back is the same
+    # shape, but hard and even instead of ragged.
+    if config.studio_matte_sigma > 0:
+        matte = ndimage.gaussian_filter(is_outer_bg.astype(float), config.studio_matte_sigma)
+        is_outer_bg = matte > 0.5
+
+    # --- 6. Whiten ---------------------------------------------------------- #
     cleaned_arr = np.asarray(rgb).copy()
     cleaned_arr[is_outer_bg] = [255, 255, 255]
     return Image.fromarray(cleaned_arr)
 
 
 def isolate_main_product(
-    image: Image.Image, config: PipelineConfig
+    image: Image.Image, config: PipelineConfig, *, clean_background: bool = True
 ) -> tuple[Image.Image, bool]:
     """Crop the product out of its studio background, then whiten the background.
 
@@ -272,17 +321,24 @@ def isolate_main_product(
     1. Crop to the product bounding box (using foreground mask).
     2. Whiten remaining studio background in the cropped image.
 
+    ``clean_background=False`` publishes the crop with its original wall - the owner's
+    2026-10-15 rule that only the primary image of a row is background-cleaned.
+
     Returns ``(image, degraded)``.  ``degraded`` is True when a guard fired.
     Never raises and never returns an empty image.
     """
     rgb = to_rgb(image)
     mask = _foreground_mask(rgb, config)
     fraction = float(mask.mean()) if mask.size else 0.0
+    # The wall as it is *before* cropping - after the crop the corners are the product.
+    wall = detect_background_color(rgb, patch_ratio=config.corner_patch_ratio)
 
     # A body too faint for the difference mask: use white-fallback path, then clean bg.
     if fraction < config.isolation_min_foreground_fraction:
         cropped, degraded = _white_on_white_crop(rgb, config)
-        return clean_outer_studio_background(cropped, config), degraded
+        if not clean_background:
+            return cropped, degraded
+        return clean_outer_studio_background(cropped, config, background=wall), degraded
 
     # Work on the *silhouette*, not on raw difference components.
     silhouette = _product_silhouette(mask, config)
@@ -292,6 +348,8 @@ def isolate_main_product(
 
     # Several comparable, spread-out objects = a diagram or a banner.
     if _is_composite_frame(boxes, areas, config):
+        if clean_background:
+            return clean_outer_studio_background(rgb, config, background=wall), True
         return rgb, True
 
     body = _single_body_box(silhouette, config)
@@ -308,9 +366,11 @@ def isolate_main_product(
     crop = rgb.crop(box)
     if crop.width < 2 or crop.height < 2:
         return rgb, True
-    # Clean the studio background AFTER cropping — corners of the crop are
-    # reliably background, so the edge-connected flood-fill works perfectly.
-    return clean_outer_studio_background(crop, config), False
+    if not clean_background:
+        return crop, False
+    # Clean the studio background AFTER cropping, keyed on the wall colour found before
+    # it: the crop's own corners can land on the product's pale shell.
+    return clean_outer_studio_background(crop, config, background=wall), False
 
 
 
