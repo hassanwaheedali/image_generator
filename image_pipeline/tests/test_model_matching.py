@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import pytest
 
 from model_matching import (
@@ -1007,7 +1009,7 @@ def test_a_whatsapp_export_filename_accuses_no_product_line() -> None:
 # learned series differentiators (owner 2026-10-14: Avante vs Avante+, Acce vs Acce Pro)
 # --------------------------------------------------------------------------- #
 @pytest.fixture(autouse=True)
-def _no_learned_differentiators():
+def _no_learned_differentiators() -> Iterator[None]:
     """The learned set is run state: every test starts and ends with none in force."""
     from model_matching import set_series_differentiators
 
