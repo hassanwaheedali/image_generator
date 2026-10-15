@@ -57,6 +57,11 @@ class ProductTask:
     #: row, so a sibling word beside it is decoration, not identity (live 2026-10-11:
     #: ``…Hyper-18X-T3-Super-White-Turbo-Pro.webp`` must not die on the word ``turbo``).
     own_terms: frozenset[str] = frozenset()
+    #: How many rows of this sheet share the row's model-code **tail** (see
+    #: ``model_matching.annotate_tail_owners``).  The tail-chunk last resort arms only
+    #: at exactly ``1``: ``0`` means never computed (tests, single passes) and ``> 1``
+    #: is an ambiguous tail the sheet cannot resolve silently - both stay dead and loud.
+    tail_owner_count: int = 0
 
 @dataclass(frozen=True)
 class ModelKeys:

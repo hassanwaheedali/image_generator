@@ -930,6 +930,158 @@ def test_a_placeholder_word_glued_without_a_hump_accuses_nothing() -> None:
     assert url_names_other_product_line(glued_foreign, pulse)
 
 
+# -----------------------------------------------------------------------------
+# tail-chunk match (live run website_ac_clean 2026-10-15: retailers print the sheet
+# code's tail - MSEF1C-18HRFN1-QC6 sold as "18HRFN1 QC6" - and every sheet page died
+# at strength 0 while the Xtreme/Titan siblings share the same middle chunk)
+# -----------------------------------------------------------------------------
+
+_GO_EASY_15 = "Midea 1.5 Ton DC Inverter Air Conditioner MSEF1C-18HRFN1-QC6 Go Easy"
+_GO_EASY_24 = "Midea 2 Ton T3 Inverter Air Conditioner MSEF1D-24HRFN1-QC6 Go Easy"
+
+
+def _tail(page: str, title: str = _GO_EASY_15, *, owners: int = 1, brand: str | None = "midea") -> str | None:
+    from model_matching import tail_chunk_match
+
+    return tail_chunk_match(
+        page, title=title, keys=build_model_keys(title), brand=brand, tail_owner_count=owners
+    )
+
+
+def test_a_page_printing_the_complete_tail_and_series_words_arms() -> None:
+    """mabdullah.pk sells the row as ``18HRFN1 QC6 ... GO EASY`` - the complete tail
+    of our code (every chunk after the first), the row's series word and its capacity.
+    That is the sheet's own model written shortly, so the limb arms with evidence."""
+    page = (
+        "Midea 18HRFN1 QC6 1.5 Ton GO EASY T3 Inverter Split Air Conditioner "
+        "midea-18hrfn1-qc6-1-5-ton-go-easy-t3-inverter-ac"
+    )
+    evidence = _tail(page)
+    assert evidence is not None
+    assert "18hrfn1" in evidence.lower()
+
+
+def test_a_hyphen_written_capacity_still_counts_as_stated() -> None:
+    """Retail slugs spell 1.5 Ton as ``1-5-ton`` - the same number, a different
+    separator.  Digit-digit hyphens are dots to the tonnage reader."""
+    page = "midea-18hrfn1-qc6-1-5-ton-go-easy-t3-inverter-ac 1-5 ton capacity"
+    assert _tail(page) is not None
+
+
+def test_a_different_tonnage_on_the_page_is_not_corroboration() -> None:
+    """A 2 Ton page for a 1.5 Ton row shares the series word but not the size -
+    capacity corroboration must actually match the number."""
+    page = "Midea 18HRFN1 QC6 2 Ton GO EASY T3 Inverter"
+    assert _tail(page) is None
+
+
+def test_a_page_without_the_row_capacity_never_arms() -> None:
+    page = "Midea 18HRFN1 QC6 GO EASY T3 Inverter Split AC"
+    assert _tail(page) is None
+
+
+def test_a_shortened_or_partial_tail_never_arms() -> None:
+    """Today's live rejects: alizaina prints ``18HRFNQC6`` (dropped the 1), alfamall
+    bare ``12HRFN``, and a Titan page ends in ``QC2``.  A tail with a letter or a
+    chunk missing is a *different* code - only the complete run arms."""
+    assert _tail("Midea 18HRFNQC6 1.5 Ton GO EASY") is None
+    assert _tail("Midea 18HRFN1 1.5 Ton GO EASY") is None
+    assert _tail("Midea 18HRFN1 QC2 1.5 Ton GO EASY") is None
+
+
+def test_a_page_printing_another_head_code_is_refused() -> None:
+    """The proven false-accept: surmawala's Xtreme Plus page prints
+    ``MSEZ2B-24HRFN1-QC6`` - our row's exact tail under a different head.  A
+    code-like chunk sitting directly before our tail run names another series and
+    vetoes the limb, however the rest of the page reads."""
+    page = "Midea 2 Ton MSEZ2B-24HRFN1-QC6 24HRFN1 QC6 GO EASY Xtreme Plus"
+    assert _tail(page, title=_GO_EASY_24) is None
+    # our own head before the run is the exact match S1 already handles - never reached,
+    # and certainly not a veto; a plain word (brand, capacity) before it is neutral.
+    assert _tail("Midea msez1c-18hrfn1-qc6 18HRFN1 QC6 1.5 Ton GO EASY") is None
+    assert _tail("midea 18HRFN1 QC6 1.5 Ton GO EASY") is not None
+
+
+def test_a_letter_only_head_on_the_tail_is_refused() -> None:
+    """A pure-letter series head (``MSUS`` of ``MSUS-18HRFN1-QC6``) has no digit, so a
+    digit-only head test misses it and another Midea line arms on our Go Easy tail.
+    Any opaque token glued before our tail names another series and vetoes."""
+    assert _tail("Midea MSUS-18HRFN1-QC6 18HRFN1 QC6 1.5 Ton GO EASY") is None
+
+
+def test_a_row_whose_only_free_words_are_category_never_arms() -> None:
+    """A row that writes the appliance type after its code (``…-QC6 Split Inverter Air
+    Conditioner``) states no series word: those words sit on *every* page of the
+    category, so they corroborate nothing and a sibling (Xtreme) page sharing the tail
+    would arm.  The limb refuses rather than trust a category noun."""
+    title = "Midea MSEF1C-18HRFN1-QC6 Split Inverter Air Conditioner 1.5 Ton"
+    page = "Midea 18HRFN1 QC6 Split Inverter Air Conditioner 1.5 Ton Xtreme"
+    assert _tail(page, title=title) is None
+
+
+def test_a_slug_hyphen_capacity_does_not_double_count_as_two() -> None:
+    """``1-5 ton`` is one stated size (1.5), but a naive reader also sees ``5 ton``
+    inside it - so a 5 Ton row would arm on a 1.5 Ton page.  The 5 Ton row must refuse."""
+    five_ton = "Midea 5 Ton DC Inverter Air Conditioner MSEF1C-60HRFN1-QC6 Go Easy"
+    assert _tail("Midea 60HRFN1 QC6 1-5 ton GO EASY", title=five_ton) is None
+
+
+def test_a_row_without_series_words_never_arms() -> None:
+    """The Haier ``HSU-20HFT-T3+`` row states no free word after its code - there is
+    nothing to corroborate with, so the limb refuses to fire at all (the owner fixes
+    that sheet row; no guessing rescue)."""
+    title = "Haier 1.5 Ton Ocean White DC Inverter Air Conditioner HSU-20HFT-T3+"
+    assert _tail("Haier HSU-20HFT-T3 ocean white 1.5 ton", title=title) is None
+
+
+def test_an_ambiguous_tail_never_arms() -> None:
+    """A tail naming two rows of the sheet (MSEF1C-24 and MSEF1D-24 both Go Easy)
+    cannot pick a winner - both rows stay dead and loud."""
+    page = "Midea 18HRFN1 QC6 1.5 Ton GO EASY T3 Inverter"
+    assert _tail(page, owners=2) is None
+    assert _tail(page, owners=0) is None
+
+
+def test_a_different_colourway_page_is_refused() -> None:
+    """A row that names a colour arms the limb only for pages that do not contradict
+    it - the Dark-Grey twin stays another product (owner rule 2026-10-07)."""
+    title = "Midea 1.5 Ton White DC Inverter Air Conditioner MSEF1C-18HRFN1-QC6 Go Easy"
+    assert _tail("Midea 18HRFN1 QC6 1.5 Ton GO EASY T3 Dark Grey edition", title=title) is None
+    assert _tail("Midea 18HRFN1 QC6 1.5 Ton GO EASY T3 White", title=title) is not None
+
+
+def test_a_listing_page_never_arms() -> None:
+    """orient.com.pk/air-conditioners.html prints every model of the catalogue -
+    tails, capacities and series words all present at once.  A page crowded with
+    distinct codes is a listing, not a product, and the limb refuses it."""
+    codes = " ".join(f"MSX{i}ZZ{i}00" for i in range(1, 12))
+    page = f"Midea 18HRFN1 QC6 1.5 Ton GO EASY {codes}"
+    assert _tail(page) is None
+
+
+def test_annotate_tail_owners_counts_a_tail_across_the_sheet() -> None:
+    """The sheet's verdict on ambiguity: a tail one row owns arms (count 1), a tail two
+    rows share never arms (count 2), and a row with no armable tail (no code, or no
+    series word after it) is marked 0 so the limb stays out."""
+    from model_matching import annotate_tail_owners
+    from models import ProductTask
+
+    tasks = [
+        ProductTask(index=0, title=_GO_EASY_15, source_urls=()),
+        ProductTask(index=1, title=_GO_EASY_15, source_urls=()),  # same tail, two owners
+        ProductTask(
+            index=2,
+            title="Midea 2 Ton T3 Inverter Air Conditioner MSEF1D-24HRFN1-QC6 Go Easy",
+            source_urls=(),
+        ),  # its own tail
+        ProductTask(
+            index=3, title="Haier 1.5 Ton Ocean White DC Inverter HSU-20HFT-T3+", source_urls=()
+        ),  # code ends the title: no series word
+    ]
+    counts = [t.tail_owner_count for t in annotate_tail_owners(tasks)]
+    assert counts == [2, 2, 1, 0]
+
+
 def test_super_asia_ecm_4700_and_gh_406_di_clean_matches() -> None:
     """Super Asia products on official store must match cleanly without being deferred."""
     # 1. ECM-4700

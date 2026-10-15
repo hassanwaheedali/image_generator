@@ -386,6 +386,211 @@ def relaxed_page_match(
     return True, f"brand + number match ({hit}) without an exact model proof"
 
 
+#: How many distinct model codes a page's *own name* may print before it reads as a
+#: catalogue listing rather than one product - the tail limb refuses crowded names.
+TAIL_MATCH_MAX_PAGE_CODES = 8
+
+_TONNAGE_RE = re.compile(r"(?<![a-z0-9.])(\d+(?:\.\d+)?)\s*[-.]?\s*(?:ton|tr)\b")
+_TONNAGE_SLUG_RE = re.compile(r"(?<![a-z0-9])(\d)-(\d)\s*[-.]?\s*(?:ton|tr)\b")
+
+
+def _tonnage_set(text: str) -> set[float]:
+    """Every tonnage a text states: ``1.5 Ton``, ``1-5-ton`` (slug hyphens), ``2 TR``.
+
+    Retail slugs write the decimal with hyphens, so the pair form is read too - and
+    the lookbehinds stop ``18HRFN1-QC6`` or the tail of ``1.5`` from posing as a
+    size.  Both sides of the corroboration use this one reader, so a row and a page
+    agree exactly when they state the same number.
+    """
+    lowered = text.lower()
+    tons = {float(f"{a}.{b}") for a, b in _TONNAGE_SLUG_RE.findall(lowered)}
+    # A slug hyphen ("1-5 ton") is one stated size, but the general pattern also reads
+    # "5 ton" out of it, so a 1.5 Ton page would double-count as {1.5, 5.0} and arm a 5
+    # Ton row.  Blank the spans the slug form already claimed before the general pass,
+    # so every stated tonnage counts exactly once.
+    general = _TONNAGE_SLUG_RE.sub(lambda m: " " * (m.end() - m.start()), lowered)
+    tons |= {float(hit) for hit in _TONNAGE_RE.findall(general)}
+    return tons
+
+
+def code_tail_chunks(keys: ModelKeys) -> tuple[str, tuple[str, ...]] | None:
+    """``(head, tail)`` of the row's first model code, or ``None`` when it has none.
+
+    Chunks split only where the sheet itself separated them (``-``, ``_``, ``/``,
+    space) - never at case or digit boundaries, which shred ``MSEF1C`` into junk.
+    The tail is every chunk after the first and must hold **two or more**: a single
+    trailing chunk is a bare number again, and a bare number never names a variant
+    (the (9173) lesson - family codes are shared by five series).
+    """
+    if not keys.tokens:
+        return None
+    chunks = [c.lower() for c in re.split(r"[-_ /]+", keys.tokens[0]) if c]
+    if len(chunks) < 3:
+        return None
+    return chunks[0], tuple(chunks[1:])
+
+
+#: The appliance-type, operating-mode and unit nouns a page prints for *every* product
+#: in a category - they sit on a Go Easy page and an Xtreme page alike, so they name no
+#: series and must never serve as corroboration.  This is deliberately NOT
+#: ``_GENERIC_NAME_WORDS``: that table also holds series adjectives (``easy``) that this
+#: limb must keep, because "MSEF1C = Go Easy" is spelled with exactly that word.
+_TAIL_CATEGORY_WORDS = frozenset(
+    word
+    for word in (
+        "conditioner", "conditioners", "inverter", "inverters", "cooling", "cooler",
+        "coolers", "cool", "split", "window", "portable", "cabinet", "chest",
+        "upright", "standing", "floor", "vertical", "horizontal", "heater", "heaters",
+        "heat", "pump", "tower", "compressor", "mounted", "wall", "capacity", "watts",
+        "watt", "inches", "inch", "feet", "filter", "refrigerator", "refrigerators",
+        "freezer", "freezers", "washer", "washers", "dryer", "dispenser", "dispensers",
+        "purifier", "purifiers", "microwave", "television", "televisions", "speaker",
+        "speakers", "soundbar", "geyser", "geysers", "automatic", "manual", "model",
+        "series", "warranty", "years", "type", "size", "only",
+    )
+    if len(word) >= 4
+)
+
+
+def _series_corroboration_words(title: str, keys: ModelKeys, brand: str | None) -> frozenset[str]:
+    """The free words the sheet places *after* its own code - the series name.
+
+    ``… MSEF1C-18HRFN1-QC6 Go Easy`` yields ``easy`` (two-letter ``go`` is too weak
+    to mean anything on a page).  A row whose title ends at its code - or that states
+    only the appliance type there (``…-QC6 Split Inverter Air Conditioner``) - has no
+    series word to corroborate and the limb refuses to fire at all: a category noun is
+    printed by every sibling page, so trusting it would arm the wrong series, and
+    nothing is guessed.
+    """
+    if not keys.tokens:
+        return frozenset()
+    halves = title.lower().split(keys.tokens[0].lower(), 1)
+    if len(halves) < 2:
+        return frozenset()
+    code = code_tail_chunks(keys)
+    chunks = {code[0], *code[1]} if code else set()
+    return frozenset(
+        word
+        for word in re.findall(r"[a-z]{4,}", halves[1])
+        if word not in chunks
+        and word not in _TAIL_CATEGORY_WORDS
+        and word not in KNOWN_BRANDS
+        and word != (brand or "").lower()
+        and not is_colour_word(word)
+    )
+
+
+def _looks_like_series_head(token: str, brand: str | None) -> bool:
+    """Whether a token glued directly before our tail names *another* model's series.
+
+    ``model_like_token`` needs a digit, so it misses a pure-letter head like ``MSUS``
+    of ``MSUS-18HRFN1-QC6`` - and that gap let a different Midea line arm on our Go
+    Easy tail (live review 2026-10-15).  A head is any opaque token of that shape: not
+    the brand, not a colour, not a plain number, and either digit-bearing or a name
+    word the category noise never explains.  The caller has already cleared this row's
+    own head and its own series words, so this only ever fires on a foreign prefix.
+    """
+    if not token or token == (brand or "").lower() or token in KNOWN_BRANDS:
+        return False
+    if token.isdigit() or is_colour_word(token):
+        return False
+    if len(token) < 4:
+        return False
+    return _keep_name_segment(token) or model_like_token(token)
+
+
+def tail_chunk_match(
+    name_text: str,
+    *,
+    title: str,
+    keys: ModelKeys,
+    brand: str | None,
+    tail_owner_count: int,
+    max_page_codes: int = TAIL_MATCH_MAX_PAGE_CODES,
+) -> str | None:
+    """Safeguard S1.tail / S15.tail - the sheet's own code, written shortly by a retailer.
+
+    Live run website_ac_clean 2026-10-15: mabdullah sells ``MSEF1C-18HRFN1-QC6`` as
+    ``18HRFN1 QC6 … GO EASY 1.5 Ton`` - the complete tail of our code, the series word
+    the sheet itself put after the code, and the row's capacity.  ``name_text`` is the
+    page's **own name** (``<title>`` + ``<h1>``), not its body: a product states its
+    model in its name, while the body of a content-rich Shopify page is stuffed with
+    forty related-product codes that would drown every guard - and a catalogue listing
+    names only "Air Conditioners", so it never carries our tail in its name.  Every
+    guard must hold *at once*, because each one alone has a proven false-accept in that
+    run: the tail also appears on Xtreme and Titan pages (head veto + series word),
+    ``18HRFN1`` alone is shared across series (complete run, whole chunks only), a
+    crowded name is a listing not a product (code-count refusal), and another colourway
+    is another product (colour veto).  ``tail_owner_count`` is the sheet's verdict: a
+    tail naming zero or several rows never arms - ambiguity is never resolved silently.
+    Returns the evidence line when armed, ``None`` when not; the caller still runs every
+    image gate.
+    """
+    if tail_owner_count != 1:
+        return None
+    code = code_tail_chunks(keys)
+    if code is None:
+        return None
+    head, tail = code
+    series = _series_corroboration_words(title, keys, brand)
+    if not series:
+        return None
+    row_tons = _tonnage_set(title)
+    if not row_tons or not row_tons & _tonnage_set(name_text):
+        return None
+    if keys.colour_word and colour_word_conflict(keys.colour_word, name_text):
+        return None
+    if len(set(code_like_tokens(name_text))) > max_page_codes:
+        return None
+    tokens = [t for t in re.split(r"[^a-z0-9]+", name_text.lower()) if t]
+    page_words = set(tokens)
+    for index in range(len(tokens) - len(tail) + 1):
+        if tuple(tokens[index : index + len(tail)]) != tail:
+            continue
+        before = tokens[index - 1] if index > 0 else ""
+        if (
+            before
+            and before != head
+            and before not in series
+            and _looks_like_series_head(before, brand)
+        ):
+            return None  # another series' head sits on our tail - refuse, loud
+        if series.issubset(page_words):
+            return (
+                f"the page's name prints the complete code tail {'-'.join(tail)} "
+                f"+ series {' '.join(sorted(series))} + the row's tonnage"
+            )
+        return None
+    return None
+
+
+def annotate_tail_owners(tasks: Sequence[ProductTask]) -> list[ProductTask]:
+    """Set each row's ``tail_owner_count`` - how many rows of the sheet own its code tail.
+
+    The tail-chunk limb may fire only where the tail names exactly one row: a sheet
+    carrying both ``MSEF1C-24HRFN1-QC6`` and ``MSEF1D-24HRFN1-QC6`` (both Go Easy) has
+    an ambiguous tail the sheet itself cannot resolve, so both rows get ``2`` and stay
+    dead rather than one silently stealing the other's page.  A row with no armable
+    tail (no code, no series word after it, no stated tonnage) gets ``0``.  Mirrors
+    :func:`annotate_sibling_terms`: the sheet is threaded into a per-row decision.
+    """
+    tails: list[tuple[str, ...] | None] = []
+    for task in tasks:
+        keys = build_model_keys(task.title)
+        code = code_tail_chunks(keys)
+        armable = (
+            code is not None
+            and bool(_series_corroboration_words(task.title, keys, None))
+            and bool(_tonnage_set(task.title))
+        )
+        tails.append(code[1] if armable and code is not None else None)
+    counts: Counter[tuple[str, ...]] = Counter(t for t in tails if t is not None)
+    return [
+        replace(task, tail_owner_count=counts[tail] if tail is not None else 0)
+        for task, tail in zip(tasks, tails, strict=True)
+    ]
+
+
 def _token_and_identity(words: list[str], index: int, max_extra: int) -> tuple[str, str]:
     """Return (token, glued identity) for ``words[index]``.
 

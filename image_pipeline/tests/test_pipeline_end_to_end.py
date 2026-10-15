@@ -127,8 +127,8 @@ def _plan(tmp_path: Path) -> PlatformPlan:
     return synthetic_platforms(tmp_path / "assets")
 
 
-def task(index: int, title: str, urls: tuple[str, ...]) -> ProductTask:
-    return ProductTask(index=index, title=title, source_urls=urls)
+def task(index: int, title: str, urls: tuple[str, ...], *, tail_owner: int = 0) -> ProductTask:
+    return ProductTask(index=index, title=title, source_urls=urls, tail_owner_count=tail_owner)
 
 
 def _urls(digi: str, alfa: str) -> tuple[tuple[str, tuple[str, ...]], ...]:
@@ -1522,6 +1522,154 @@ def test_relaxed_matching_can_be_switched_off(tmp_path: Path) -> None:
     )
     assert accepted == []
     assert result.status is Status.FAILED
+
+
+# --------------------------------------------------------------------------- #
+# tail-chunk last resort (live run website_ac_clean 2026-10-15: mabdullah sells the
+# MSEF1C-18HRFN1-QC6 row as "18HRFN1 QC6 … GO EASY 1.5 Ton" and every page died)
+# --------------------------------------------------------------------------- #
+TAIL_TITLE = "Midea 1.5 Ton DC Inverter Air Conditioner MSEF1C-18HRFN1-QC6 Go Easy"
+TAIL_SHEET_URL = "https://www.mabdullah.pk/products/midea-18hrfn1-qc6-1-5-ton-go-easy-t3-inverter-ac"
+
+
+def _tail_page() -> str:
+    return (
+        "<html><head><title>Midea 18HRFN1-QC6 1.5 Ton GO EASY T3 Inverter Split AC"
+        "</title></head><body><h1>Midea 18HRFN1 QC6 1.5 Ton GO EASY</h1>"
+        "<div class='product-gallery'>"
+        + "".join(f'<img src="https://cdn.mabdullah.pk/p/goeasy-{i}.jpg">' for i in range(1, 4))
+        + "</div></body></html>"
+    )
+
+
+def _tail_images() -> dict[str, bytes]:
+    return {
+        f"https://cdn.mabdullah.pk/p/goeasy-{i}.jpg": png_bytes(_gallery_image(i))
+        for i in range(1, 4)
+    }
+
+
+def test_a_tail_printing_sheet_page_publishes_flagged_as_last_resort(tmp_path: Path) -> None:
+    """The complete code tail + the sheet's own series word + the row's tonnage is
+    enough to publish - but never silently: the row is PARTIAL, the decision line
+    names the rule, and the review CSV carries it for the human pass."""
+    config = live_config(tmp_path)
+    deps, _, _, _ = build_deps(tmp_path, {TAIL_SHEET_URL: _tail_page()}, _tail_images())
+    result, accepted = process_product(
+        task(0, TAIL_TITLE, (TAIL_SHEET_URL,), tail_owner=1), deps, config
+    )
+    assert result.images_accepted == 3 and len(accepted) == 3
+    assert result.status is Status.PARTIAL, "a tail-chosen page is never silently ok"
+    assert "flagged: tail-chunk match" in result.note
+    decisions = [
+        json.loads(line) for line in (tmp_path / "out" / "decisions.jsonl").read_text().splitlines()
+    ]
+    assert any(line["rule_id"] == "S1.tail" for line in decisions)
+    write_output_csvs([result], config, _plan(tmp_path))
+    review = (config.review_csv).read_text(encoding="utf-8")
+    assert TAIL_TITLE in review and "tail-chunk match" in review
+
+
+def test_a_tail_page_never_preempts_a_page_that_prints_the_model(tmp_path: Path) -> None:
+    """The limb is a dead-end rescue only: a page printing the exact code still wins,
+    and the tail page never enters the report."""
+    config = live_config(tmp_path)
+    exact_url = "https://www.dawlance-official.example/msef1c-18hrfn1-qc6"
+    exact_page = (
+        "<html><head><title>Midea MSEF1C-18HRFN1-QC6 Go Easy 1.5 Ton</title></head><body>"
+        "<h1>Midea MSEF1C-18HRFN1-QC6 Go Easy</h1><div class='product-gallery'>"
+        + "".join(f'<img src="https://cdn.mabdullah.pk/p/goeasy-{i}.jpg">' for i in range(1, 4))
+        + "</div></body></html>"
+    )
+    deps, pages, _, _ = build_deps(
+        tmp_path, {exact_url: exact_page, TAIL_SHEET_URL: _tail_page()}, _tail_images()
+    )
+    result, accepted = process_product(
+        task(0, TAIL_TITLE, (exact_url, TAIL_SHEET_URL), tail_owner=1), deps, config
+    )
+    assert len(accepted) == 3
+    assert "tail-chunk" not in result.note
+    assert TAIL_SHEET_URL not in " ".join(pages.requested) or result.status is Status.OK
+
+
+def test_the_tail_limb_is_inert_without_one_unique_tail_on_the_sheet(tmp_path: Path) -> None:
+    """``tail_owner_count`` is the sheet's verdict: zero (not computed) or several
+    (ambiguous) rows and the limb never fires - the row stays dead and loud."""
+    config = live_config(tmp_path)
+    deps, _, _, _ = build_deps(tmp_path, {TAIL_SHEET_URL: _tail_page()}, _tail_images())
+    result, accepted = process_product(
+        task(0, TAIL_TITLE, (TAIL_SHEET_URL,)), deps, config
+    )
+    assert accepted == []
+    assert result.status is Status.FAILED
+
+
+def test_the_tail_limb_can_be_switched_off(tmp_path: Path) -> None:
+    config = live_config(tmp_path, tail_chunk_match_enabled=False)
+    deps, _, _, _ = build_deps(tmp_path, {TAIL_SHEET_URL: _tail_page()}, _tail_images())
+    result, accepted = process_product(
+        task(0, TAIL_TITLE, (TAIL_SHEET_URL,), tail_owner=1), deps, config
+    )
+    assert accepted == []
+    assert result.status is Status.FAILED
+
+
+def test_a_tail_page_on_the_fallback_tier_is_flagged_s15(tmp_path: Path) -> None:
+    """The same last resort reached through the retailer *search* tier is logged as
+    S15.tail, not S1.tail: the tier a page came from decides the rule id, so the
+    review report shows where the guess happened."""
+    config = live_config(tmp_path)
+    dead = "https://www.mideapakistan.store/products/msef1c-18hrfn1-qc6"
+    searcher = FakeSourceSearcher(
+        candidates=[
+            PageCandidate(
+                url=TAIL_SHEET_URL,
+                origin="json-search:www.mabdullah.pk",
+                method="json-search",
+            )
+        ],
+        report=SourceSearchReport(tried=("www.mabdullah.pk:shopify:1",)),
+    )
+    deps, _, _, _ = build_deps(
+        tmp_path, {dead: "", TAIL_SHEET_URL: _tail_page()}, _tail_images()
+    )
+    deps.source_searcher = searcher
+    result, accepted = process_product(
+        task(0, TAIL_TITLE, (dead,), tail_owner=1), deps, config
+    )
+    assert result.status is Status.PARTIAL
+    assert "flagged: tail-chunk match" in result.note
+    decisions = [
+        json.loads(line)
+        for line in (tmp_path / "out" / "decisions.jsonl").read_text().splitlines()
+    ]
+    assert any(line["rule_id"] == "S15.tail" for line in decisions)
+
+
+def test_a_page_naming_another_brand_is_never_rescued_by_the_tail(tmp_path: Path) -> None:
+    """A retailer page carrying our exact tail, series word and tonnage but naming
+    ANOTHER maker is refused on the brand (``match_rule`` ``other_brand_product``).
+    The tail limb only fills a *missing* model proof - it must not overturn that verdict
+    and publish a wrong-brand picture (owner rule: the brand must match, by any means)."""
+    config = live_config(tmp_path)
+    other_brand_page = (
+        "<html><head><title>Haier 18HRFN1-QC6 1.5 Ton GO EASY T3 Inverter Split AC"
+        "</title></head><body><h1>Haier 18HRFN1 QC6 1.5 Ton GO EASY</h1>"
+        "<div class='product-gallery'>"
+        + "".join(f'<img src="https://cdn.mabdullah.pk/p/goeasy-{i}.jpg">' for i in range(1, 4))
+        + "</div></body></html>"
+    )
+    deps, _, _, _ = build_deps(tmp_path, {TAIL_SHEET_URL: other_brand_page}, _tail_images())
+    result, accepted = process_product(
+        task(0, TAIL_TITLE, (TAIL_SHEET_URL,), tail_owner=1), deps, config
+    )
+    assert accepted == []
+    assert result.status is Status.FAILED
+    decisions = [
+        json.loads(line)
+        for line in (tmp_path / "out" / "decisions.jsonl").read_text().splitlines()
+    ]
+    assert not any(line["rule_id"] in ("S1.tail", "S15.tail") for line in decisions)
 
 
 # --------------------------------------------------------------------------- #

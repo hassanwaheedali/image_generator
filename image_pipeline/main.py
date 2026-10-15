@@ -714,9 +714,10 @@ def main(argv: list[str] | None = None) -> int:
     # (``+`` of ``Avante+``, ``Pro`` of ``Acce Pro``) separate two sold variants, and
     # those words must already be name words when the sibling terms are read out.
     _learn_tier_differentiators(config, tasks)
-    from model_matching import annotate_sibling_terms
+    from model_matching import annotate_sibling_terms, annotate_tail_owners
 
     tasks = annotate_sibling_terms(tasks)
+    tasks = annotate_tail_owners(tasks)
 
     checkpoint = {} if not config.resume else load_checkpoint(config.checkpoint_path)
 
@@ -852,6 +853,18 @@ def summarize(results: list[ProductResult], config: PipelineConfig) -> None:
     for result in results:
         if result.status is Status.FAILED:
             print(f"  - {csv_escape(result.title)} : {result.reason}")
+    tail_rows = [r for r in results if "tail-chunk match" in r.note]
+    if tail_rows:
+        print(
+            f"\nTAIL-CHUNK ROWS ({len(tail_rows)}) - the sheet's URLs never printed the full"
+            " model, so a page carrying only its code tail was published as a last resort;"
+            " confirm each (title, page and tier below) before trusting it:"
+        )
+        for result in tail_rows:
+            note = next(
+                (p for p in result.note.split("; ") if "tail-chunk match" in p), result.note
+            )
+            print(f"  - {csv_escape(result.title)}\n      {note}")
     print(f"report  : {config.report_csv}")
     print(f"decisions: {config.decisions_path}")
 

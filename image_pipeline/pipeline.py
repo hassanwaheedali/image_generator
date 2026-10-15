@@ -76,6 +76,7 @@ from model_matching import (
     is_display_product,
     near_miss_codes,
     relaxed_page_match,
+    tail_chunk_match,
     url_anchored_to_row,
     url_belongs_to_other_model,
     url_names_foreign_brand,
@@ -1302,16 +1303,56 @@ def _visit_page(
                 detail=f"fallback page accepted with a flag - {relaxed}",
             )
             match = replace(match, strength=max(1, match.strength), detail=relaxed, match_rule="relaxed")
+    tail_flag = ""
     if not match.accepted:
-        rejections["S15" if is_fallback else "S1"] += 1
-        detail = f"page strength 0 - {match.detail}"
-        if is_fallback:
-            detail = f"fallback candidate rejected - {match.detail}"
-        deps.decisions.reject(
-            title=task.title, url=resolved_url, rule_id="S15" if is_fallback else "S1",
-            detail=detail,
+        tail_reason = (
+            tail_chunk_match(
+                _page_name_text(soup),
+                title=task.title,
+                keys=keys,
+                brand=brand,
+                tail_owner_count=task.tail_owner_count,
+            )
+            # The limb is only for a page that failed to *prove* the model - a
+            # neutral strength-0.  A page refused for another colourway or another
+            # brand is rejected on its own merits and never rescued by a short tail.
+            if config.tail_chunk_match_enabled and match.match_rule == "none"
+            else ""
         )
-        return _PageOutcome(False, True, resolved_url)
+        if tail_reason and defer_tolerated:
+            # A tail page is a last resort, not an answer: defer it exactly like the
+            # tolerated-spelling page so any later page that *prints* the model still
+            # wins.  Stage 3b revisits it with defer_tolerated off.
+            deps.decisions.keep(
+                title=task.title,
+                url=resolved_url,
+                rule_id="S15.tail" if is_fallback else "S1.tail",
+                detail=f"deferred as last resort - {tail_reason}",
+            )
+            return _PageOutcome(True, True, resolved_url, deferred=True)
+        if tail_reason:
+            deps.decisions.keep(
+                title=task.title,
+                url=resolved_url,
+                rule_id="S15.tail" if is_fallback else "S1.tail",
+                detail=f"published as last resort - {tail_reason}",
+            )
+            notes.append(
+                f"flagged: tail-chunk match "
+                f"({'fallback' if is_fallback else 'sheet'} page {resolved_url}) - {tail_reason}"
+            )
+            tail_flag = tail_reason
+            match = replace(match, strength=1, detail=tail_reason, match_rule="tail")
+        else:
+            rejections["S15" if is_fallback else "S1"] += 1
+            detail = f"page strength 0 - {match.detail}"
+            if is_fallback:
+                detail = f"fallback candidate rejected - {match.detail}"
+            deps.decisions.reject(
+                title=task.title, url=resolved_url, rule_id="S15" if is_fallback else "S1",
+                detail=detail,
+            )
+            return _PageOutcome(False, True, resolved_url)
 
     tolerated_reason = ""
     if match.tolerated and config.tolerated_spelling_as_last_resort:
@@ -1401,12 +1442,27 @@ def _visit_page(
         budget=budget,
         salvage=salvage,
     )
-    return _PageOutcome(True, True, resolved_url, relaxed, tolerated=tolerated_reason)
+    return _PageOutcome(True, True, resolved_url, relaxed, tolerated=tolerated_reason or tail_flag)
 
 
 def _parse(html: str) -> BeautifulSoup:
     """Parse with lxml (the fast backend); kept in one place for auditability."""
     return BeautifulSoup(html, "lxml")
+
+
+def _page_name_text(soup: BeautifulSoup) -> str:
+    """The page's own name: its ``<title>`` plus the first couple of ``<h1>`` headings.
+
+    A product page states its model in its name; the body below is navigation, spec
+    tables and related-product carousels that would smother any word-level guard.  The
+    tail-chunk limb reads only this - a catalogue listing whose name is generic never
+    carries a specific model here, which is what makes it refuse listings for free.
+    """
+    bits: list[str] = []
+    if soup.title:
+        bits.append(soup.title.get_text(" "))
+    bits.extend(h.get_text(" ") for h in soup.find_all("h1")[:2])
+    return " ".join(bits)
 
 
 def _extend_with_structured_gallery(

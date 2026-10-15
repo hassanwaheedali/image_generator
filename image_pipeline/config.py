@@ -451,6 +451,14 @@ class PipelineConfig:
     #: chain found nothing.  Owner decision 2026-10-06: the sheet's link is sometimes the
     #: wrong page for the model in the title, so the model wins over the link.
     tolerated_spelling_as_last_resort: bool = True
+    #: A page that prints no key of its own may still be the row, written shortly: the
+    #: **complete** tail of the sheet's code plus the series word the sheet put after
+    #: the code plus the row's tonnage (see ``model_matching.tail_chunk_match``).  A
+    #: dead-end rescue only - it arms where today's row dies, publishes flagged
+    #: (``flagged: tail-chunk match``) and never preempts exact, tolerated or relaxed
+    #: evidence.  Live run website_ac_clean 2026-10-15: three Go Easy rows died while
+    #: mabdullah sold them as ``18HRFN1 QC6 … GO EASY 1.5 Ton``.
+    tail_chunk_match_enabled: bool = True
     fallback_max_pages_per_row: int = 6
     #: Per *source* share of that budget.  Without it the first source that answers
     #: (a brand sitemap lists the whole model family) fills the row budget and the
