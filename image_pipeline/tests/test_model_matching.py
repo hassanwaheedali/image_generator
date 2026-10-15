@@ -931,6 +931,41 @@ def test_a_placeholder_word_glued_without_a_hump_accuses_nothing() -> None:
 
 
 # -----------------------------------------------------------------------------
+# a colourway written inside the code (live run website_ac_clean 2026-10-15:
+# Haier sells the SAME body as HSU-20HFTEX/023WDC(OW)-T3 and -DG-; the (OW) is the
+# colourway, and dropping it made the dark-grey page look like "our model minus a
+# trailing letter" and demoted the brand's own Ocean-White page to merely tolerated)
+# -----------------------------------------------------------------------------
+
+
+def test_a_glued_colourway_parenthetical_stays_in_the_model_code() -> None:
+    """`023WDC(OW)` is one label, not a code plus a removable note: the colourway
+    marker belongs to the identity so a different-colour page cannot match it."""
+    keys = build_model_keys(
+        "Haier 1.5 Ton Ocean White DC Inverter Air Conditioner HSU-20HFTEX/023WDC(OW)-T3 Plus"
+    )
+    assert keys.tokens[0] == "HSU-20HFTEX/023WDC-OW-T3"
+    assert keys.identities[0] == "hsu20hftex023wdcowt3"
+
+
+def test_the_colourway_letter_tells_the_two_haier_pages_apart() -> None:
+    """With (OW) kept, the brand's Ocean-White page matches our row and the Dark-Grey
+    page does not - before, both looked like the same model minus a trailing letter."""
+    keys = build_model_keys("Haier Ocean White Inverter HSU-20HFTEX/023WDC(OW)-T3 Plus")
+    assert find_matching_keys("Haier HSU-20HFTEX/023WDC-OW-T3 Plus", keys)
+    assert not find_matching_keys("Haier HSU-20HFTEX/023WDC-DG-T3 Plus", keys)
+
+
+def test_a_spaced_or_noncolour_parenthetical_is_still_stripped() -> None:
+    """Only a code glued to 1-4 letters folds. A spaced note, a multi-word phrase and
+    digits inside brackets keep being removed exactly as before - nothing invented."""
+    spaced = build_model_keys("Orient Pulse 19C Ultra (2024 edition) White")
+    assert all("2024" not in t and "edition" not in t for t in spaced.tokens)
+    phrase = build_model_keys("Haier HRF-538 IFGA (Dark Grey) Split AC")
+    assert all("grey" not in t.lower() and "dark" not in t.lower() for t in phrase.tokens)
+
+
+# -----------------------------------------------------------------------------
 # tail-chunk match (live run website_ac_clean 2026-10-15: retailers print the sheet
 # code's tail - MSEF1C-18HRFN1-QC6 sold as "18HRFN1 QC6" - and every sheet page died
 # at strength 0 while the Xtreme/Titan siblings share the same middle chunk)

@@ -43,6 +43,14 @@ from variant_terms import (
 _PUNCTUATION = ".,;:!?()[]{}\"'`“”‘’–—-_/\\|+*&^%$#@~<>="
 _SEP = r"[\s\-_/.]*"
 
+#: A colourway written **inside** the code, glued to it and short: ``023WDC(OW)``.
+#: The maker sells one body in several finishes spelled only by this marker, so it is
+#: part of the model's identity, not a removable parenthetical.  Matched only when the
+#: run before ``(`` already carries a digit (a code, not a word) and the bracket holds
+#: 1-4 letters - a spaced note ``(2024 edition)``, a phrase ``(Dark Grey)`` and digits
+#: stay ordinary brackets and are stripped.
+_INLINE_COLOURWAY_RE = re.compile(r"([A-Za-z0-9]*\d[A-Za-z0-9]*)\(([A-Za-z]{1,4})\)")
+
 UNIT_QUANTITY_RE = re.compile(
     r"^\d+(?:[.,]\d+)?"
     r"(?:kg|kgs|g|ltr|ltrs|l|liter|litre|ton|tons|btu|inch|in|w|kw|hz|mm|cm|m"
@@ -970,7 +978,10 @@ def _build(
     max_extra_tokens: int,
 ) -> ModelKeys:
     cleaned = WHITESPACE_RE.sub(
-        " ", strip_bracketed(title, keep_if_unbalanced=keep_unbalanced)
+        " ",
+        strip_bracketed(
+            _INLINE_COLOURWAY_RE.sub(r"\1-\2", title), keep_if_unbalanced=keep_unbalanced
+        ),
     ).strip()
     words = cleaned.split()
 
@@ -1111,6 +1122,22 @@ def near_miss_codes(text: str, keys: ModelKeys) -> tuple[str, ...]:
     return tuple(dict.fromkeys(hints))[:3]
 
 
+def _leading_code_stem(segment: str) -> str:
+    """The leading ``letters+digits`` run of a slash segment (``023WDC-OW-T3`` -> ``023wdc``).
+
+    A shop that leaves the factory side of ``HSU-.../023WDC...`` off prints neither
+    this stem nor its suffix; a shop that prints *another* colourway shows the same
+    stem with a different tail - Haier sells the identical body as ``023WDC-OW-T3``
+    (Ocean White) and ``023WDC-DG-T3`` (Dark Grey).  The stem is what tells those
+    two apart, so the slash tolerance can only fire when the page has *no* stem.
+    """
+    for chunk in re.split(r"[-_/ ]+", segment):
+        core = normalize_key(chunk)
+        if len(core) >= 3 and re.search(r"[a-z]", core) and re.search(r"[0-9]", core):
+            return core
+    return ""
+
+
 def _slash_segment_hit(token: str, core: str, normalized: str) -> bool:
     """True when one ``/``-separated segment of the token matches on its own.
 
@@ -1121,6 +1148,10 @@ def _slash_segment_hit(token: str, core: str, normalized: str) -> bool:
     only counts when it is model-like in its own right (letters + digits, >= 3
     chars) and keeps the boundary-anchored pattern, so ``HSU-12`` still never
     matches inside ``HSU-12HFPAA``.
+
+    Refused when the page carries the *other* side's stem but not our full suffix
+    (live 2026-10-15: the Dark-Grey page ``…023WDC-DG-T3…`` was wrongly accepted
+    as an Ocean-White row whose code is ``…023WDC(OW)-T3…``).
     """
     for segment in token.split("/"):
         seg_core = normalize_key(segment)
@@ -1128,8 +1159,17 @@ def _slash_segment_hit(token: str, core: str, normalized: str) -> bool:
             continue
         if not re.search(r"[a-z]", seg_core) or not re.search(r"[0-9]", seg_core):
             continue
-        if _compiled(seg_core).search(normalized):
-            return True
+        if not _compiled(seg_core).search(normalized):
+            continue
+        others = [s for s in token.split("/") if s != segment]
+        if any(
+            (stem := _leading_code_stem(other))
+            and _compiled(stem).search(normalized)
+            and not _compiled(normalize_key(other)).search(normalized)
+            for other in others
+        ):
+            continue  # the page prints the other side under a different colourway
+        return True
     return False
 
 
@@ -1142,10 +1182,16 @@ def _segment_truncation_hit(token: str, core: str, normalized: str) -> bool:
     whole separator-delimited segment is safe where letter-dropping is not: the
     remainder still has to be model-like (letters *and* digits), so ``9160-WB``
     never degenerates to ``9160`` and ``PWM-1250`` never to ``PWM``.
+
+    A short pure-letter tail (``OW``, ``GD``, ``W``) is a **colourway**, not a
+    series tail: dropping it would let a different-colour page pass as our model
+    (live 2026-10-15), so it is never truncated.
     """
     segments = [part for part in re.split(r"[-_/ ]+", token) if part]
     for drop in (1, 2):
         if len(segments) <= drop:
+            continue
+        if any(re.fullmatch(r"[A-Za-z]{1,4}", part) for part in segments[-drop:]):
             continue
         if segments[-drop].isdigit() or re.search(r"\d{2,}", segments[-drop]):
             continue
