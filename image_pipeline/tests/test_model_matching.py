@@ -907,6 +907,29 @@ def test_a_camel_case_own_file_is_not_another_product_line() -> None:
     assert not url_names_other_product_line(nameless, pulse)
 
 
+def test_a_placeholder_word_glued_without_a_hump_accuses_nothing() -> None:
+    """Live run website_ac_clean 2026-10-15: rd.com.pk exported its gallery as
+    ``Untitledproject-2025-02-17T110657.024_<uuid>.jpg`` - a lowercase p, so the camel
+    split never fires and the plain reader saw one glued word the row did not own.  The
+    row's only two pictures died as "another product line".  A word that decomposes
+    entirely into the commerce-noise vocabulary (``untitled`` + ``project``) names no
+    product and must accuse nothing, however the merchant capitalised it - while a
+    glued word that is *not* made of noise words (``grandvcm``) is still the
+    accusation it always was."""
+    from model_matching import url_names_other_product_line
+
+    haier = build_model_keys("Haier 1.5 Ton Ocean White DC Inverter Air Conditioner HSU-20HFT-T3+")
+    live = (
+        "https://rd.com.pk/cdn/shop/files/Untitledproject-2025-02-17T110657.024_"
+        "73800caf-b874-4a88-be46-9546d7f05580.jpg"
+    )
+    assert not url_names_other_product_line(live, haier)
+
+    pulse = build_model_keys("Pulse 19C Ultra White T3 | Orient Electronics Pakistan")
+    glued_foreign = "https://x.pk/media/grandvcm.png"  # decomposes into nothing
+    assert url_names_other_product_line(glued_foreign, pulse)
+
+
 def test_super_asia_ecm_4700_and_gh_406_di_clean_matches() -> None:
     """Super Asia products on official store must match cleanly without being deferred."""
     # 1. ECM-4700

@@ -1372,6 +1372,38 @@ _HEX_HASH_RE = re.compile(
 )
 
 
+#: Longest/shortest noise word - the greedy split starts with the widest step and
+#: shrinks to the table's own floor, so no entry is ever unreachable.
+_MAX_NOISE_WORD_LEN = max(len(word) for word in _URL_COMMERCE_NOISE)
+_MIN_NOISE_WORD_LEN = min(len(word) for word in _URL_COMMERCE_NOISE)
+
+
+def _decomposes_into_noise(word: str) -> bool:
+    """Whether a glued file-name word is only commerce noise re-assembled.
+
+    A merchant who exports ``Untitledproject`` with a lowercase p defeats the camel
+    split, and the plain reader sees one word the row does not own - live run
+    2026-10-15, rd.com.pk's only two pictures died as "another product line".  If the
+    word decomposes entirely into **two or more** existing noise words (greedy,
+    longest first) it names no product, exactly like its spaced form, so it accuses
+    nothing.  No new vocabulary: the existing table alone decides.  The greedy scan
+    never backtracks, so a compound whose widest-first bite overshoots (``imagesale``
+    eats ``images`` and strands ``ale``) still accuses - erring toward the guard,
+    never past it.
+    """
+    index = 0
+    parts = 0
+    while index < len(word):
+        for length in range(_MAX_NOISE_WORD_LEN, _MIN_NOISE_WORD_LEN - 1, -1):
+            if word[index : index + length] in _URL_COMMERCE_NOISE:
+                index += length
+                parts += 1
+                break
+        else:
+            return False
+    return parts >= 2
+
+
 def url_names_other_product_line(url: str, keys: ModelKeys) -> bool:
     """Safeguard S4, fourth limb - sheet knowledge not required.
 
@@ -1407,6 +1439,7 @@ def url_names_other_product_line(url: str, keys: ModelKeys) -> bool:
         and word not in _URL_COMMERCE_NOISE
         and not is_colour_word(word)
         and not (len(word) <= 4 and set(word).issubset(set("abcdef")))
+        and not _decomposes_into_noise(word)
     }
     return bool(foreign)
 
