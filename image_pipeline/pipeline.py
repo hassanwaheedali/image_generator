@@ -1867,6 +1867,10 @@ def _consume_candidates(
         # reject a perfect product photo.  Each cut is recorded with its own rule id, and
         # every gate below still runs on the cleaned image - a coloured background or a
         # lifestyle shot is rejected exactly as before.
+        # Kept because the audit has to show both: what the shop served, and what these
+        # three gates left.  Without it ``raw/`` is the cut, and a row that published a
+        # sliced product leaves no trace of where the cut landed.
+        downloaded = image
         image, band = strip_promo_band(image, config)
         if band is not None:
             side, pixels = band
@@ -2001,6 +2005,7 @@ def _consume_candidates(
             used_url=used_url,
             source_label=source_label,
             image=image,
+            downloaded=downloaded,
             config=config,
             deps=deps,
             dedup=dedup,
@@ -2036,14 +2041,24 @@ def _compose_and_save(
     used_url: str,
     source_label: str,
     image: Image.Image,
+    downloaded: Image.Image | None = None,
     config: PipelineConfig,
     deps: PipelineDeps,
     dedup: ProductDedup,
     accepted: list[AcceptedImage],
     fingerprint: ImageFingerprint | None = None,
 ) -> None:
-    """Stage 5: isolate, 1:1 centre, light unsharp, every selected template, save locally."""
-    isolated, degraded = isolate_main_product(image, config)
+    """Stage 5: isolate, 1:1 centre, light unsharp, every selected template, save locally.
+
+    ``downloaded`` is the picture as the fetch returned it, before the page-furniture gates
+    cut it.  ``raw/`` is written from it so the audit always holds what the shop served; the
+    cut version lands in ``clean/`` beside it, and only when a cut actually happened.
+    """
+    index = len(accepted) + 1
+    # Owner decision 2026-10-15: the studio background is keyed out of the primary image
+    # only.  Later images of a row show parts and details, where the flood-fill erased pale
+    # product bodies without buying anything back.
+    isolated, degraded = isolate_main_product(image, config, clean_background=(index == 1))
     square = to_square_canvas(
         isolated,
         config.canonical_side,
@@ -2056,8 +2071,13 @@ def _compose_and_save(
         percent=config.unsharp_percent,
         threshold=config.unsharp_threshold,
     )
-    index = len(accepted) + 1
-    raw_path = _save_audit(image, config, task.title, ImageRole.RAW, f"{index:02d}-raw.jpg")
+    served = downloaded if downloaded is not None else image
+    raw_path = _save_audit(served, config, task.title, ImageRole.RAW, f"{index:02d}-raw.jpg")
+    if served.size != image.size:
+        # The gates cut something, and where they cut is the whole story when the cut was
+        # wrong - so it is kept, but only for those rows.  Writing a twin of every raw file
+        # would bury the handful that has anything to show.
+        _save_audit(image, config, task.title, ImageRole.CLEAN, f"{index:02d}-clean.jpg")
     square_path = _save_audit(
         square, config, task.title, ImageRole.ISOLATED, f"{index:02d}-square.jpg"
     )
@@ -2293,8 +2313,9 @@ def _picture_block(platforms: PlatformPlan) -> str:
     )
     lines.append(
         "- `audit/<product>/` - the evidence that never goes to a shop: `raw/` the photos "
-        "exactly as downloaded (proof of what the source showed) and `isolated/` after "
-        "background knock-out, 1:1 squaring and sharpening (1080x1080)."
+        "exactly as downloaded (proof of what the source showed), `clean/` the same photo "
+        "after a page-furniture gate cut it - written only for the rows that were cut - and "
+        "`isolated/` after background knock-out, 1:1 squaring and sharpening (1080x1080)."
     )
     return "\n".join(lines)
 

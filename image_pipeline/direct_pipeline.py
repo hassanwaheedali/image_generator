@@ -166,6 +166,8 @@ def process_direct_product(
 
         # The same furniture cleanup Option 1 runs before the ring test: a shop
         # promo strip glued to an edge is cut, not a reason to lose the photo.
+        # Kept for the audit: ``raw/`` is what the URL served, ``clean/`` what survived.
+        downloaded = image
         image, band = strip_promo_band(image, config)
         if band is not None:
             side, pixels = band
@@ -287,6 +289,7 @@ def process_direct_product(
             used_url=url,
             source_label="direct",
             image=image,
+            downloaded=downloaded,
             config=config,
             deps=deps,
             dedup=dedup,

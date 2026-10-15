@@ -548,6 +548,7 @@ output/
 ├── pipeline_run.log               the full log
 └── images/<product-slug>/
     ├── raw/          01-raw.jpg ...        exactly what was downloaded
+    ├── clean/        01-clean.jpg ...      only when a gate cut the photo (S7.band/seam/panel)
     ├── isolated/     01-square.jpg ...     background knocked out, 1:1, sharpened
     ├── final_digimall/01-digimall.jpg ...  final picture for DigiMall
     └── final_alfamall/01-alfamall.jpg ...  final picture for AlfaMall

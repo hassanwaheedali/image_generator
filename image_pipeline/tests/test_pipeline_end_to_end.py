@@ -2666,9 +2666,68 @@ def test_a_pasted_marketing_panel_is_cut_before_the_row_is_judged(tmp_path: Path
     assert accepted, [line["detail"] for line in lines]
     saved = sorted((config.audit_dir / safe_slug(result.title) / "raw").glob("*.jpg"))
     assert saved, result.title
-    with PILImage.open(saved[0]) as published:
-        assert published.size[1] < fixture.size[1]          # the panel is gone from the file too
+    with PILImage.open(saved[0]) as served:
+        assert served.size == fixture.size                     # the shop's own picture, intact
+    with PILImage.open(config.audit_dir / safe_slug(result.title) / "clean" / "01-clean.jpg") as cut:
+        assert cut.size[1] < fixture.size[1]                   # the cut is on the record beside it
     assert result.status in (Status.OK, Status.PARTIAL)
+
+
+def _decisions(tmp_path: Path) -> list[dict[str, object]]:
+    """Every line the run wrote to ``decisions.jsonl``, for a failure message."""
+    path = tmp_path / "out" / "decisions.jsonl"
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+
+
+def test_the_raw_folder_keeps_the_picture_the_shop_served(tmp_path: Path) -> None:
+    """``raw/`` is what the shop served; the cleanup gates' cut belongs in ``clean/``.
+
+    Both files used to be the same post-crop picture, so a row that published a sliced product
+    left no trace of what was cut or where.  Live case: the owner's Dawlance Dual Pro T3 of
+    2026-10-15, where a 520px "layout seam" trim took the bottom of the unit and the audit
+    folder showed only the result.
+    """
+    import io
+
+    from PIL import Image as PILImage
+    from test_image_quality import _unit_with_badge_panel
+
+    fixture = _unit_with_badge_panel(size=900)
+    buffer = io.BytesIO()
+    fixture.save(buffer, format="PNG")
+    config = live_config(tmp_path, min_short_side=120, min_long_side=200)
+    deps, _, _, _ = build_deps(
+        tmp_path, {HAIER_PAGE: load_fixture("product_ok")}, {IMG1: buffer.getvalue()}
+    )
+    result, accepted = process_product(
+        task(0, "Haier HSU-12HFPAA Inverter AC", (HAIER_PAGE,)), deps, config
+    )
+    assert accepted, [line["detail"] for line in _decisions(tmp_path)]
+    audit = config.audit_dir / safe_slug(result.title)
+    with PILImage.open(audit / "raw" / "01-raw.jpg") as served:
+        assert served.size == fixture.size, "raw is not the picture the shop served"
+    with PILImage.open(audit / "clean" / "01-clean.jpg") as cut:
+        assert cut.size[1] < fixture.size[1], "the cut the gates made was not recorded"
+
+
+def test_no_clean_folder_when_nothing_was_cut(tmp_path: Path) -> None:
+    """A cut is rare, so the folder is rare too - not a byte-for-byte twin of every raw."""
+    from PIL import Image as PILImage
+
+    config = live_config(tmp_path)
+    deps, _, _, _ = build_deps(
+        tmp_path, {HAIER_PAGE: load_fixture("product_ok")}, gallery_images()
+    )
+    result, accepted = process_product(
+        task(0, "Haier HSU-12HFPAA Inverter AC", (HAIER_PAGE,)), deps, config
+    )
+    assert accepted, [line["detail"] for line in _decisions(tmp_path)]
+    audit = config.audit_dir / safe_slug(result.title)
+    with PILImage.open(audit / "raw" / "01-raw.jpg") as served:
+        assert served.size == (900, 900)
+    assert not (audit / "clean").exists()
 
 
 def test_a_tinted_studio_wash_cannot_cost_the_row_the_brands_own_hero(tmp_path: Path) -> None:

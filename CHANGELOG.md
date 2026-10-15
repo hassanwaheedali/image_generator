@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refrigerator, washing machine, yellow sale template) and over a loopback-HTTP `--dry-run`.
 
 ### Fixed
+- **`audit/raw/` is the picture the shop served (owner run 2026-10-15).** The promo-strip,
+  seam and panel gates run before compose, and compose wrote *their output* to `raw/`, so the
+  audit held the result of a cut and never where it landed — which is why the sliced AC above
+  took a day to diagnose. `raw/` is now written from the download, and `clean/` appears beside
+  it only for a row whose photo was actually cut, so the folder is evidence and not a twin of
+  every file.
 - **The crop keeps the whole product, and only the primary image is background-cleaned (owner
   sample 2026-10-15).** Three holes in one path. (1) `_single_body_box` reached only
   `isolation_neighbor_distance_px` (35px), so the air cooler whose white shell is invisible to

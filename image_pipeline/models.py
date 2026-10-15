@@ -36,6 +36,7 @@ class ImageRole(str, Enum):
     """
 
     RAW = "raw"
+    CLEAN = "clean"
     ISOLATED = "isolated"
     REJECTED = "rejected"
 
