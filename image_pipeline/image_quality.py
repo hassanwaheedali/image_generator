@@ -559,6 +559,61 @@ def strip_promo_band(
     return cropped, (side, height - cropped.size[1])
 
 
+def _kept_edge_is_clear(
+    non_white: np.ndarray, orientation: str, at: int, config: PipelineConfig, *, kept_before: bool
+) -> bool:
+    """True when the side being kept does not begin with the product itself.
+
+    ``at`` is where the kept picture's edge lands.  A shop's layout divider has blank space
+    on both sides of it; a product's own edge line has the product pressed against it, and
+    trimming there is how an air conditioner lost its louvre (live 2026-10-15: 520px of a
+    Dawlance Dual Pro T3, 366px of a Hyper 18X - both scored 0.9 product at the cut line,
+    against 0.1 and 0.33 for the two trims that only removed empty space).
+    """
+    height, width = non_white.shape
+    size = width if orientation == "vertical" else height
+    depth = max(1, round(size * config.seam_kept_band_ratio))
+    if orientation == "vertical":
+        block = non_white[:, max(0, at - depth) : at] if kept_before else non_white[:, at : at + depth]
+    else:
+        block = non_white[max(0, at - depth) : at, :] if kept_before else non_white[at : at + depth, :]
+    if block.size == 0:
+        return False
+    return float(block.mean()) <= config.seam_kept_max_content_ratio
+
+
+def _seam_verdict(
+    non_white: np.ndarray, orientation: str, start: int, end: int, config: PipelineConfig
+) -> tuple[str, int, int] | None:
+    """The trim the marked run ``[start, end)`` offers, or ``None`` when it is not a seam.
+
+    Two things must hold: the sliver beyond the line is empty, which is what makes the line
+    furniture rather than picture, and the kept side starts on empty space, which is what
+    makes the cut safe.
+    """
+    height, width = non_white.shape
+    size = width if orientation == "vertical" else height
+    run = end - start
+    if run > config.seam_max_width_px or run > int(size * (1.0 - config.seam_keep_min_ratio)):
+        return None
+    if orientation == "vertical":
+        before, after = non_white[:, :start], non_white[:, end:]
+    else:
+        before, after = non_white[:start, :], non_white[end:, :]
+    # an empty side counts as zero content (the seam may sit right on the edge)
+    before_content = float(before.mean()) if start > 0 else 0.0
+    after_content = float(after.mean()) if end < size else 0.0
+    if min(before_content, after_content) > config.seam_offcut_max_content_ratio:
+        return None
+    keep_after = before_content <= after_content          # cut away the emptier side
+    edge = end if keep_after else start
+    if not _kept_edge_is_clear(non_white, orientation, edge, config, kept_before=not keep_after):
+        return None
+    if keep_after:
+        return f"{orientation}-start", end, end
+    return f"{orientation}-end", start, size - start
+
+
 def _scan_seam(
     non_white: np.ndarray, config: PipelineConfig, orientation: str
 ) -> tuple[str, int, int] | None:
@@ -570,12 +625,11 @@ def _scan_seam(
     height, width = non_white.shape
     if orientation == "vertical":
         counts = non_white.sum(axis=0)          # per column
-        span, size = height, width
+        span = height
     else:
         counts = non_white.sum(axis=1)          # per row
-        span, size = width, height
+        span = width
     marked = counts >= config.seam_min_span_ratio * span
-    limit = int(size * (1.0 - config.seam_keep_min_ratio))
 
     start = None
     for index in range(len(marked) + 1):
@@ -583,21 +637,10 @@ def _scan_seam(
         if inside and start is None:
             start = index
         elif not inside and start is not None:
-            run = index - start
-            if run <= config.seam_max_width_px and run <= limit:
-                keep_before = non_white[:, :start] if orientation == "vertical" else non_white[:start, :]
-                keep_after = non_white[:, index:] if orientation == "vertical" else non_white[index:, :]
-                # an empty side counts as zero content (the seam may sit right on the edge)
-                before_content = float(keep_before.mean()) if start > 0 else 0.0
-                after_content = float(keep_after.mean()) if index < size else 0.0
-                if min(before_content, after_content) <= config.seam_offcut_max_content_ratio:
-                    # cut away the emptier side - the product decides which side that is.
-                    # The seam columns/rows sit between ``start`` and ``index`` and are always
-                    # part of what is removed.
-                    if before_content <= after_content:
-                        return f"{orientation}-start", index, index
-                    return f"{orientation}-end", start, size - start
+            verdict = _seam_verdict(non_white, orientation, start, index, config)
             start = None
+            if verdict is not None:
+                return verdict
     return None
 
 

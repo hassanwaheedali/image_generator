@@ -578,6 +578,39 @@ def test_a_seam_beside_real_content_is_left_alone(config: PipelineConfig) -> Non
     assert trimmed is image
 
 
+def _appliance_photo(*, body_bottom: int, line_top: int) -> Image.Image:
+    """A studio frame of an appliance, drawn to the measurements that broke the seam rule.
+
+    The body is 90% of the width - wide, but under the 95% span bar - and the junction line
+    is 97%: a thin, full-width, near-black row, exactly what ``S7.seam`` reads as a shop's
+    layout divider.  Where the line sits relative to the body is the whole difference: glued
+    to it, the line *is* the product's own edge (live 2026-10-15: 520px of a Dawlance Dual
+    Pro T3 and 366px of a Hyper 18X were cut there); standing in blank space below it, the
+    line is furniture and the trim is what the rule was built to do.
+    """
+    image = Image.new("RGB", (1200, 1200), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((20, 300, 1100, body_bottom), fill=(236, 238, 242))
+    draw.rectangle((20, line_top, 1180, line_top + 3), fill=(70, 74, 82))
+    return image
+
+
+def test_a_products_own_edge_line_is_not_a_layout_seam(config: PipelineConfig) -> None:
+    """The cut has to land on empty space, not deep inside the product."""
+    image = _appliance_photo(body_bottom=676, line_top=677)
+    trimmed, removed = trim_edge_seams(image, config)
+    assert removed == [], removed
+    assert trimmed is image
+
+
+def test_a_divider_standing_in_blank_space_is_still_trimmed(config: PipelineConfig) -> None:
+    """The guard must not blind the rule to the furniture it exists to remove."""
+    image = _appliance_photo(body_bottom=640, line_top=660)
+    trimmed, removed = trim_edge_seams(image, config)
+    assert removed and removed[0][0] == "horizontal-end", removed
+    assert trimmed.size[1] <= 660
+
+
 # --------------------------------------------------------------------------- #
 # User order (2026-10-06): the new brand templates + "big, centred, never on the
 # logo, never glued to the bottom".

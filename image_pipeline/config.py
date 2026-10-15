@@ -779,6 +779,13 @@ class PipelineConfig:
     seam_keep_min_ratio: float = 0.5
     #: How many seams may be trimmed (one per pass), e.g. a side line plus an edge line.
     seam_max_passes: int = 3
+    #: How deep inside the kept picture to look when judging where a cut would land, as a
+    #: share of the frame.  A shop's layout divider has blank space on both sides of itself.
+    seam_kept_band_ratio: float = 0.01
+    #: How much product may sit in that band before the trim is refused.  Measured on the
+    #: live assets of 2026-10-15: the two cuts that sliced a product scored 0.90 and 0.94,
+    #: the two that removed only blank space scored 0.10 and 0.33.
+    seam_kept_max_content_ratio: float = 0.5
     template_white_cutoff: int = 250
     template_make_white_transparent: bool = True
     #: A template counts as "already transparent" only when it really contains translucent
@@ -1047,6 +1054,8 @@ class PipelineConfig:
             ("seam_min_span_ratio", self.seam_min_span_ratio),
             ("seam_offcut_max_content_ratio", self.seam_offcut_max_content_ratio),
             ("seam_keep_min_ratio", self.seam_keep_min_ratio),
+            ("seam_kept_band_ratio", self.seam_kept_band_ratio),
+            ("seam_kept_max_content_ratio", self.seam_kept_max_content_ratio),
         ):
             if not 0.0 < value <= 1.0:
                 raise ConfigError(f"{name} must be in (0, 1]")

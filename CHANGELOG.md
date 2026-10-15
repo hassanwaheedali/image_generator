@@ -23,6 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refrigerator, washing machine, yellow sale template) and over a loopback-HTTP `--dry-run`.
 
 ### Fixed
+- **A product's own edge line is not a shop layout seam (owner run 2026-10-15).** `S7.seam`
+  trims a thin full-width divider when one side of it is empty — which the bottom edge of an
+  air conditioner's body also is. It cut 520px off the Dawlance Dual Pro T3 hero and 366px off
+  a Hyper 18X, and both published with the louvre sliced away. The scan now also asks what the
+  *kept* side begins with: a shop's divider has blank space on both sides of itself, a
+  product's edge has the product pressed against it. Measured over the five live assets the
+  rule had already trimmed: the two product slices (0.90 and 0.94 product at the cut line) are
+  refused, the two genuine furniture cuts (0.10 and 0.33) still trim, one no longer fires.
+  Thresholds `seam_kept_band_ratio` and `seam_kept_max_content_ratio`. Refusing costs no row —
+  the untrimmed photo passes S7 on its four neutral corners.
 - **A camel-case file of the row's own line is ours (owner run 2026-10-12 false
   positive).** The `E-Comfort Pro KEC-1267S` row's own hero on kenwoodpakistan.pk is
   `eComfortPro.png` - the line name glued into one camel hump. The wrong-product limb
