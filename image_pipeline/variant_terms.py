@@ -33,8 +33,10 @@ straight in.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from typing import Literal
 
+from similarity import similar
 from textnorm import normalize_text
 
 # --------------------------------------------------------------------------- #
@@ -160,17 +162,87 @@ def primary_colour_word(text: str) -> str | None:
     (9178-WB)"), so the last word is the one that describes the picture.  A multi-word
     synonym resolves to its head word (``matte black`` -> ``black``) so that a longer
     name for the same colour compares equal.  ``None`` when no known colour appears.
+
+    :func:`colour_phrase` reads the same position and keeps the shade in front of it.
     """
-    padded = _padded(text)
-    best: tuple[int, int, str] | None = None
-    for synonym in _COLOUR_SYNONYMS:
-        start = padded.rfind(f" {synonym} ")
-        if start < 0:
+    return colour_phrase(text)[0] or None
+
+
+#: Verdict of :func:`shade_agreement`, same three-way shape as :class:`SuffixVerdict`.
+ShadeVerdict = Literal["same", "omitted", "different"]
+
+#: Every word a colour name can end on, in the vocabulary's own spelling.
+_HEADS: dict[str, str] = {
+    synonym.split()[-1]: _canonical(synonym.split()[-1])
+    for synonyms in COLOUR_FAMILIES.values()
+    for synonym in synonyms
+}
+
+#: The two-word colour names the vocabulary already holds (``off white``, ``matte black``,
+#: ``rose gold``).  Inside one of them the first word *is* part of the colour, not a second
+#: attribute about it - which is what keeps ``off`` from posing as a colourway of white.
+_COMPOUND_COLOURS: frozenset[str] = frozenset(
+    normalize_text(synonym)
+    for synonyms in COLOUR_FAMILIES.values()
+    for synonym in synonyms
+    if len(synonym.split()) > 1
+)
+
+
+def colour_phrase(text: str, shade_words: Iterable[str] = ()) -> tuple[str, str]:
+    """The colour ``text`` sells, as ``(head, shade)`` - ``Pearl Red`` -> ``("red", "pearl")``.
+
+    The head is exactly :func:`primary_colour_word`'s answer.  The shade is the single word
+    standing in front of it, and only when that word names a colour of its own (``pearl``,
+    ``emerald``) or the caller was taught that it does (``ruby``, ``hairline`` - the
+    catalogue proves those; no list of them belongs in this file).  An unknown word in that
+    slot is a series name or a category noun, not a colour, so ``inverter red`` states no
+    shade and can never veto a page.  ``("", "")`` when the text names no colour at all.
+    """
+    taught = {_canonical(word) for word in shade_words}
+    tokens = normalize_text(text).split()
+    for index in range(len(tokens) - 1, -1, -1):
+        head = _HEADS.get(tokens[index])
+        if head is None:
             continue
-        candidate = (start + len(synonym), start, synonym)   # latest end, then latest start
-        if best is None or candidate[:2] > best[:2]:
-            best = candidate
-    return _canonical(best[2]) if best is not None else None
+        shade = ""
+        if index:
+            previous = _canonical(tokens[index - 1])
+            if f"{previous} {head}" not in _COMPOUND_COLOURS and (
+                previous in _HEADS or previous in taught
+            ):
+                shade = previous
+        return head, shade
+    return "", ""
+
+
+def shade_agreement(row: tuple[str, str], page: tuple[str, str]) -> ShadeVerdict:
+    """Whether a row's colour and a page's colour describe the same picture.
+
+    Three verdicts, and only ``different`` ever speaks:
+
+    * ``same`` - the two shades are one colour: the same word however it is spelled
+      (``matt`` ~ ``matte``, because a page that re-types the word is not a different
+      colourway), or two *finish* names the vocabulary already knows as one colour
+      (``silver`` ~ ``chrome``, both grey) - the same carve-out :func:`_same_colour`
+      makes for heads, since makers spell a finish several ways and use it as a series name;
+    * ``omitted`` - one side states no shade, or the two colours are not the same family.
+      The family case is left alone on purpose: :func:`colour_word_conflict` already
+      rejects it, so this rule only ever *adds* the same-family-different-shade veto that
+      rule could not see, and never changes a verdict that already exists;
+    * ``different`` - one colour, two shades.  A different shade of the same colour is a
+      different picture (owner 2026-10-16: 9140-WB is sold as Pearl, Ruby and Diamond Red,
+      and only the shade says which one the customer was promised).
+    """
+    row_head, row_shade = row
+    page_head, page_shade = page
+    if not row_head or not page_head or not _same_colour(row_head, page_head):
+        return "omitted"
+    if not row_shade or not page_shade:
+        return "omitted"
+    if similar(row_shade, page_shade) or _same_colour(row_shade, page_shade):
+        return "same"
+    return "different"
 
 
 def colour_word_conflict(title_word: str | None, page_text: str) -> bool:

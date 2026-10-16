@@ -8,11 +8,13 @@ a config or the network.  The pipeline behaviour they drive is covered in
 from __future__ import annotations
 
 from variant_terms import (
+    colour_phrase,
     colour_word_conflict,
     colour_words,
     identity_alpha_tail,
     primary_colour_conflict,
     primary_colour_word,
+    shade_agreement,
     suffix_agreement,
 )
 
@@ -266,3 +268,57 @@ def test_an_unknown_colourway_is_separated_dynamically_not_by_a_table() -> None:
     assert same.matched and not same.tolerated       # identical name words -> exact
     # and the known chromatic pair still conflicts through the colour rule
     assert colour_word_conflict("red", "PEL Water Dispenser Maroon Blaze")
+
+
+# --------------------------------------------------------------------------- #
+# colour_phrase / shade_agreement (owner 2026-10-16: "color red is not enough -
+# 9140 ships as Pearl Red, Ruby Red and Diamond Red, and only the shade is the picture")
+# --------------------------------------------------------------------------- #
+def test_the_shade_in_front_of_a_colour_is_read_as_part_of_the_colour() -> None:
+    """A word the vocabulary already knows needs no teaching: ``pearl`` is a colour."""
+    assert colour_phrase("dawlance avante refrigerator 9 cu ft pearl red") == ("red", "pearl")
+    assert colour_phrase("haier refrigerator 7 cu ft mist green", {"mist"}) == ("green", "mist")
+    assert colour_phrase("haier refrigerator 7 cu ft mist green") == ("green", "")
+
+
+def test_a_two_word_colour_the_vocabulary_already_knows_names_no_second_shade() -> None:
+    """``off white`` is one colour name, so ``off`` must not pose as a colourway."""
+    assert colour_phrase("dawlance refrigerator off white") == ("white", "")
+    assert colour_phrase("washer matte black") == ("black", "")
+    assert colour_phrase("haier inverter ac silk white", {"silk"}) == ("white", "silk")
+
+
+def test_an_unknown_word_names_a_shade_only_once_the_catalogue_taught_it() -> None:
+    assert colour_phrase("dawlance avante ruby red", {"ruby"}) == ("red", "ruby")
+    assert colour_phrase("dawlance avante ruby red") == ("red", "")
+
+
+def test_a_text_naming_no_colour_has_no_phrase() -> None:
+    assert colour_phrase("haier thunder inverter ac 1.5 ton") == ("", "")
+
+
+def test_two_pages_stating_the_same_shade_of_the_same_colour_agree() -> None:
+    assert shade_agreement(("red", "pearl"), ("red", "pearl")) == "same"
+    assert shade_agreement(("grey", "silver"), ("grey", "chrome")) == "same"
+
+
+def test_a_different_shade_of_the_same_colour_is_the_only_hard_word() -> None:
+    assert shade_agreement(("red", "pearl"), ("red", "ruby")) == "different"
+
+
+def test_an_unstated_shade_is_never_a_rejection() -> None:
+    """The standing doctrine: what cannot be read is no opinion, not a contradiction."""
+    assert shade_agreement(("red", "pearl"), ("red", "")) == "omitted"
+    assert shade_agreement(("red", ""), ("red", "pearl")) == "omitted"
+    assert shade_agreement(("", ""), ("red", "pearl")) == "omitted"
+
+
+def test_another_colour_is_left_to_the_colour_rule_that_already_rejects_it() -> None:
+    """red vs burgundy vs copper are told apart by ``colour_word_conflict``, not here."""
+    assert shade_agreement(("red", "pearl"), ("copper", "pearl")) == "omitted"
+    assert shade_agreement(("red", "pearl"), ("burgundy", "pearl")) == "omitted"
+
+
+def test_a_shade_spelled_two_ways_is_still_one_shade() -> None:
+    assert shade_agreement(("black", "matte"), ("black", "matt")) == "same"
+    assert shade_agreement(("green", "meadow"), ("green", "medow")) == "same"

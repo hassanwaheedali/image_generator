@@ -611,11 +611,17 @@ def _check_local_images(
     return exit_code
 
 
-def _learn_tier_differentiators(config: PipelineConfig, tasks: list[ProductTask]) -> None:
-    """Install the tier words the catalogue data itself proves (see model_matching)."""
+def _learn_differentiators(config: PipelineConfig, tasks: list[ProductTask]) -> None:
+    """Install the words the catalogue data itself proves (see model_matching).
+
+    Two sets come out of one scan: the tier words that separate ``Avante`` from
+    ``Avante+``, and the colourway words that separate ``Pearl Red`` from ``Ruby Red``.
+    The tiers are learned first because the colourway reader counts series lines, and a
+    series line is named by the tier-aware name words.
+    """
     import csv
 
-    from model_matching import learn_series_differentiators
+    from model_matching import learn_colourway_words, learn_series_differentiators
     from url_filters import detect_brand
 
     pairs: list[tuple[str | None, str]] = []
@@ -639,6 +645,15 @@ def _learn_tier_differentiators(config: PipelineConfig, tasks: list[ProductTask]
     LOG.info(
         "series differentiators learned from %d title(s): %s",
         len(pairs), ", ".join(sorted(learned)) or "none",
+    )
+    colourways = learn_colourway_words(
+        pairs,
+        min_evidence=config.colourway_min_evidence,
+        min_exclusivity=config.colourway_min_exclusivity,
+    )
+    LOG.info(
+        "colourway words learned from %d title(s): %s",
+        len(pairs), ", ".join(sorted(colourways)) or "none",
     )
 
 
@@ -710,10 +725,10 @@ def main(argv: list[str] | None = None) -> int:
     # series word belongs to another product, whatever the page's status (Orient run
     # 2026-10-10: the Pulse row published the Innova file).  Computed over the whole
     # sheet before ``--limit`` trims the view.
-    # ``_learn_tier_differentiators`` runs first: sibling rows prove which short words
+    # ``_learn_differentiators`` runs first: sibling rows prove which short words
     # (``+`` of ``Avante+``, ``Pro`` of ``Acce Pro``) separate two sold variants, and
     # those words must already be name words when the sibling terms are read out.
-    _learn_tier_differentiators(config, tasks)
+    _learn_differentiators(config, tasks)
     from model_matching import annotate_sibling_terms, annotate_tail_owners
 
     tasks = annotate_sibling_terms(tasks)
@@ -786,7 +801,29 @@ def main(argv: list[str] | None = None) -> int:
     write_output_csvs(everything, config, platforms)
     _write_failed_helper_csvs(everything, tasks, config)
     summarize(everything, config)
+    _report_unstated_shades(tasks)
     return 0
+
+
+def _report_unstated_shades(tasks: list[ProductTask]) -> None:
+    """S20.shade-unstated: rows whose own link names a shade the sheet leaves out.
+
+    The matcher cannot invent a colourway the row never states, and a bare "Red" is three
+    different fridges (owner 2026-10-16).  Listing the rows once at the end is what turns a
+    wrong picture into one line of the sheet to fix.
+    """
+    from model_matching import shade_unstated_rows
+
+    unstated = shade_unstated_rows(tasks)
+    if not unstated:
+        return
+    print(
+        f"\nSHADE NOT STATED ({len(unstated)}) - the row's own link names a colourway the "
+        "title does not.\nWrite it into the title (e.g. 'Pearl Red', not 'Red') and the "
+        "other shades of the same\ncolour stop being accepted for that row:"
+    )
+    for title, shade in unstated:
+        print(f"  - {csv_escape(title)}  -> {shade}")
 
 
 def _write_failed_helper_csvs(

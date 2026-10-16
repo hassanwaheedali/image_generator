@@ -539,8 +539,9 @@ def verify_page(
         )
     elif decision.rule == "colour_conflict":
         # The page carries the model's own code but a different colourway.
+        colour = f"{keys.colour_shade} {keys.colour_word}".strip()
         detail = (
-            f"page shows another colourway (title: {keys.colour_word}) - "
+            f"page shows another colourway (title: {colour}) - "
             "a different colour is a different product"
         )
     elif strength == 0:

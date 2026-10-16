@@ -31,9 +31,10 @@ from textnorm import WHITESPACE_RE, normalize_key, normalize_text
 from url_filters import KNOWN_BRANDS, page_product_brand
 from variant_terms import (
     COLOUR_FAMILIES,
+    colour_phrase,
     colour_word_conflict,
     is_colour_word,
-    primary_colour_word,
+    shade_agreement,
     suffix_agreement,
 )
 
@@ -507,6 +508,35 @@ def _looks_like_series_head(token: str, brand: str | None) -> bool:
     return _keep_name_segment(token) or model_like_token(token)
 
 
+def _foreign_series_veto(
+    page_words: set[str],
+    *,
+    series: frozenset[str],
+    sibling_terms: frozenset[str],
+    own_terms: frozenset[str],
+) -> bool:
+    """True when the page's own name belongs to another row of this sheet.
+
+    The same sheet evidence S4's file limb uses: a word naming exactly one *other* row
+    names another product, and live run 2026-10-15 showed the Xtreme and Titan pages
+    carrying our Go Easy tail - a row whose only free word after its code is a shared
+    spec name (``T3 Plus``) armed on them.  The word this limb itself demands of the
+    page can never veto it, and a name anchored by one of this row's own line words is
+    kept (live 2026-10-11: ``…Hyper-18X-T3-Super-White-Turbo-Pro`` says ``turbo``,
+    another row's word, beside its own name - decoration, not identity).
+    """
+    if page_words & _own_anchor_words(own_terms):
+        return False
+    return bool((sibling_terms - series) & page_words)
+
+
+def _foreign_head_on_tail(token: str, *, head: str, series: frozenset[str], brand: str | None) -> bool:
+    """True when a token glued directly before our tail run names another series."""
+    if not token or token == head or token in series:
+        return False
+    return _looks_like_series_head(token, brand)
+
+
 def tail_chunk_match(
     name_text: str,
     *,
@@ -514,6 +544,8 @@ def tail_chunk_match(
     keys: ModelKeys,
     brand: str | None,
     tail_owner_count: int,
+    sibling_terms: frozenset[str] = frozenset(),
+    own_terms: frozenset[str] = frozenset(),
     max_page_codes: int = TAIL_MATCH_MAX_PAGE_CODES,
 ) -> str | None:
     """Safeguard S1.tail / S15.tail - the sheet's own code, written shortly by a retailer.
@@ -526,13 +558,15 @@ def tail_chunk_match(
     forty related-product codes that would drown every guard - and a catalogue listing
     names only "Air Conditioners", so it never carries our tail in its name.  Every
     guard must hold *at once*, because each one alone has a proven false-accept in that
-    run: the tail also appears on Xtreme and Titan pages (head veto + series word),
-    ``18HRFN1`` alone is shared across series (complete run, whole chunks only), a
-    crowded name is a listing not a product (code-count refusal), and another colourway
-    is another product (colour veto).  ``tail_owner_count`` is the sheet's verdict: a
-    tail naming zero or several rows never arms - ambiguity is never resolved silently.
-    Returns the evidence line when armed, ``None`` when not; the caller still runs every
-    image gate.
+    run: the tail also appears on Xtreme and Titan pages (the head veto, the sheet's own
+    series word, and ``sibling_terms`` from :func:`annotate_sibling_terms` - a foreign
+    series word in the page's name, stood down when that name carries one of this row's
+    own line words exactly as S4's file limb is), ``18HRFN1`` alone is shared across
+    series (complete run, whole chunks only), a crowded name is a listing not a product
+    (code-count refusal), and another colourway is another product (colour veto).
+    ``tail_owner_count`` is the sheet's verdict: a tail naming zero or several rows
+    never arms - ambiguity is never resolved silently.  Returns the evidence line when
+    armed, ``None`` when not; the caller still runs every image gate.
     """
     if tail_owner_count != 1:
         return None
@@ -546,22 +580,22 @@ def tail_chunk_match(
     row_tons = _tonnage_set(title)
     if not row_tons or not row_tons & _tonnage_set(name_text):
         return None
-    if keys.colour_word and colour_word_conflict(keys.colour_word, name_text):
-        return None
+    if keys.colour_word and (
+        colour_word_conflict(keys.colour_word, name_text)
+        or _shade_veto(keys, name_text, "")
+    ):
+        return None  # another colour, or our colour under another shade, is another picture
     if len(set(code_like_tokens(name_text))) > max_page_codes:
         return None
     tokens = [t for t in re.split(r"[^a-z0-9]+", name_text.lower()) if t]
     page_words = set(tokens)
+    if _foreign_series_veto(page_words, series=series, sibling_terms=sibling_terms, own_terms=own_terms):
+        return None  # the page's own name belongs to another row of this sheet
     for index in range(len(tokens) - len(tail) + 1):
         if tuple(tokens[index : index + len(tail)]) != tail:
             continue
         before = tokens[index - 1] if index > 0 else ""
-        if (
-            before
-            and before != head
-            and before not in series
-            and _looks_like_series_head(before, brand)
-        ):
+        if _foreign_head_on_tail(before, head=head, series=series, brand=brand):
             return None  # another series' head sits on our tail - refuse, loud
         if series.issubset(page_words):
             return (
@@ -627,7 +661,7 @@ def _token_and_identity(words: list[str], index: int, max_extra: int) -> tuple[s
 # colourway ("Ocean Mist") is the only thing left to compare.  Generic vocabulary,
 # not per-product data.
 _GENERIC_NAME_WORDS = frozenset((
-    "refrigerator", "fridge", "freezer", "washing", "machine", "washer", "dryer",
+    "refrigerator", "fridge", "freezer", "washing", "machine", "washer", "dishwasher", "dryer",
     "dispenser", "conditioner", "inverter", "converter", "on", "top", "bottom",
     "glass", "door", "doors", "tap", "taps", "straight", "water", "cool", "cooler",
     "cu", "ft", "capacity", "litre", "liters", "gallon", "kg", "watt", "ton", "tons",
@@ -835,16 +869,19 @@ def _tier_pair_evidence(
     return evidence
 
 
-def _is_tier_word(
+def _word_clears_brand_and_noise(
     word: str,
-    lines: set[tuple[str, frozenset[str]]],
     word_freq: Counter[str],
     brand_keys: set[str],
 ) -> bool:
-    """Whether one candidate word survives the structural guards (see the learner)."""
-    if len(lines) < 2 or len(word) < 3:
-        return False
-    if word in brand_keys or word in KNOWN_BRANDS:
+    """Whether a learned candidate is neither a brand nor an abbreviation of noise.
+
+    Shared by every word the catalogue teaches (tiers and colourways alike): a candidate
+    is refused when it *is* a brand, or when it is the head of a much more common brand or
+    category word - ``INV`` of ``inverter``, ``DAW`` of ``Dawlance`` - because in that case
+    it is an abbreviation of something that names no product.
+    """
+    if normalize_key(word) in brand_keys or word in KNOWN_BRANDS:
         return False
     noise_words = _GENERIC_NAME_WORDS | _DYNAMIC_GENERIC_NAME_WORDS
     return not any(
@@ -854,6 +891,18 @@ def _is_tier_word(
         and (longer in KNOWN_BRANDS or longer in noise_words)
         for longer, count in word_freq.items()
     )
+
+
+def _is_tier_word(
+    word: str,
+    lines: set[tuple[str, frozenset[str]]],
+    word_freq: Counter[str],
+    brand_keys: set[str],
+) -> bool:
+    """Whether one candidate word survives the structural guards (see the learner)."""
+    if len(lines) < 2 or len(word) < 3:
+        return False
+    return _word_clears_brand_and_noise(word, word_freq, brand_keys)
 
 
 def learn_series_differentiators(
@@ -890,6 +939,117 @@ def learn_series_differentiators(
     }
     set_series_differentiators(learned | {w.strip().lower() for w in extra if w.strip()})
     return _SERIES_DIFFERENTIATORS
+
+
+# --------------------------------------------------------------------------- #
+# learned colourway (shade) words
+# --------------------------------------------------------------------------- #
+#: A row can state "Red" and still mean one of three different refrigerators - 9140-WB
+#: is sold as Pearl Red, Ruby Red and Diamond Red, and only the shade picks the picture.
+#: The words that name a shade are listed nowhere.  The catalogue proves them instead: a
+#: word is a colourway word when it sits in front of a colour name repeatedly, does it on
+#: more than one series line, and is at home nowhere else.  Measured, not asserted - the
+#: same doctrine that keeps ``plus`` and ``pro`` out of a hand table above.
+_COLOURWAY_MIN_EVIDENCE = 2
+_COLOURWAY_MIN_EXCLUSIVITY = 0.6
+_COLOURWAY_MIN_WORD_LENGTH = 4
+
+#: Every word a colour name can end on (``midnight black`` -> ``black``), so the slot in
+#: front of a colour is found without maintaining a second vocabulary.
+_COLOURWAY_HEADS = frozenset(
+    synonym.split()[-1] for synonyms in COLOUR_FAMILIES.values() for synonym in synonyms
+)
+
+_COLOURWAY_WORDS: frozenset[str] = frozenset()
+
+
+def set_colourway_words(words: Iterable[str]) -> None:
+    """Install the colourway set for this run (replaces, never unions).
+
+    Same contract as :func:`set_series_differentiators`: cached title keys read their
+    colour phrase from this set, so the cache is cleared with it.
+    """
+    global _COLOURWAY_WORDS
+    _COLOURWAY_WORDS = frozenset(w.strip().lower() for w in words if w.strip())
+    _build.cache_clear()
+
+
+def colourway_words() -> frozenset[str]:
+    """The colourway words currently in force (for tests and callers that report state)."""
+    return _COLOURWAY_WORDS
+
+
+def _colour_slot_words(title: str) -> tuple[str, ...]:
+    """Every unknown word sitting immediately in front of a colour name in one title.
+
+    ``… 9 Cu Ft Pearl Red (9140-WB-GD)``, ``… 12 Cu Ft Hairline Black (9178-WB)`` and
+    ``… 20 Ltr Blue`` all fill the slot, and most of what comes out of it names no colour
+    - the learner decides.  Words the colour vocabulary already knows (``pearl``,
+    ``chrome``) are left out on purpose: they read as shades without any teaching, and
+    learning them would let a finish word that makers use as a series name (``Dawlance
+    **Chrome**``) pose as a colourway.  Digits are transparent, so ``Frost 20 Pro White``
+    still offers ``pro``, exactly as the tier reader does.
+    """
+    words = [word for word in normalize_text(title).split() if word.isalpha()]
+    return tuple(
+        words[index - 1]
+        for index in range(1, len(words))
+        if words[index] in _COLOURWAY_HEADS
+        and len(words[index - 1]) >= _COLOURWAY_MIN_WORD_LENGTH
+        and not is_colour_word(words[index - 1])
+    )
+
+
+def learn_colourway_words(
+    pairs: Iterable[tuple[str | None, str]],
+    *,
+    extra: Iterable[str] = (),
+    min_evidence: int = _COLOURWAY_MIN_EVIDENCE,
+    min_exclusivity: float = _COLOURWAY_MIN_EXCLUSIVITY,
+) -> frozenset[str]:
+    """Derive the shade words the catalogue itself proves and install them.
+
+    Run the tier learner first: the series lines counted here are its name words, so the
+    two learners share one reading of every title.
+
+    A slot word is installed when all of these hold.  It names a colour in front of a
+    colour head at least ``min_evidence`` times; those uses are at least
+    ``min_exclusivity`` of *every* use of the word in the catalogue, which is what tells
+    ``hairline`` (27 of 27) from ``grill`` or ``inverter`` (a handful of slots inside
+    hundreds of ordinary mentions); it does so on **two different series lines**, because
+    one title can be an accident; and it survives the shared brand/abbreviation guards and
+    the standing category-noise list, which is the difference from the tier learner -
+    ``pro`` is a tier only because two sibling rows prove it, while a slot word has no
+    such proof and ``machine`` would otherwise be taught as a colourway.
+
+    Nothing learned is a fail-open, not a risk: an unlearned shade word simply keeps
+    today's colour reading, which can cost a protection but can never reject a page.
+    """
+    set_colourway_words(())
+    rows = [(brand, title) for brand, title in pairs if title and title.strip()]
+    _grouped, word_freq, brand_keys = _tier_pair_rows(rows)
+    slot: Counter[str] = Counter()
+    lines: dict[str, set[tuple[str, frozenset[str]]]] = {}
+    for brand, title in rows:
+        key = normalize_key(brand or "")
+        if len(key) < 4:
+            continue  # a brand-less row cannot say which line it belongs to
+        base = frozenset(_name_segments(title)[0])
+        for word in _colour_slot_words(title):
+            slot[word] += 1
+            lines.setdefault(word, set()).add((key, base))
+    noise = _GENERIC_NAME_WORDS | _DYNAMIC_GENERIC_NAME_WORDS
+    learned = {
+        word
+        for word, count in slot.items()
+        if count >= min_evidence
+        and count >= min_exclusivity * word_freq.get(word, count)
+        and len(lines[word]) >= 2
+        and word not in noise
+        and _word_clears_brand_and_noise(word, word_freq, brand_keys)
+    }
+    set_colourway_words(learned | {w.strip().lower() for w in extra if w.strip()})
+    return _COLOURWAY_WORDS
 
 
 def _name_words(title: str) -> tuple[str, ...]:
@@ -1016,6 +1176,7 @@ def _build(
             tokens, identities = scan(" ".join(kept).split())
 
     title_key = normalize_key(cleaned) if allow_title_only else ""
+    colour_word, colour_shade = colour_phrase(title, _COLOURWAY_WORDS)
 
     return ModelKeys(
         cleaned_title=cleaned,
@@ -1024,9 +1185,13 @@ def _build(
         identities=identities,
         colours=tuple(sorted(extract_colour_families(title))),
         variant_facts=tuple(sorted(extract_variant_facts(title).items())),
-        colour_word=primary_colour_word(title) or "",
+        colour_word=colour_word,
+        colour_shade=colour_shade,
         name_words=_name_words(title),
         keywords=() if tokens else _keyword_tokens(title),
+        colourway_markers=frozenset(
+            hit.group(2).lower() for hit in _INLINE_COLOURWAY_RE.finditer(title)
+        ),
     )
 
 
@@ -1129,7 +1294,7 @@ def _leading_code_stem(segment: str) -> str:
     this stem nor its suffix; a shop that prints *another* colourway shows the same
     stem with a different tail - Haier sells the identical body as ``023WDC-OW-T3``
     (Ocean White) and ``023WDC-DG-T3`` (Dark Grey).  The stem is what tells those
-    two apart, so the slash tolerance can only fire when the page has *no* stem.
+    apart: a page showing it is a page that knows this factory code.
     """
     for chunk in re.split(r"[-_/ ]+", segment):
         core = normalize_key(chunk)
@@ -1138,7 +1303,9 @@ def _leading_code_stem(segment: str) -> str:
     return ""
 
 
-def _slash_segment_hit(token: str, core: str, normalized: str) -> bool:
+def _slash_segment_hit(
+    token: str, core: str, normalized: str, colourways: frozenset[str] = frozenset()
+) -> bool:
     """True when one ``/``-separated segment of the token matches on its own.
 
     Haier sheets print ``HSU-13HFCP/023WDC(W)``: the part before the slash is the
@@ -1149,11 +1316,14 @@ def _slash_segment_hit(token: str, core: str, normalized: str) -> bool:
     chars) and keeps the boundary-anchored pattern, so ``HSU-12`` still never
     matches inside ``HSU-12HFPAA``.
 
-    Refused when the page carries the *other* side's stem but not our full suffix
-    (live 2026-10-15: the Dark-Grey page ``…023WDC-DG-T3…`` was wrongly accepted
-    as an Ocean-White row whose code is ``…023WDC(OW)-T3…``).
+    A row that states a colourway is held to it (live 2026-10-15: Haier's Dark-Grey
+    page was accepted as an Ocean-White row because both print the same customer
+    model).  When the page *does* carry the factory code's stem but not our colourway
+    it is a different finish, not a shop that left the code out, so the tolerance is
+    refused.  Rows that state no colourway keep the original lenient behaviour.
     """
-    for segment in token.split("/"):
+    segments = token.split("/")
+    for segment in segments:
         seg_core = normalize_key(segment)
         if len(seg_core) < 3 or seg_core == core:
             continue
@@ -1161,19 +1331,21 @@ def _slash_segment_hit(token: str, core: str, normalized: str) -> bool:
             continue
         if not _compiled(seg_core).search(normalized):
             continue
-        others = [s for s in token.split("/") if s != segment]
-        if any(
+        if colourways and any(
             (stem := _leading_code_stem(other))
             and _compiled(stem).search(normalized)
             and not _compiled(normalize_key(other)).search(normalized)
-            for other in others
+            for other in segments
+            if other != segment
         ):
-            continue  # the page prints the other side under a different colourway
+            continue  # the page prints that factory code under another colourway
         return True
     return False
 
 
-def _segment_truncation_hit(token: str, core: str, normalized: str) -> bool:
+def _segment_truncation_hit(
+    token: str, core: str, normalized: str, colourways: frozenset[str] = frozenset()
+) -> bool:
     """True when the token minus its trailing ``-suffix`` segment matches the page.
 
     GREE sheets print ``GS-12PITH17G-T3`` while the product page prints the model
@@ -1183,15 +1355,16 @@ def _segment_truncation_hit(token: str, core: str, normalized: str) -> bool:
     remainder still has to be model-like (letters *and* digits), so ``9160-WB``
     never degenerates to ``9160`` and ``PWM-1250`` never to ``PWM``.
 
-    A short pure-letter tail (``OW``, ``GD``, ``W``) is a **colourway**, not a
-    series tail: dropping it would let a different-colour page pass as our model
-    (live 2026-10-15), so it is never truncated.
+    The one thing that may never be dropped is a colourway the sheet wrote into the
+    code (``(OW)`` names the finish, so a page without it is another product).  It is
+    matched against the sheet's own marker, never against the shape of a short tail:
+    ``DF-300-ES`` and ``DW-128-G`` are series tails and stay truncatable.
     """
     segments = [part for part in re.split(r"[-_/ ]+", token) if part]
     for drop in (1, 2):
         if len(segments) <= drop:
             continue
-        if any(re.fullmatch(r"[A-Za-z]{1,4}", part) for part in segments[-drop:]):
+        if colourways and any(part.lower() in colourways for part in segments[-drop:]):
             continue
         if segments[-drop].isdigit() or re.search(r"\d{2,}", segments[-drop]):
             continue
@@ -1200,7 +1373,41 @@ def _segment_truncation_hit(token: str, core: str, normalized: str) -> bool:
             continue
         if not re.search(r"[a-z]", candidate) or not re.search(r"[0-9]", candidate):
             continue
-        if _compiled(candidate).search(normalized):
+        if _compiled(candidate).search(normalized) and not _page_names_other_short_tail(
+            candidate, normalized, frozenset(normalize_key(part) for part in segments[-drop:])
+        ):
+            return True
+    return False
+
+
+def _page_names_other_short_tail(
+    stem: str, normalized: str, our_tails: frozenset[str]
+) -> bool:
+    """True when the page carries ``stem`` and ends it with a **different** short tail.
+
+    ``9140-WB-GD`` row, ``9140WB-RB`` page: the shop did not leave our tail out, it printed
+    another one - and a short pure-letter tail is a colourway code, not noise (owner
+    2026-10-15).  This is the contradiction half of the standing rule; omission stays
+    innocent, so the page that really drops our tail still matches.
+
+    The glued stem, its last run and its last digit+letter pair are all tried
+    (``hsu13hfcp023wdc`` anchors whole, its tail only after ``023wdc``), because a sheet
+    glues what a page prints apart and an anchor that misses the spelling misses the fact.
+    What the page legitimately puts there is skipped, using vocabulary the pipeline already
+    keeps rather than a new list: a colour (``9140WB Red``), a category or marketing word,
+    one of our own dropped tails, and anything with a digit (``023WDC-T3`` is a series tail,
+    never a colourway).
+    """
+    if not stem:
+        return False
+    runs = _MODEL_RUN_RE.findall(stem)
+    anchors = {stem} | {"".join(runs[-length:]) for length in (1, 2) if len(runs) >= length}
+    tail_re = r"[\s\-_/.]*([a-z]{2,3})(?![a-z0-9])"
+    for anchor in sorted(anchors, key=len, reverse=True):
+        for hit in re.compile(_compiled(anchor).pattern + tail_re).finditer(normalized):
+            tail = hit.group(1)
+            if tail in our_tails or tail in _GENERIC_NAME_WORDS or is_colour_word(tail):
+                continue
             return True
     return False
 
@@ -1263,20 +1470,30 @@ def find_matching_keys(
             if identity and identity != core and _compiled(identity).search(normalized):
                 matched.append(token)
                 continue
-        if include_identities and "/" in token and _slash_segment_hit(token, core, normalized):
+        if include_identities and "/" in token and _slash_segment_hit(
+            token, core, normalized, keys.colourway_markers
+        ):
             matched.append(token)
             continue
         if include_identities and (
-            _segment_truncation_hit(token, core, normalized)
+            _segment_truncation_hit(token, core, normalized, keys.colourway_markers)
             or _family_range_hit(core, normalized)
         ):
             matched.append(token)
             continue
-        if include_truncation:
+        marker_end = bool(keys.colourway_markers) and core.endswith(tuple(keys.colourway_markers))
+        if include_truncation and not marker_end:
+            # a colourway the sheet wrote into the code ends the core, and dropping letters
+            # off it is how a -DG page was tolerated for an -OW row (owner 2026-10-15)
             for variant in truncation_variants(core):
-                if _compiled(variant).search(normalized):
-                    matched.append(token)
-                    break
+                if not _compiled(variant).search(normalized):
+                    continue
+                if _page_names_other_short_tail(
+                    variant, normalized, frozenset({core[len(variant):]}) | keys.colourway_markers
+                ):
+                    continue  # our stem, spelled to another short tail: another product
+                matched.append(token)
+                break
     title_hit = (
         include_title_key
         and keys.title_key
@@ -1459,6 +1676,21 @@ def _series_words(title: str) -> frozenset[str]:
     )
 
 
+def _own_anchor_words(own_terms: frozenset[str]) -> set[str]:
+    """The own line words that prove a name belongs to *this* row.
+
+    The brand and the catalogue noise never anchor: every Orient asset says ``orient``,
+    so the word proves nothing and would let ``orient-blaze-…`` pose as any Orient row.
+    Shared by S4's file limb (:func:`url_anchored_to_row`) and the tail-chunk limb's
+    foreign-series veto, so the two cannot drift apart on what counts as our own name.
+    """
+    return {
+        word
+        for word in own_terms
+        if word not in KNOWN_BRANDS and word not in _KEYWORD_EXTRA_NOISE
+    }
+
+
 def sibling_series_terms(titles: Sequence[str]) -> tuple[frozenset[str], ...]:
     """Sheet knowledge for S4: for each row, the series words of the *other* rows.
 
@@ -1573,11 +1805,7 @@ def url_anchored_to_row(
         url, strong, brand=brand
     ):
         return True
-    usable = {
-        word
-        for word in own_terms
-        if word not in KNOWN_BRANDS and word not in _KEYWORD_EXTRA_NOISE
-    }
+    usable = _own_anchor_words(own_terms)
     if usable:
         filename = urlsplit(unquote(url)).path.rsplit("/", 1)[-1]
         filename = filename.rsplit(".", 1)[0]
@@ -1916,6 +2144,11 @@ def find_brand_code_matches(
                 if not _usable_core(candidate, min_length=min_length, min_digits=min_digits):
                     continue
                 if _code_search(normalized, candidate, identity, brand):
+                    if candidate != core and _page_names_other_short_tail(
+                        candidate, normalized,
+                        keys.colourway_markers | frozenset({core[len(candidate):]}),
+                    ):
+                        continue  # our stem printed to another short tail is another product
                     matched = candidate
                     break
             if matched is not None:
@@ -2154,6 +2387,32 @@ def _recognize(
     return ProductMatch(False, "none", ())
 
 
+def shade_unstated_rows(tasks: Sequence[ProductTask]) -> tuple[tuple[str, str], ...]:
+    """Rows naming a bare colour while their **own** sheet link names a shade.
+
+    A row written ``… 9 Cu Ft Red (9140-WB-GD)`` states no shade, and 9140-WB is sold as
+    Pearl, Ruby and Diamond Red at once - so no matcher can know which one was promised, and
+    the sheet is the only place that can say it.  Each row's own link is read for the hint
+    (``ref-9140wb-avante-pearl-red…`` -> ``pearl red``) and the pair is reported, so the owner
+    writes the shade once instead of guessing from the pictures that came back.
+
+    Report-only, by owner decision 2026-10-16: a sheet link is sometimes the wrong page
+    (``Gem Black`` beside ``sapphire-purple``), so it is never allowed to decide a match.  A
+    hint is offered only when the link's colour *head* is the one the row already states.
+    """
+    out: list[tuple[str, str]] = []
+    for task in tasks:
+        keys = build_model_keys(task.title)
+        if not keys.colour_word or keys.colour_shade:
+            continue
+        for url in task.source_urls[:1]:
+            slug = unquote(urlsplit(url).path).rsplit("/", 1)[-1]
+            head, shade = colour_phrase(slug, _COLOURWAY_WORDS)
+            if shade and head == keys.colour_word:
+                out.append((task.title, f"{shade} {head}"))
+    return tuple(out)
+
+
 def _page_names_another_variant(keys: ModelKeys, strong_text: str) -> bool:
     """True when the page prints a **different** variant suffix of the same model stem.
 
@@ -2300,6 +2559,33 @@ def _drop_brand_words(words: tuple[str, ...], brand: str | None) -> tuple[str, .
     return tuple(word for word in words if word not in key and key not in word)
 
 
+def _names_word(text: str, word: str) -> bool:
+    """Whether ``text`` names ``word`` as a whole word."""
+    return bool(word) and f" {word} " in f" {normalize_text(text)} "
+
+
+def _shade_veto(keys: ModelKeys, named_text: str, selected_colourway: str) -> bool:
+    """Whether the page names the row's colour under **another shade**.
+
+    Read only from what the page itself says: :func:`colour_phrase` looks at the last word in
+    front of a colour name, so a URL is stripped first (a slug is a hint, never evidence -
+    owner decision 2026-10-16) and the page's labelled "Colour:" value is read as its own
+    field, so a shop path ending in ``…-avante-mist`` cannot lend ``mist`` to a declared
+    ``Green`` and invent a colourway the page never printed.
+
+    Like the head rule it mirrors, a page that names the row's shade anywhere is compatible,
+    not contradicted: shops list the range (``Pearl Red / Ruby Red``) on one product page.
+    """
+    if not keys.colour_shade:
+        return False
+    page_phrase = colour_phrase(named_text, _COLOURWAY_WORDS)
+    if not page_phrase[0] and selected_colourway:
+        page_phrase = colour_phrase(selected_colourway, _COLOURWAY_WORDS)
+    if shade_agreement((keys.colour_word, keys.colour_shade), page_phrase) != "different":
+        return False
+    return not _names_word(f"{named_text} {selected_colourway}", keys.colour_shade)
+
+
 def score_match(
     keys: ModelKeys,
     strong_text: str,
@@ -2310,7 +2596,8 @@ def score_match(
 
     Three independent vetoes, each fail-open (an absent attribute is never a veto):
     * series - the page names a line/colourway in place of the row's (``Daimond``/``Cuby``);
-    * colour - the row's colour word conflicts with the page (existing primitive);
+    * colour - the row's colour conflicts with the page, by head word
+      (:func:`colour_word_conflict`) or by shade (:func:`_shade_veto`);
     * size   - a capacity/type fact contradicts (existing ``variant_conflicts``).
 
     ``selected_colourway`` is the page's own labelled "Colour:" value (read by
@@ -2329,7 +2616,8 @@ def score_match(
     confidence = _name_word_confidence(row_words, page_words)
     return ScoreMatch(
         series_veto=_name_word_substitution(row_words, page_words),
-        colour_veto=colour_word_conflict(keys.colour_word, page_colour_text),
+        colour_veto=colour_word_conflict(keys.colour_word, page_colour_text)
+        or _shade_veto(keys, _URL_TOKEN_RE.sub(" ", strong_text), selected_colourway),
         size_veto=bool(variant_conflicts(keys.variant_dict(), extract_variant_facts(strong_text))),
         confidence=confidence,
     )

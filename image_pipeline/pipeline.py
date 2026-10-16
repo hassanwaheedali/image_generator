@@ -73,6 +73,7 @@ from image_quality import (
 )
 from model_matching import (
     build_model_keys,
+    colourway_words,
     is_display_product,
     near_miss_codes,
     relaxed_page_match,
@@ -118,7 +119,7 @@ from url_filters import (
     upscale_candidates,
     url_filename,
 )
-from variant_terms import colour_word_conflict, identity_alpha_tail
+from variant_terms import colour_phrase, colour_word_conflict, identity_alpha_tail, shade_agreement
 
 LOG = logging.getLogger("pipeline")
 
@@ -618,6 +619,8 @@ def process_product(
         config.image_full_download_max_per_row,
     )
     salvage: list[SalvageOffer] = []
+    #: S20.mixed-shade: the (head, shade) the first shade-bearing page fixed this gallery to.
+    gallery_colour: list[tuple[str, str]] = []
 
     # ---- stage 2 & 3: sheet URLs and fallback search -----------------------
     # Customer & Owner rules:
@@ -712,6 +715,7 @@ def process_product(
             notes=notes,
             budget=budget,
             salvage=salvage,
+            gallery_colour=gallery_colour,
             defer_tolerated=True,
         )
         if outcome.deferred:
@@ -847,6 +851,7 @@ def process_product(
             notes=notes,
             budget=budget,
             salvage=salvage,
+            gallery_colour=gallery_colour,
             defer_tolerated=False,
         )
         if outcome.tolerated:
@@ -1247,6 +1252,33 @@ def _search_sources(
     return list(found), report
 
 
+def _shade_gallery_lock(
+    soup: BeautifulSoup, keys: ModelKeys, gallery_colour: list[tuple[str, str]]
+) -> str:
+    """S20.mixed-shade: the detail when this page breaks the gallery's shade, else "".
+
+    A row naming a colour but no shade (`9140-WB` is sold as Pearl Red AND Ruby Red)
+    cannot veto any page for its shade - but one gallery must not show two of them.  The
+    first shade-bearing page sets the gallery's shade (recorded in ``gallery_colour``) and
+    a later page selling another shade of the same colour is skipped; a page naming no
+    shade says nothing and stays allowed, so a terse shop title can never starve the row
+    (owner 2026-10-16).
+    """
+    if keys.colour_shade:
+        return ""  # the row stated its shade: the colour veto already speaks
+    page_colour = colour_phrase(_page_name_text(soup), colourway_words())
+    if not page_colour[1]:
+        return ""
+    if gallery_colour and shade_agreement(gallery_colour[0], page_colour) == "different":
+        return (
+            f"this gallery shows {gallery_colour[0][1]} {gallery_colour[0][0]}, "
+            f"this page sells {page_colour[1]} {page_colour[0]}"
+        )
+    if not gallery_colour:
+        gallery_colour.append(page_colour)
+    return ""
+
+
 def _visit_page(
     *,
     task: ProductTask,
@@ -1265,6 +1297,7 @@ def _visit_page(
     notes: list[str],
     budget: _DownloadBudget,
     salvage: list[SalvageOffer],
+    gallery_colour: list[tuple[str, str]],
     defer_tolerated: bool = False,
 ) -> _PageOutcome:
     """Fetch one page, verify it (S1, or S15 for a fallback candidate), extract, gate.
@@ -1305,6 +1338,8 @@ def _visit_page(
             match = replace(match, strength=max(1, match.strength), detail=relaxed, match_rule="relaxed")
     tail_flag = ""
     if not match.accepted:
+        #: Which rule id records this page: a sheet URL is S1, a searched candidate S15.
+        tier = "S15" if is_fallback else "S1"
         tail_reason = (
             tail_chunk_match(
                 _page_name_text(soup),
@@ -1312,6 +1347,8 @@ def _visit_page(
                 keys=keys,
                 brand=brand,
                 tail_owner_count=task.tail_owner_count,
+                sibling_terms=task.sibling_terms,
+                own_terms=task.own_terms,
             )
             # The limb is only for a page that failed to *prove* the model - a
             # neutral strength-0.  A page refused for another colourway or another
@@ -1326,7 +1363,7 @@ def _visit_page(
             deps.decisions.keep(
                 title=task.title,
                 url=resolved_url,
-                rule_id="S15.tail" if is_fallback else "S1.tail",
+                rule_id=f"{tier}.tail",
                 detail=f"deferred as last resort - {tail_reason}",
             )
             return _PageOutcome(True, True, resolved_url, deferred=True)
@@ -1334,7 +1371,7 @@ def _visit_page(
             deps.decisions.keep(
                 title=task.title,
                 url=resolved_url,
-                rule_id="S15.tail" if is_fallback else "S1.tail",
+                rule_id=f"{tier}.tail",
                 detail=f"published as last resort - {tail_reason}",
             )
             notes.append(
@@ -1344,12 +1381,12 @@ def _visit_page(
             tail_flag = tail_reason
             match = replace(match, strength=1, detail=tail_reason, match_rule="tail")
         else:
-            rejections["S15" if is_fallback else "S1"] += 1
+            rejections[tier] += 1
             detail = f"page strength 0 - {match.detail}"
             if is_fallback:
                 detail = f"fallback candidate rejected - {match.detail}"
             deps.decisions.reject(
-                title=task.title, url=resolved_url, rule_id="S15" if is_fallback else "S1",
+                title=task.title, url=resolved_url, rule_id=tier,
                 detail=detail,
             )
             return _PageOutcome(False, True, resolved_url)
@@ -1382,6 +1419,15 @@ def _visit_page(
         )
     if is_fallback:
         notes.append(f"fallback page: {source_label}")
+    # S20.mixed-shade: one gallery never shows two shades of one colour (see
+    # _shade_gallery_lock for the rule and why a shadeless page stays allowed).
+    mixed_shade = _shade_gallery_lock(soup, keys, gallery_colour)
+    if mixed_shade:
+        deps.decisions.reject(
+            title=task.title, url=resolved_url, rule_id="S20.mixed-shade", detail=mixed_shade
+        )
+        rejections["S20"] += 1
+        return _PageOutcome(True, True, resolved_url)
     context = ExtractionContext(
         page_url=resolved_url,
         soup=soup,

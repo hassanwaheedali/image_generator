@@ -127,8 +127,23 @@ def _plan(tmp_path: Path) -> PlatformPlan:
     return synthetic_platforms(tmp_path / "assets")
 
 
-def task(index: int, title: str, urls: tuple[str, ...], *, tail_owner: int = 0) -> ProductTask:
-    return ProductTask(index=index, title=title, source_urls=urls, tail_owner_count=tail_owner)
+def task(
+    index: int,
+    title: str,
+    urls: tuple[str, ...],
+    *,
+    tail_owner: int = 0,
+    siblings: frozenset[str] = frozenset(),
+    own: frozenset[str] = frozenset(),
+) -> ProductTask:
+    return ProductTask(
+        index=index,
+        title=title,
+        source_urls=urls,
+        tail_owner_count=tail_owner,
+        sibling_terms=siblings,
+        own_terms=own,
+    )
 
 
 def _urls(digi: str, alfa: str) -> tuple[tuple[str, tuple[str, ...]], ...]:
@@ -1568,6 +1583,111 @@ def test_a_tail_printing_sheet_page_publishes_flagged_as_last_resort(tmp_path: P
     write_output_csvs([result], config, _plan(tmp_path))
     review = (config.review_csv).read_text(encoding="utf-8")
     assert TAIL_TITLE in review and "tail-chunk match" in review
+
+
+def test_the_sheet_knows_another_rows_series_and_the_tail_page_dies(tmp_path: Path) -> None:
+    """Wiring, not arithmetic: the limb must be handed the sheet's own verdict about the
+    other rows.  A page printing our tail and our series word but *named* as another
+    row's product in its ``<h1>`` (live run 2026-10-15: the same ``18HRFN1 QC6`` tail sits
+    on Midea's Xtreme and Titan lines) is a different product's picture, so the row stays
+    dead instead of publishing a flagged wrong series."""
+    config = live_config(tmp_path)
+    xtreme_page = (
+        "<html><head><title>Midea 18HRFN1-QC6 1.5 Ton GO EASY T3 Inverter Split AC"
+        "</title></head><body><h1>Midea 18HRFN1 QC6 1.5 Ton Xtreme</h1>"
+        "<div class='product-gallery'>"
+        + "".join(f'<img src="https://cdn.mabdullah.pk/p/goeasy-{i}.jpg">' for i in range(1, 4))
+        + "</div></body></html>"
+    )
+    deps, _, _, _ = build_deps(tmp_path, {TAIL_SHEET_URL: xtreme_page}, _tail_images())
+    result, accepted = process_product(
+        task(0, TAIL_TITLE, (TAIL_SHEET_URL,), tail_owner=1, siblings=frozenset({"xtreme"})),
+        deps,
+        config,
+    )
+    assert accepted == [] and result.status is Status.FAILED
+
+
+def _shade_page(shade: str) -> str:
+    """A product page whose own name sells the ``shade`` Red, with three gallery shots."""
+    return (
+        f"<html><head><title>Dawlance 9140-WB-GD Avante {shade} Red Refrigerator</title></head>"
+        f"<body><h1>Dawlance Avante {shade} Red</h1><div class='product-gallery'>"
+        + "".join(
+            f'<img src="https://cdn.shop.pk/p/9140-wb-gd-{shade.lower()}-{i}.jpg">'
+            for i in range(1, 4)
+        )
+        + "</div></body></html>"
+    )
+
+
+def test_a_row_naming_no_shade_publishes_one_shade_not_a_mix(tmp_path: Path) -> None:
+    """9140-WB-GD is sold as Pearl Red and Ruby Red: a row that says only "Red" gets one
+    shade's pictures, never a gallery that mixes the two (owner 2026-10-16)."""
+    from model_matching import set_colourway_words
+
+    row = "Dawlance Avante Freezer-On-Top Refrigerator 9 Cu Ft Red (9140-WB-GD)"
+    pearl = "https://www.surmawala.pk/dawlance-9140-wb-gd-avante-refrigerator"
+    ruby = "https://www.friendshome.pk/dawlance-9140-wb-gd-avante-refrigerator"
+    images = {
+        f"https://cdn.shop.pk/p/9140-wb-gd-{shade}-{i}.jpg": png_bytes(_gallery_image(i))
+        for shade in ("pearl", "ruby")
+        for i in range(1, 4)
+    }
+    config = live_config(tmp_path, target_images_per_product=4)
+    set_colourway_words({"ruby"})
+    try:
+        deps, _, _, _ = build_deps(
+            tmp_path, {pearl: _shade_page("Pearl"), ruby: _shade_page("Ruby")}, images
+        )
+        result, accepted = process_product(task(0, row, (pearl, ruby)), deps, config)
+    finally:
+        set_colourway_words(())
+    assert result.images_accepted == 3 and len(accepted) == 3, "one shade's gallery only"
+    decisions = [
+        json.loads(line) for line in (tmp_path / "out" / "decisions.jsonl").read_text().splitlines()
+    ]
+    blocked = [line for line in decisions if line["rule_id"] == "S20.mixed-shade"]
+    assert [line["url"] for line in blocked] == [ruby]
+
+
+def test_a_page_that_names_no_shade_never_locks_the_gallery(tmp_path: Path) -> None:
+    """The fail-open half: a terse page is not refused for want of a shade, and it cannot
+    decide the gallery's shade either - omission stays no opinion."""
+    from model_matching import set_colourway_words
+
+    row = "Dawlance Avante Freezer-On-Top Refrigerator 9 Cu Ft Red (9140-WB-GD)"
+    shaded = "https://www.surmawala.pk/dawlance-9140-wb-gd-avante-refrigerator"
+    terse = "https://www.friendshome.pk/dawlance-9140-wb-gd-avante-refrigerator"
+    terse_page = (
+        "<html><head><title>Dawlance 9140-WB-GD Avante Refrigerator</title></head>"
+        "<body><h1>Dawlance Avante Refrigerator</h1><div class='product-gallery'>"
+        "<img src='https://cdn.shop.pk/p/9140-wb-gd-1.jpg'></div></body></html>"
+    )
+    config = live_config(tmp_path)
+    set_colourway_words({"ruby"})
+    try:
+        deps, _, _, _ = build_deps(
+            tmp_path,
+            {shaded: _shade_page("Ruby"), terse: terse_page},
+            {
+                **{
+                    f"https://cdn.shop.pk/p/9140-wb-gd-ruby-{i}.jpg": png_bytes(_gallery_image(i))
+                    for i in range(1, 4)
+                },
+                "https://cdn.shop.pk/p/9140-wb-gd-1.jpg": png_bytes(_gallery_image(1)),
+            },
+        )
+        result, _ = process_product(task(0, row, (shaded, terse)), deps, config)
+    finally:
+        set_colourway_words(())
+    decisions = [
+        json.loads(line) for line in (tmp_path / "out" / "decisions.jsonl").read_text().splitlines()
+    ]
+    assert not any(
+        line["url"] == terse and line["rule_id"] == "S20.mixed-shade" for line in decisions
+    ), "the page that named no shade was refused for that"
+    assert result.images_accepted >= 3
 
 
 def test_a_tail_page_never_preempts_a_page_that_prints_the_model(tmp_path: Path) -> None:

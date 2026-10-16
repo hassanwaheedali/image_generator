@@ -84,6 +84,9 @@ class ModelKeys:
     variant_facts: tuple[tuple[str, str], ...] = ()
     #: The title's own colour word, for variant separation ("" when it names no colour).
     colour_word: str = ""
+    #: The shade in front of it - ``pearl`` of ``Pearl Red`` ("" when the title states none).
+    #: 9140-WB is sold as Pearl, Ruby and Diamond Red, so the head word alone names no product.
+    colour_shade: str = ""
     #: Positional "name" words - series lines and unknown colourways - with brand-agnostic
     #: noise (type words, colours, model codes) removed; used by the scored matcher.
     name_words: tuple[str, ...] = ()
@@ -91,6 +94,11 @@ class ModelKeys:
     #: "Dawlance Dual Pro 30 Inverter T3" is the model - keywords, not a token).  Empty
     #: whenever the title has a model-like token; then S1 uses the keys as before.
     keywords: tuple[str, ...] = ()
+    #: Colourway letters the sheet wrote **inside** the model code, e.g. ``(OW)`` of
+    #: ``HSU-20HFTEX/023WDC(OW)-T3``.  They are part of the model's identity, so a
+    #: tolerance may not drop them (Haier sells one body as -OW- Ocean White and -DG-
+    #: Dark Grey).  Empty unless the title actually spells a code this way.
+    colourway_markers: frozenset[str] = frozenset()
 
     @property
     def all_keys(self) -> tuple[str, ...]:

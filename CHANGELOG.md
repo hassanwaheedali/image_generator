@@ -23,6 +23,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refrigerator, washing machine, yellow sale template) and over a loopback-HTTP `--dry-run`.
 
 ### Fixed
+- **The shade, not the colour, decides the picture (Safeguard S20, owner 2026-10-16).**
+  `9140-WB` is sold as Avante Pearl Red, Ruby Red and Diamond Red: one body, three products,
+  and `Red` named none of them — so a Pearl Red row happily published a Ruby Red gallery.
+  A shade word is not hand-listed: `learn_colourway_words` measures the catalogue and keeps
+  a word that sits in front of a colour head, on at least two series lines, and is at home
+  nowhere else (live: `hairline` 27/27, `coral` 12/12, `ruby` 4/4 against `inverter` 6/347).
+  `colour_phrase` + `shade_agreement` then answer `same` / `omitted` / `different`, and only
+  `different` rejects — as hard as any colour conflict, in the page match, in the tolerated
+  variants and in the tail last resort (`_shade_veto`).  A shade readable only from the row's
+  own sheet **URL** is reported, never matched on (`S20.unstated`: the run ends by naming the
+  rows whose link says `pearl red` while their title says only `Red`), and one gallery never
+  mixes two shades: the first shade-bearing page locks it and a later page selling another
+  shade is skipped (`S20.mixed-shade`), while a page naming no shade stays allowed so a terse
+  shop title can never starve a row.  Measured after the adversarial review fixed six
+  findings: 0 of 753 rows lose their own sheet URL, 0 new blocks over 9,611 row-to-page pairs,
+  382 bare-head rows unchanged, and all six protected leniencies (`/023WDC(W)`,
+  `GS-12PITH17G-T3`, `DF-300-ES`, `DW-128-G`, `DW-7500C`, `(OW)`) still match.
+- **A short-tailed page named for another row's series is refused (owner 2026-10-16).** The
+  tail-chunk last resort armed on Midea's Xtreme and Titan pages for a row whose only free
+  word after its code is a shared spec name (`T3 Plus`): those pages print `T3 Plus` too, so
+  the complete tail, the series word and the tonnage all held.  The limb now also asks the
+  sheet — the same evidence S4's file limb already uses (`annotate_sibling_terms`): a word
+  naming exactly one *other* row names another product, and the page's own name carrying it
+  refuses the rescue.  No new word table, and the two exceptions the repo already honours are
+  kept: the word the limb itself demands can never veto it, and a name anchored by one of
+  this row's own line words is kept (live 2026-10-11: `…Hyper-18X-T3-Super-White-Turbo-Pro`
+  is decoration, not identity).  Measured on the live sheets: the three rows whose own pages
+  arm today still arm, and no pair that arms today is newly refused — the guard closes the
+  proven shape without touching a published row.
+- **The colourway written inside a model code survives every tolerance (owner 2026-10-16).**
+  A marker glued to the code (`HSU-18HWR-T3+(OW)`, `…-QC6(WB)`) names the colour of the page,
+  yet three routes could still drop it: the dropped-trailing-letter tolerance, the
+  brand-plus-code route and the truncation variants — each of which published a sibling
+  colourway's photo for the row.  A marker is now part of the code for every one of them, and
+  a page printing the same stem under a *different* short tail is refused outright
+  (`_page_names_other_short_tail`) instead of merely downgraded.  The contradiction test is
+  marker-scoped, not shape-scoped: an earlier over-broad version cost 86 of 598 truncation
+  candidates, the shipped one costs 3.
 - **`audit/raw/` is the picture the shop served (owner run 2026-10-15).** The promo-strip,
   seam and panel gates run before compose, and compose wrote *their output* to `raw/`, so the
   audit held the result of a cut and never where it landed — which is why the sliced AC above

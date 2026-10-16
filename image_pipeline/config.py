@@ -329,6 +329,15 @@ class PipelineConfig:
     #: Tier words the owner wants in force regardless of what the corpus proves.
     extra_series_differentiators: tuple[str, ...] = ()
 
+    # --- learned colourway (shade) words, from the same corpus (owner 2026-10-16) ---
+    # "Pearl Red" and "Ruby Red" are two products, so the words that name a shade have to
+    # be recognised - by measurement over the catalogue, not by a list.  Two thresholds:
+    #: How many times a word must sit in front of a colour name before it is a shade.
+    colourway_min_evidence: int = 2
+    #: What share of *all* that word's uses those colour-slot uses must be.  Below it the
+    #: word is at home elsewhere (``inverter``, ``grill``) and names no colourway.
+    colourway_min_exclusivity: float = 0.6
+
     # ----- simplified matching (customer decisions 2026-10-05, plan §3.6) ---
 
     # Loose about recognizing the product, strict about publishing a wrong image.

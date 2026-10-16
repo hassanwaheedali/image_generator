@@ -21,6 +21,9 @@ from model_matching import (
     numeric_stem,
     relaxed_page_match,
     score_match,
+    set_colourway_words,
+    shade_unstated_rows,
+    tail_chunk_match,
     truncation_variants,
     url_belongs_to_other_model,
     url_names_foreign_brand,
@@ -938,6 +941,27 @@ def test_a_placeholder_word_glued_without_a_hump_accuses_nothing() -> None:
 # -----------------------------------------------------------------------------
 
 
+def test_a_series_tail_is_still_truncatable_when_no_colourway_is_stated() -> None:
+    """The guard belongs to the colourway, never to the shape of a short tail.  ``ES``
+    in ``DF-300-ES`` and ``G`` in ``DW-128-G`` are series/feature letters a shop drops
+    routinely; treating them as finishes would cost ~14% of the catalogue its tolerance
+    (measured 2026-10-15 on 598 corpus codes), so they must keep truncating."""
+    assert find_matching_keys(
+        "Daewoo DF-300 Microwave", build_model_keys("Daewoo DF-300-ES Microwave")
+    )
+    assert find_matching_keys(
+        "Dawlance DW-128 Half Load Dishwasher", build_model_keys("Dawlance DW-128-G Dishwasher")
+    )
+
+
+def test_a_slash_code_without_a_colourway_keeps_the_old_leniency() -> None:
+    """A row that states no finish is unaffected: a shop printing only part of the
+    factory side still matches, exactly as before the colourway guard existed."""
+    keys = build_model_keys("Haier HSU-13HFCP/023WDC-Triple Inverter")
+    assert not keys.colourway_markers
+    assert find_matching_keys("Haier HSU-13HFCP 023WDC Inverter AC", keys)
+
+
 def test_a_glued_colourway_parenthetical_stays_in_the_model_code() -> None:
     """`023WDC(OW)` is one label, not a code plus a removable note: the colourway
     marker belongs to the identity so a different-colour page cannot match it."""
@@ -975,11 +999,25 @@ _GO_EASY_15 = "Midea 1.5 Ton DC Inverter Air Conditioner MSEF1C-18HRFN1-QC6 Go E
 _GO_EASY_24 = "Midea 2 Ton T3 Inverter Air Conditioner MSEF1D-24HRFN1-QC6 Go Easy"
 
 
-def _tail(page: str, title: str = _GO_EASY_15, *, owners: int = 1, brand: str | None = "midea") -> str | None:
+def _tail(
+    page: str,
+    title: str = _GO_EASY_15,
+    *,
+    owners: int = 1,
+    brand: str | None = "midea",
+    siblings: frozenset[str] = frozenset(),
+    own: frozenset[str] = frozenset(),
+) -> str | None:
     from model_matching import tail_chunk_match
 
     return tail_chunk_match(
-        page, title=title, keys=build_model_keys(title), brand=brand, tail_owner_count=owners
+        page,
+        title=title,
+        keys=build_model_keys(title),
+        brand=brand,
+        tail_owner_count=owners,
+        sibling_terms=siblings,
+        own_terms=own,
     )
 
 
@@ -1042,6 +1080,64 @@ def test_a_letter_only_head_on_the_tail_is_refused() -> None:
     digit-only head test misses it and another Midea line arms on our Go Easy tail.
     Any opaque token glued before our tail names another series and vetoes."""
     assert _tail("Midea MSUS-18HRFN1-QC6 18HRFN1 QC6 1.5 Ton GO EASY") is None
+
+
+_T3_PLUS_15 = "Midea 1.5 Ton DC Inverter Air Conditioner MSEF1C-18HRFN1-QC6 T3 Plus"
+_DIAMOND_EDGE_15 = "Midea 1.5 Ton DC Inverter Air Conditioner MSEF1C-18HRFN1-QC6 Diamond Edge"
+
+
+def test_a_page_naming_a_sibling_series_is_refused() -> None:
+    """Live-run shape: a row whose only free word after its code is a spec name
+    (``T3 Plus``) arms on an Xtreme page, because that page prints ``T3 Plus`` too -
+    so the head veto and the tonnage both hold and nothing separates the two.  The
+    sheet already knows ``xtreme`` names another row's product (S4's sibling terms)
+    and the page's own name says it: the colour guard's veto, aimed at the series."""
+    def arms(page: str) -> str | None:
+        # this row's own terms are only the brand, and a brand never anchors a page to it
+        return _tail(page, _T3_PLUS_15, siblings=frozenset({"xtreme", "titan"}), own=frozenset({"midea"}))
+
+    assert arms("Midea 18HRFN1 QC6 1.5 Ton T3 Plus Xtreme Inverter AC") is None
+    assert arms("Midea 18HRFN1 QC6 1.5 Ton T3 Plus Titan Inverter AC") is None
+    assert arms("Midea 18HRFN1 QC6 1.5 Ton T3 Plus Inverter AC") is not None
+
+
+def test_a_page_named_by_our_own_line_word_keeps_its_decorating_sibling() -> None:
+    """The live 2026-10-11 lesson S4 already honours (``…Hyper-18X-T3-Super-White-
+    Turbo-Pro.webp``): a name that carries *this* row's line word is anchored to the
+    row, and another row's word beside it is decoration - a cross-sell in a title.  A
+    page printed with our own Diamond Edge and the word ``turbo`` is still our picture;
+    refusing it is the owner-visible bug of losing a row's own page."""
+    own = frozenset({"midea", "diamond"})
+    arms = _tail(
+        "Midea 18HRFN1 QC6 1.5 Ton Diamond Edge Turbo Split Inverter AC",
+        _DIAMOND_EDGE_15,
+        siblings=frozenset({"turbo"}),
+        own=own,
+    )
+    assert arms is not None
+
+
+def test_a_sibling_code_written_inside_the_page_name_is_still_foreign() -> None:
+    """The refusal reads the page's name as whole words, not only the words that survive
+    a model-key parse: ``MSE2C-INNOVA`` is another row's code, and the retailer that
+    prints it beside our tail is listing two products - the word ``innova`` inside that
+    code is evidence of the other one, however the parser segments it."""
+    own = frozenset({"midea"})
+    page = "Midea 18HRFN1 QC6 1.5 Ton T3 Plus MSE2C-INNOVA 2 Ton Split AC"
+    assert _tail(page, _T3_PLUS_15, siblings=frozenset({"innova"}), own=own) is None
+
+
+def test_the_word_the_limb_demands_on_the_page_never_vetoes() -> None:
+    """``easy`` is the word this limb *requires* the page to print, so it can never be
+    the foreign word that refuses it: a row's own corroboration outranks a sibling term
+    carrying the same letters, or the limb could never arm at all."""
+    assert _tail("Midea 18HRFN1 QC6 1.5 Ton GO EASY", siblings=frozenset({"easy"})) is not None
+
+
+def test_a_sheet_that_names_no_siblings_leaves_the_limb_alone() -> None:
+    """A single-row sheet (or a code-only catalogue) hands over nothing, and nothing is
+    an opinion: the limb arms exactly as it did before the series veto existed."""
+    assert _tail("Midea 18HRFN1 QC6 1.5 Ton T3 Plus Xtreme Inverter AC", title=_T3_PLUS_15) is not None
 
 
 def test_a_row_whose_only_free_words_are_category_never_arms() -> None:
@@ -1220,12 +1316,14 @@ def test_a_whatsapp_export_filename_accuses_no_product_line() -> None:
 # --------------------------------------------------------------------------- #
 @pytest.fixture(autouse=True)
 def _no_learned_differentiators() -> Iterator[None]:
-    """The learned set is run state: every test starts and ends with none in force."""
-    from model_matching import set_series_differentiators
+    """The learned sets are run state: every test starts and ends with none in force."""
+    from model_matching import set_colourway_words, set_series_differentiators
 
     set_series_differentiators(())
+    set_colourway_words(())
     yield
     set_series_differentiators(())
+    set_colourway_words(())
 
 
 #: Two *series lines* that each show the plain/tier pair - the learner needs evidence
@@ -1334,3 +1432,235 @@ def test_learning_is_deterministic_and_model_codes_are_not_tier_evidence() -> No
     before = build_model_keys(code_rows[0][1]).name_words
     assert not learn_series_differentiators(code_rows)  # a kg difference names no tier
     assert build_model_keys(code_rows[0][1]).name_words == before
+
+
+# --------------------------------------------------------------------------- #
+# learned colourway (shade) words (owner 2026-10-16: "Red" is not enough - 9140
+# ships as Pearl Red, Ruby Red and Diamond Red, and only the shade picks the picture)
+# --------------------------------------------------------------------------- #
+#: The catalogue proves a shade word the same way it proves a tier: the word is used
+#: in front of a colour name, on more than one series line, and nowhere else.
+COLOURWAY_ROWS = (
+    ("Dawlance", "Dawlance Avante Freezer-On-Top Refrigerator 9 Cu Ft Pearl Red (9140-WB-GD)"),
+    ("Dawlance", "Dawlance Avante Freezer-On-Top Refrigerator 9 Cu Ft Ruby Red (9140-WB-RB)"),
+    ("Dawlance", "Dawlance Acce Glass Door Freezer-On-Top Refrigerator Pearl Red (9173)"),
+    ("Dawlance", "Dawlance Acce Glass Door Freezer-On-Top Refrigerator Ruby Red (9173)"),
+    ("Haier", "Haier Chrome Freezer-On-Top Refrigerator 7 Cu Ft Pearl Blue (HRF-520)"),
+    ("Dawlance", "Dawlance Chrome FH Freezer-On-Top Refrigerator 12 Cu Ft Hairline Black (9178-WB)"),
+    ("Haier", "Haier Inverter Freezer Refrigerator Hairline Black (HRF-60)"),
+    # category nouns in the same slot - a word that names the appliance names no colourway
+    ("Haier", "Haier Top Load Washing Machine White"),
+    ("Dawlance", "Dawlance Top Load Washing Machine Grey"),
+    # a unit abbreviation in the same slot - too short to be a shade
+    ("Dawlance", "Dawlance Water Dispenser 20 Ltr Blue"),
+    ("Haier", "Haier Water Dispenser 25 Ltr Black"),
+    # a series word that also lives outside the colour slot - not a shade name
+    ("Haier", "Haier Grill Red Gas Stove"),
+    ("Flare", "Flare Grill Red Gas Stove"),
+    ("Haier", "Haier Barbecue Grill Stand"),
+    ("Flare", "Flare Heavy Duty Grill Stand"),
+    ("Haier", "Haier Grill With Lid"),
+    ("Flare", "Flare Grill With Lid"),
+)
+
+
+def test_the_catalogue_teaches_which_words_name_a_shade() -> None:
+    from model_matching import colourway_words, learn_colourway_words
+
+    learned = learn_colourway_words(COLOURWAY_ROWS)
+    assert learned == colourway_words()
+    assert {"ruby", "hairline"} <= learned
+    # a word the colour vocabulary already knows needs no teaching to be a shade
+    assert "pearl" not in learned
+
+
+def test_a_word_used_outside_the_colour_slot_names_no_shade() -> None:
+    """Exclusivity is the classifier: a word at home elsewhere is not a colourway."""
+    from model_matching import learn_colourway_words
+
+    assert "grill" not in learn_colourway_words(COLOURWAY_ROWS)
+
+
+def test_a_category_word_in_the_colour_slot_is_never_a_shade() -> None:
+    """"… Washing Machine White" teaches no colourway, even with perfect evidence."""
+    from model_matching import learn_colourway_words
+
+    assert not {"machine", "ltr"} & learn_colourway_words(COLOURWAY_ROWS)
+
+
+def test_nothing_learned_leaves_the_colour_reading_exactly_as_today() -> None:
+    """Fail open: an unlearned shade word can only cost a protection, never reject."""
+    from model_matching import colourway_words, learn_colourway_words
+
+    title = "Dawlance Avante Freezer-On-Top Refrigerator 9 Cu Ft Pearl Red (9140-WB-GD)"
+    before = build_model_keys(title)
+    assert not learn_colourway_words(())
+    assert not colourway_words()
+    after = build_model_keys(title)
+    assert after.colour_word == before.colour_word == "red"
+    assert after.name_words == before.name_words
+
+
+# --------------------------------------------------------------------------- #
+# full-shade colourway match (owner 2026-10-16: 9140-WB is Pearl, Ruby and Diamond
+# Red at once, so "red" proves nothing and only the shade is the promised picture)
+# --------------------------------------------------------------------------- #
+PEARL_RED_ROW = "Dawlance Avante Freezer-On-Top Refrigerator 9 Cu Ft Pearl Red (9140-WB-GD)"
+PEARL_RED_PAGE = "Dawlance REF 9140WB Avante Pearl Red Refrigerator"
+RUBY_RED_PAGE = "Dawlance REF 9140WB Avante Ruby Red Refrigerator"
+
+
+def test_the_row_reads_its_own_shade() -> None:
+    keys = build_model_keys(PEARL_RED_ROW)
+    assert (keys.colour_word, keys.colour_shade) == ("red", "pearl")
+    assert build_model_keys(RUBY_RED_PAGE).colour_shade == ""   # untaught: no opinion
+
+
+def test_a_page_naming_another_shade_of_the_same_colour_is_not_this_product() -> None:
+    from model_matching import learn_colourway_words
+
+    learn_colourway_words(COLOURWAY_ROWS)          # the catalogue teaches "ruby"
+    keys = build_model_keys(PEARL_RED_ROW)
+    assert match_product(keys=keys, brand="Dawlance", strong_text=RUBY_RED_PAGE).rule == (
+        "colour_conflict"
+    )
+    assert match_product(keys=keys, brand="Dawlance", strong_text=PEARL_RED_PAGE).rule == (
+        "model_key"
+    )
+
+
+def test_an_unlearned_shade_leaves_the_page_exactly_as_today() -> None:
+    """Fail open: without catalogue evidence nothing is refused on a word alone."""
+    keys = build_model_keys(PEARL_RED_ROW)
+    match = match_product(keys=keys, brand="Dawlance", strong_text=RUBY_RED_PAGE)
+    assert match.matched and match.rule == "model_key"
+
+
+def test_a_page_that_states_no_shade_is_still_no_opinion() -> None:
+    from model_matching import learn_colourway_words
+
+    learn_colourway_words(COLOURWAY_ROWS)
+    keys = build_model_keys(PEARL_RED_ROW)
+    match = match_product(keys=keys, brand="Dawlance",
+                          strong_text="Dawlance REF 9140WB Avante Refrigerator")
+    assert match.matched
+
+
+# --------------------------------------------------------------------------- #
+# S20.shade-unstated: the sheet is the only place a shade can be written
+# (owner 2026-10-16: warn, never match on the URL)
+# --------------------------------------------------------------------------- #
+def test_a_row_naming_no_shade_is_reported_when_its_own_link_names_one() -> None:
+    from models import ProductTask
+
+    tasks = [
+        ProductTask(
+            index=0,
+            title="Dawlance Avante Freezer-On-Top Refrigerator 9 Cu Ft Red (9140-WB-GD)",
+            source_urls=(
+                (
+                    "https://www.dawlance.com.pk/double-door-refrigerator/"
+                    "ref-9140wb-avante-pearl-red-refrigerators"
+                ),
+            ),
+        ),
+    ]
+    assert shade_unstated_rows(tasks) == ((tasks[0].title, "pearl red"),)
+
+
+def test_a_row_that_already_states_its_shade_is_never_reported() -> None:
+    from models import ProductTask
+
+    tasks = [
+        ProductTask(
+            index=0,
+            title="Dawlance Avante Freezer-On-Top Refrigerator 9 Cu Ft Pearl Red (9140-WB-GD)",
+            source_urls=("https://www.dawlance.com.pk/ref-9140wb-avante-pearl-red-refrigerators",),
+        ),
+    ]
+    assert not shade_unstated_rows(tasks)
+
+
+def test_a_link_naming_a_different_colour_gives_no_hint() -> None:
+    """The sheet link is sometimes the wrong page: Gem Black beside sapphire-purple."""
+    from models import ProductTask
+
+    tasks = [
+        ProductTask(
+            index=0,
+            title="Dawlance Refrigerator 12 Cu Ft Gem Black (9173)",
+            source_urls=("https://www.dawlance.com.pk/ref-9173wb-avante-sapphire-purple",),
+        ),
+    ]
+    assert not shade_unstated_rows(tasks)
+
+
+# --- the shade is read from what the page itself says, never from a slug or a join ---
+NO_SHADE_PAGE = "Dawlance REF 9140WB Avante Refrigerator"
+
+
+def test_a_shade_only_the_page_url_knows_never_rejects() -> None:
+    """Owner decision 2: a sheet/URL slug is a hint, not evidence the page states a shade."""
+    set_colourway_words({"diamond", "ruby"})
+    keys = build_model_keys(PEARL_RED_ROW)
+    strong = f"https://www.dawlance.com.pk/ref-9140wb-avante-diamond-red-refrigerators\n{NO_SHADE_PAGE}"
+    assert match_product(keys=keys, brand="Dawlance", strong_text=strong).rule == "model_key"
+
+
+def test_a_page_listing_our_shade_beside_another_is_not_a_clash() -> None:
+    """A shop that lists the range ("Pearl Red / Ruby Red") names our colourway too."""
+    set_colourway_words({"ruby"})
+    keys = build_model_keys(PEARL_RED_ROW)
+    assert match_product(
+        keys=keys, brand="Dawlance",
+        strong_text="Dawlance Avante 9140WB Refrigerator Pearl Red / Ruby Red",
+    ).matched
+
+
+def test_a_labelled_colour_never_borrows_a_shade_from_the_field_before_it() -> None:
+    """The page's labelled "Colour:" value is read on its own, so a slug cannot leak into it."""
+    set_colourway_words({"mist", "hairline"})
+    keys = build_model_keys(
+        "Dawlance Avante+ Freezer-On-Top Refrigerator 16 Cu Ft Hairline Green (9178-WB)"
+    )
+    assert match_product(
+        keys=keys, brand="Dawlance",
+        strong_text="https://www.dawlance.com.pk/ref-9178wb-avante-mist",
+        selected_colourway="Green",
+    ).rule == "model_key"
+
+
+def test_the_tail_last_resort_never_arms_for_another_shade() -> None:
+    """S15.tail is a last resort for THIS picture, not for any page sharing the short code."""
+    set_colourway_words({"ruby"})
+    row = "Midea 1.5 Ton Pearl Red DC Inverter Air Conditioner MSEF1C-18HRFN1-QC6 Go Easy"
+    keys = build_model_keys(row)
+    def arms(page: str) -> bool:
+        return tail_chunk_match(page, title=row, keys=keys, brand="Midea",
+                                tail_owner_count=1) is not None
+    assert arms("Midea 18HRFN1 QC6 Go Easy 1.5 Ton Pearl Red Split AC")
+    assert not arms("Midea 18HRFN1 QC6 Go Easy 1.5 Ton Ruby Red Split AC")
+
+
+def test_a_marker_is_not_droppable_through_the_letter_tolerance() -> None:
+    """(OW) survived the slash and segment paths but fell to the plain letter drop."""
+    keys = build_model_keys("Haier HSU-13HFCP/023WDC(OW) Inverter AC")
+    assert keys.colourway_markers == frozenset({"ow"})
+    assert not match_product(
+        keys=keys, brand="Haier", strong_text="Haier HSU-13HFCP 023WDC-DG Inverter AC"
+    ).matched
+
+
+def test_a_page_printing_our_stem_under_another_short_tail_is_not_our_model() -> None:
+    """Omission says nothing; a different tail on the same stem says another product."""
+    keys = build_model_keys("Dawlance Avante Freezer-On-Top Refrigerator 9 Cu Ft Red (9140-WB-GD)")
+    assert not match_product(
+        keys=keys, brand="Dawlance", strong_text="Dawlance REF 9140WB-RB Avante Refrigerator"
+    ).matched
+    # and the innocent readings stay exactly as they were
+    assert match_product(
+        keys=keys, brand="Dawlance", strong_text="Dawlance REF 9140WB Avante Refrigerator"
+    ).matched
+    assert match_product(
+        keys=keys, brand="Dawlance", strong_text="Dawlance 9140WB Red refrigerator"
+    ).matched
