@@ -2297,6 +2297,203 @@ def test_below_floor_sharp_image_is_accepted_directly(tmp_path: Path) -> None:
     assert not any(entry["rule_id"] == "S13.salvage" for entry in log)
 
 
+def test_a_gallery_never_mixes_two_colour_families_when_the_row_states_none(tmp_path: Path) -> None:
+    """S17 wired for real (owner 2026-10-16). The rule was written, tested and advertised - and
+    never called, so a row stating no colour word had nothing comparing its pictures: S16 needs
+    `keys.colour_word` and says nothing without one.  Two blue shots settle the album's colour,
+    and the red picture after them is another product's photo."""
+    blue_a = "https://www.hadielectronics.com.pk/wp-content/blue-1.jpg"
+    blue_b = "https://www.hadielectronics.com.pk/wp-content/blue-2.jpg"
+    red_url = "https://www.hadielectronics.com.pk/wp-content/red.jpg"
+    page_url = "https://www.hadielectronics.com.pk/product/homage-hrf-47662/"
+    gallery = "".join(f'<img src="{u}">' for u in (blue_a, blue_b, red_url))
+    page = (
+        "<!doctype html><html><head>"
+        "<title>Homage HRF-47662 Freezer-on-Top Refrigerator 18 Cu Ft</title></head><body>"
+        f'<div class="product-gallery">{gallery}</div></body></html>'
+    )
+    config = live_config(tmp_path, target_images_per_product=3)
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {page_url: page},
+        {
+            blue_a: _jpeg_bytes(clean_product_image(700, 700, "#2f5fa8")),
+            blue_b: _jpeg_bytes(clean_product_image(760, 640, "#1e4f96")),
+            red_url: _jpeg_bytes(clean_product_image(640, 760, "#c0392b")),
+        },
+    )
+    result, images = process_product(
+        task(0, "Homage Freezer-on-Top Refrigerator 18 Cu Ft (HRF-47662)", (page_url,)),
+        deps,
+        config,
+    )
+    log = [
+        json.loads(line)
+        for line in (tmp_path / "out" / "decisions.jsonl").read_text().splitlines()
+    ]
+    assert [i.source_url for i in images] == [blue_a, blue_b], "the album keeps its colour"
+    assert any(
+        e["rule_id"] == "S17" and e["decision"] == "reject" and e["url"] == red_url for e in log
+    ), log
+    assert "colour not stated" not in result.note, "a settled gallery asks nothing"
+
+
+def test_an_unresolved_colour_mix_is_asked_not_guessed(tmp_path: Path) -> None:
+    """One blue and one red picture agree with nothing: no family has the two shots S17 needs
+    to call a gallery settled, so the run publishes what it has and asks the owner which colour
+    he bought - his rule, never guess a colourway for him (2026-10-16)."""
+    blue_url = "https://www.hadielectronics.com.pk/wp-content/blue-only.jpg"
+    red_url = "https://www.hadielectronics.com.pk/wp-content/red-only.jpg"
+    page_url = "https://www.hadielectronics.com.pk/product/homage-hrf-47662/"
+    gallery = "".join(f'<img src="{u}">' for u in (blue_url, red_url))
+    page = (
+        "<!doctype html><html><head>"
+        "<title>Homage HRF-47662 Freezer-on-Top Refrigerator 18 Cu Ft</title></head><body>"
+        f'<div class="product-gallery">{gallery}</div></body></html>'
+    )
+    config = live_config(tmp_path, target_images_per_product=4)
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {page_url: page},
+        {
+            blue_url: _jpeg_bytes(clean_product_image(700, 700, "#2f5fa8")),
+            red_url: _jpeg_bytes(clean_product_image(760, 640, "#c0392b")),
+        },
+    )
+    result, images = process_product(
+        task(0, "Homage Freezer-on-Top Refrigerator 18 Cu Ft (HRF-47662)", (page_url,)),
+        deps,
+        config,
+    )
+    assert len(images) == 2, "nothing has settled, so nothing is refused"
+    assert "colour not stated:" in result.note, result.note
+    assert "blue x1" in result.note and "red x1" in result.note
+
+
+def test_a_row_that_states_its_colour_is_never_asked(tmp_path: Path) -> None:
+    """The question is for rows that name no colour at all.  This row is a **display** product,
+    so S16 is exempt and cannot be the reason anything is missing - the only thing left to
+    prove is that a stated colour word keeps the row out of the notice."""
+    blue_url = "https://www.hadielectronics.com.pk/wp-content/screen-blue.jpg"
+    gold_url = "https://www.hadielectronics.com.pk/wp-content/screen-gold.jpg"
+    page_url = "https://www.hadielectronics.com.pk/product/homage-55q2/"
+    gallery = "".join(f'<img src="{u}">' for u in (blue_url, gold_url))
+    page = (
+        "<!doctype html><html><head>"
+        "<title>Homage 55Q2 Blue 55 Inch QLED Smart TV</title></head>"
+        f'<body><div class="product-gallery">{gallery}</div></body></html>'
+    )
+    config = live_config(tmp_path, target_images_per_product=4)
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {page_url: page},
+        {
+            blue_url: _jpeg_bytes(clean_product_image(700, 700, "#2f5fa8")),
+            gold_url: _jpeg_bytes(clean_product_image(760, 640, "#d4af37")),
+        },
+    )
+    result, _ = process_product(
+        task(0, "Homage 55 Inch QLED Smart TV Blue (55Q2)", (page_url,)),
+        deps,
+        config,
+    )
+    assert "colour not stated" not in result.note, result.note
+
+
+def test_a_mixed_album_is_never_published_as_plain_ok(tmp_path: Path) -> None:
+    """The case a fresh-context review found (2026-10-16): one blue shot arrives, then two red
+    ones.  Nothing was refused - the lock only forms when the second red lands - so the row
+    published `ok` with a red-and-blue album and an empty note.  A lock is a veto, not a
+    verdict: an album holding two families is the owner's question and a review row, never a
+    silent success."""
+    blue_url = "https://www.hadielectronics.com.pk/wp-content/one-blue.jpg"
+    red_a = "https://www.hadielectronics.com.pk/wp-content/red-a.jpg"
+    red_b = "https://www.hadielectronics.com.pk/wp-content/red-b.jpg"
+    page_url = "https://www.hadielectronics.com.pk/product/homage-hrf-47662/"
+    gallery = "".join(f'<img src="{u}">' for u in (blue_url, red_a, red_b))
+    page = (
+        "<!doctype html><html><head>"
+        "<title>Homage HRF-47662 Freezer-on-Top Refrigerator 18 Cu Ft</title></head><body>"
+        f'<div class="product-gallery">{gallery}</div></body></html>'
+    )
+    config = live_config(tmp_path, target_images_per_product=3)
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {page_url: page},
+        {
+            blue_url: _jpeg_bytes(clean_product_image(700, 700, "#2f5fa8")),
+            red_a: _jpeg_bytes(clean_product_image(760, 640, "#c0392b")),
+            red_b: _jpeg_bytes(clean_product_image(640, 760, "#b02028")),
+        },
+    )
+    result, images = process_product(
+        task(0, "Homage Freezer-on-Top Refrigerator 18 Cu Ft (HRF-47662)", (page_url,)),
+        deps,
+        config,
+    )
+    assert len(images) == 3, "nothing to refuse: each was accepted before any lock existed"
+    assert result.status is Status.PARTIAL, result.status
+    assert "colour not stated:" in result.note, result.note
+
+
+def test_a_neutral_picture_never_sets_the_gallery_colour(tmp_path: Path) -> None:
+    """S17 errs on the keep side, like every colour rule here: a white or grey shot is no
+    opinion about the family, so a studio gallery of neutrals loses nothing - and the first
+    chromatic picture after them still sets it."""
+    urls = [f"https://www.hadielectronics.com.pk/wp-content/n{i}.jpg" for i in (1, 2, 3)]
+    page_url = "https://www.hadielectronics.com.pk/product/homage-hrf-47662/"
+    gallery = "".join(f'<img src="{u}">' for u in urls)
+    page = (
+        "<!doctype html><html><head>"
+        "<title>Homage HRF-47662 Freezer-on-Top Refrigerator 18 Cu Ft</title></head><body>"
+        f'<div class="product-gallery">{gallery}</div></body></html>'
+    )
+    images_bytes = {
+        urls[0]: _jpeg_bytes(clean_product_image(700, 700, "#f2f2f2")),
+        urls[1]: _jpeg_bytes(clean_product_image(720, 720, "#d9d9d9")),
+        urls[2]: _jpeg_bytes(clean_product_image(680, 680, "#c0392b")),
+    }
+    config = live_config(tmp_path, target_images_per_product=3)
+    deps, _, _, _ = build_deps(tmp_path, {page_url: page}, images_bytes)
+    _, images = process_product(
+        task(0, "Homage Freezer-on-Top Refrigerator 18 Cu Ft (HRF-47662)", (page_url,)),
+        deps,
+        config,
+    )
+    assert [i.source_url for i in images] == urls
+
+
+def test_the_gallery_colour_gate_can_be_switched_off(tmp_path: Path) -> None:
+    """One config field per safeguard: `color_gate_enabled` already governs S16 and now
+    governs S17 too, so a run can be compared with and without the album rule.  The album is
+    already **locked** here (two blue shots), so the guard is live with the switch on and the
+    third, red picture survives only with it off - a test that passed with the rule running
+    would prove nothing."""
+    blue_a = "https://www.hadielectronics.com.pk/wp-content/blue-1.jpg"
+    blue_b = "https://www.hadielectronics.com.pk/wp-content/blue-2.jpg"
+    red_url = "https://www.hadielectronics.com.pk/wp-content/red.jpg"
+    page_url = "https://www.hadielectronics.com.pk/product/homage-hrf-47662/"
+    gallery = "".join(f'<img src="{u}">' for u in (blue_a, blue_b, red_url))
+    page = (
+        "<!doctype html><html><head>"
+        "<title>Homage HRF-47662 Freezer-on-Top Refrigerator 18 Cu Ft</title></head><body>"
+        f'<div class="product-gallery">{gallery}</div></body></html>'
+    )
+    images_bytes = {
+        blue_a: _jpeg_bytes(clean_product_image(700, 700, "#2f5fa8")),
+        blue_b: _jpeg_bytes(clean_product_image(760, 640, "#1e4f96")),
+        red_url: _jpeg_bytes(clean_product_image(640, 760, "#c0392b")),
+    }
+    config = live_config(tmp_path, target_images_per_product=3, color_gate_enabled=False)
+    deps, _, _, _ = build_deps(tmp_path, {page_url: page}, images_bytes)
+    _, images = process_product(
+        task(0, "Homage Freezer-on-Top Refrigerator 18 Cu Ft (HRF-47662)", (page_url,)),
+        deps,
+        config,
+    )
+    assert len(images) == 3, "with the guard off the locked album keeps its red sibling too"
+
+
 def test_salvage_takes_the_correct_colour_not_the_wrong_sibling(tmp_path: Path) -> None:
     """The same site serves maroon and golden below the floor: salvage must skip
     the wrong colour (S16.salvage) and publish only the golden one."""

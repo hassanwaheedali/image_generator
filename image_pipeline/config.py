@@ -12,7 +12,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Final
+from typing import Final
 
 # Output CSV headers.  Changing the header is a one-constant change.
 #: ``Image_Urls`` serves the hosted-import mode; ``images`` serves the CSV-only mode
@@ -132,34 +132,6 @@ def load_env_file(
         if contributed is None:
             contributed = candidate
     return contributed or first_seen
-
-
-def load_config_file(
-    path: Path | None = None,
-    *,
-    search_dirs: Sequence[Path] | None = None,
-) -> dict[str, Any]:
-    """Load configuration dictionary from a JSON file (e.g. pipeline_config.json)."""
-    import json
-    candidates: list[Path] = []
-    if path is not None:
-        candidates.append(path)
-    else:
-        folders = list(search_dirs) if search_dirs is not None else default_search_dirs()
-        for folder in folders:
-            candidates.append(folder / "pipeline_config.json")
-            candidates.append(folder / "config.json")
-    for candidate in candidates:
-        if candidate.is_file():
-            try:
-                with candidate.open("r", encoding="utf-8") as f:
-                    data = json.load(f)
-                if isinstance(data, dict):
-                    return data
-            except (OSError, ValueError):
-                pass
-    return {}
-
 
 
 #: Default endpoint used when ``FREEIMAGE_UPLOAD_URL`` is not set.
@@ -633,6 +605,12 @@ class PipelineConfig:
     #: ``color_gate_official_chroma_exempt``), and the "is it a colour or is it a wash"
     #: test is saturation-based instead of raw channel spread.
     color_gate_enabled: bool = True
+    #: S17's evidence bar (owner 2026-10-16): how many accepted pictures must agree on one
+    #: colour family before that family becomes the gallery's colour and a different family
+    #: can be refused.  One picture never decides - a detail shot of a white AC with a black
+    #: louvre reads as another family and must not delete the row's real photos - and a
+    #: higher number makes the guard slower to act, so 2 is the floor the owner set.
+    gallery_colour_min_agreement: int = 2
     #: Skip the chromatic-dominance branch on a brand-owned page.  The brand's hero *is*
     #: the definitive picture of that variant, and a coloured studio plate around a white
     #: unit is not a colour conflict; a dark body on a white row is, and that branch stays
@@ -912,6 +890,10 @@ class PipelineConfig:
             raise ConfigError("gallery_publishes_all_min must be >= 1")
         if self.min_required_images < 1:
             raise ConfigError("min_required_images must be >= 1")
+        if self.gallery_colour_min_agreement < 2:
+            raise ConfigError(
+                "gallery_colour_min_agreement must be >= 2: one picture never defines a gallery"
+            )
         if self.max_images_per_product < self.min_required_images:
             raise ConfigError(
                 "max_images_per_product must be >= min_required_images "

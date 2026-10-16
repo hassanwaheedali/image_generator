@@ -541,6 +541,12 @@ def _decide_candidate(
     return None
 
 
+#: The sentence a row carries when its own pictures showed more than one colour family and
+#: the row states no colour word.  Only the owner knows which one he bought, so the run asks
+#: him instead of guessing (S17, owner 2026-10-16); ``main`` prints these rows as a block.
+COLOUR_UNSTATED_NOTE = "colour not stated:"
+
+
 def process_product(
     task: ProductTask,
     deps: PipelineDeps,
@@ -594,6 +600,7 @@ def process_product(
         corr_threshold=config.dedup_corr_threshold,
         hard_corr_threshold=config.dedup_hard_corr_threshold,
         shape_iou_min=config.dedup_shape_iou_min,
+        colour_min_agreement=config.gallery_colour_min_agreement,
     )
 
     accepted: list[AcceptedImage] = []
@@ -884,6 +891,13 @@ def process_product(
         )
 
     # ---- stage 4/5 summary -------------------------------------------------
+    colour_ambiguous = not keys.colour_word and not dedup.colour_settled
+    if colour_ambiguous:
+        seen = ", ".join(f"{family} x{count}" for family, count in dedup.colour_sightings)
+        notes.append(
+            f"{COLOUR_UNSTATED_NOTE} the pages show {seen} - write the colour in the row "
+            "to get the exact picture"
+        )
     if rejections:
         summary = ", ".join(
             f"{rule} x{count}" for rule, count in rejections.most_common(4)
@@ -921,9 +935,11 @@ def process_product(
     )
     stages.append(f"5 compose: {len(accepted)} final set(s) on every selected template")
     result = finalize_and_upload(task, result, accepted, deps, config, keys)
-    if relaxed_notes and result.status is Status.OK:
-        # A relaxed fallback match is published, never silently "ok": the row goes to
-        # review_products.csv and to the report with its flag.
+    if (relaxed_notes or colour_ambiguous) and result.status is Status.OK:
+        # A relaxed fallback match, or an album whose own pictures show two colours, is
+        # published but never silently "ok": the row goes to review_products.csv and to the
+        # report with its flag (S17, owner 2026-10-16 - a wrong colour is a penalty, and only
+        # he can say which of the two colours he bought).
         result = replace(result, status=Status.PARTIAL)
     stages.append(
         "6 upload: "
@@ -1079,6 +1095,16 @@ def _salvage_row(
                     detail=f"wrong colour for the last-resort slot too - {color_detail}",
                 )
                 continue
+        if gallery_colour_gate(
+            offer.image,
+            dedup,
+            config=config,
+            deps=deps,
+            title=task.title,
+            url=offer.used_url,
+            rejections=rejections,
+        ):
+            continue  # S17: a last resort is still another product's colour
         deps.decisions.keep(
             title=task.title,
             url=offer.used_url,
@@ -1277,6 +1303,37 @@ def _shade_gallery_lock(
     if not gallery_colour:
         gallery_colour.append(page_colour)
     return ""
+
+
+def gallery_colour_gate(
+    image: Image.Image,
+    dedup: ProductDedup,
+    *,
+    config: PipelineConfig,
+    deps: PipelineDeps,
+    title: str,
+    url: str,
+    rejections: Counter[str],
+) -> bool:
+    """Safeguard S17: True when this candidate must not join the gallery.
+
+    One gallery is one product's album, so it never mixes two colour families.  S16 cannot
+    cover this: it compares a picture against the *row's* colour word and says nothing when
+    the row states none - which is how a red and a blue refrigerator photo sat in one row
+    (owner 2026-10-16, after finding the rule written, tested and never called).  The first
+    chromatic family the gallery accepted is the witness; a neutral shot is no opinion and
+    never sets or breaks it.
+    """
+    if not config.color_gate_enabled:
+        return False
+    accepted, reason = dedup.check_color_consistency(image)
+    if accepted:
+        return False
+    rejections["S17"] += 1
+    deps.decisions.reject(title=title, url=url, rule_id="S17", detail=reason)
+    if config.keep_rejected_images:
+        _dump_rejected(image, config, title, url, "S17")
+    return True
 
 
 def _visit_page(
@@ -2023,6 +2080,16 @@ def _consume_candidates(
                 deps.decisions.keep(
                     title=task.title, url=used_url, rule_id="S16.official", detail=color_detail
                 )
+        if gallery_colour_gate(
+            image,
+            dedup,
+            config=config,
+            deps=deps,
+            title=task.title,
+            url=used_url,
+            rejections=rejections,
+        ):
+            continue  # another colour family is another product's picture
         # One fingerprint per candidate, reused by the gate and by the bookkeeping after
         # compose - the same 32x32 resample of the same 1200px image, once instead of twice.
         fingerprint = compute_fingerprint(image)

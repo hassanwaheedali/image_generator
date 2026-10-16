@@ -101,7 +101,8 @@ variable always wins. **Never print, log, commit or echo the key value.**
   conflicts with the title colorway (e.g., Purple/Red images for a Golden refrigerator), and `S17`
   enforces intra-gallery chromatic consistency. Display products (LED TVs, monitors, OLED/QLED) are
   exempted from S16 via `is_display_product()` so vibrant screen wallpapers do not trigger false rejections.
-  `config.variant_separation_enabled` and `config.visual_color_gate_enabled` control these safeguards.
+  `config.variant_separation_enabled` and `config.color_gate_enabled` control these safeguards
+  (`color_gate_enabled` gates both S16 and S17).
 - **Relaxed matching never applies to the sheet's own URLs.** `relaxed_page_match` is only for
   `is_fallback=True` pages, it must always emit `S15.relaxed` **and** a `review_products.csv` row, and
   it must match whole tokens: `dw7500` never matches inside `dw7500c`.

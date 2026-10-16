@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from config import PipelineConfig, load_config_file
+from config import PipelineConfig
 from main import build_config, build_parser
 from model_matching import _name_words, register_generic_name_words
 from models import AcceptedImage, ImageCandidate
@@ -62,27 +62,15 @@ def test_limit_gallery_iteration_caps_publish_goal() -> None:
     assert _page_publish_goal(candidates, cfg_limited) == 1
 
 
-def test_load_config_file_and_build_config(tmp_path: Path) -> None:
-    """Test loading config from JSON file and merging into build_config."""
-    cfg_file = tmp_path / "custom_config.json"
-    cfg_file.write_text(
-        '{"early_stop_when_image_found": true, "limit_gallery_iteration": true, '
-        '"min_required_images": 1, "target_images_per_product": 1, "extra_generic_name_words": ["customterm"]}',
-        encoding="utf-8",
-    )
-
-    data = load_config_file(cfg_file)
-    assert data["early_stop_when_image_found"] is True
-    assert data["target_images_per_product"] == 1
-
-    args = build_parser().parse_args(["--config", str(cfg_file), "--dry-run"])
+def test_build_config_inherits_the_code_defaults() -> None:
+    """No JSON overlay any more (owner 2026-10-16): a bare run takes its numbers straight
+    from ``PipelineConfig``, and only a command-line flag can move them."""
+    args = build_parser().parse_args(["--dry-run"])
     pipeline_cfg = build_config(args)
 
-    assert pipeline_cfg.early_stop_when_image_found is True
-    assert pipeline_cfg.limit_gallery_iteration is True
-    assert pipeline_cfg.min_required_images == 1
-    assert pipeline_cfg.target_images_per_product == 1
-    assert "customterm" in pipeline_cfg.extra_generic_name_words
+    assert pipeline_cfg.min_required_images == PipelineConfig.min_required_images
+    assert pipeline_cfg.target_images_per_product == PipelineConfig.target_images_per_product
+    assert pipeline_cfg.max_images_per_product == PipelineConfig.max_images_per_product
 
 
 def test_extra_generic_name_words_registration() -> None:

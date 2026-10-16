@@ -7,13 +7,93 @@ module-level state, so an image can never be carried from one product to another
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
 from PIL import Image
 
-from image_quality import body_shape, shape_overlap, to_rgb
+from image_quality import body_shape, extract_foreground_color_profile, shape_overlap, to_rgb
+
+#: The labels ``image_quality.extract_foreground_color_profile`` uses when a picture does
+#: **not** name a colour: the neutral verdict and the hue-ambiguous catch-all.  Everything
+#: else the profiler can emit (red, gold, blue, green, purple, and any family added later)
+#: is a colour someone could stand behind, so this list of *exclusions* is the whole
+#: vocabulary S17 needs - no family list to keep in step with the profiler (owner rule:
+#: derive, don't hand-list; fresh-context review 2026-10-16 flagged the nine-name table I
+#: first wrote as four dead entries plus a silent no-op on any rename).
+_NO_COLOUR_FAMILIES = frozenset({"neutral", "chromatic", ""})
+
+
+def _chromatic_family(image: Image.Image) -> tuple[str, float]:
+    """The image's colour family and hue, or ``("", 0.0)`` when it names no colour."""
+    profile = extract_foreground_color_profile(image)
+    if not profile.is_chromatic or profile.dominant_family in _NO_COLOUR_FAMILIES:
+        return "", 0.0
+    return profile.dominant_family, profile.median_hue
+
+
+class GalleryColour:
+    """Safeguard S17's memory: which family the album is, and what the pages showed.
+
+    One product has one colour, so a gallery never mixes two colour **families** - a red
+    refrigerator beside a blue one is two products on one shop page, and a wrong picture
+    costs a penalty. A single picture never defines the album either: the family locks
+    only when ``min_agreement`` accepted pictures agree on it, because a detail shot of a
+    white AC with a black louvre reads as a different family and must not delete the row's
+    real photos (owner 2026-10-16).  Every family *seen* is counted, refused pictures
+    included, so a row that states no colour can be reported back to the owner instead of
+    guessed for him.
+    """
+
+    def __init__(self, *, min_agreement: int) -> None:
+        self._min_agreement = min_agreement
+        self._accepted: Counter[str] = Counter()
+        self._lock = ""
+
+    def verdict(self, image: Image.Image) -> tuple[bool, str]:
+        """True when this candidate may join the gallery; the reason when it may not."""
+        family, hue = _chromatic_family(image)
+        if not self._locked(family):
+            return True, ""
+        return False, (
+            f"intra-gallery colour conflict: candidate is {family} (hue {hue:.0f}°) "
+            f"while this gallery is {self._lock}"
+        )
+
+    def record(self, image: Image.Image) -> None:
+        """Remember an accepted picture's family; two agreeing ones fix the album."""
+        family, _ = _chromatic_family(image)
+        if not family:
+            return
+        self._accepted[family] += 1
+        if self._accepted[family] >= self._min_agreement:
+            self._lock = family
+
+    def _locked(self, family: str) -> bool:
+        """True when this picture's family contradicts the album's settled colour."""
+        return bool(family) and bool(self._lock) and family != self._lock
+
+    @property
+    def settled(self) -> bool:
+        """Whether this album is one colour.
+
+        The lock is a veto, not a verdict: an album that accepted red *and* purple holds two
+        products even once one of them has outvoted the other, so the answer comes from how
+        many families were accepted, never from whether a lock exists (fresh-context review
+        2026-10-16: reading "locked" as "settled" let a mixed gallery publish silently).
+        """
+        return len(self._accepted) < 2
+
+    @property
+    def families(self) -> tuple[str, ...]:
+        """The colour families this gallery accepted, most-published first."""
+        return tuple(family for family, _ in self.sightings)
+
+    @property
+    def sightings(self) -> tuple[tuple[str, int], ...]:
+        return tuple(sorted(self._accepted.items(), key=lambda item: (-item[1], item[0])))
 
 
 @dataclass(frozen=True)
@@ -157,6 +237,7 @@ class ProductDedup:
         corr_threshold: float,
         hard_corr_threshold: float = 0.985,
         shape_iou_min: float = 0.90,
+        colour_min_agreement: int = 2,
     ) -> None:
         self._hard = hard_threshold
         self._soft = soft_threshold
@@ -164,27 +245,27 @@ class ProductDedup:
         self._hard_corr = hard_corr_threshold
         self._shape_iou = shape_iou_min
         self._entries: list[tuple[str, ImageFingerprint]] = []
-        self._accepted_color_families: list[str] = []
+        self._colour = GalleryColour(min_agreement=colour_min_agreement)
 
     def check_color_consistency(self, image: Image.Image) -> tuple[bool, str]:
-        """Safeguard S17: checks if image foreground color contradicts already-accepted images."""
-        if not self._accepted_color_families:
-            return True, ""
-        from image_quality import extract_foreground_color_profile
+        """Safeguard S17: may this picture join the gallery already accepted?"""
+        return self._colour.verdict(image)
 
-        profile = extract_foreground_color_profile(image)
-        if not profile.is_chromatic:
-            return True, ""
-        first_fam = self._accepted_color_families[0]
-        _CHROMATIC_SET = (
-            "purple", "red", "blue", "green", "gold", "orange", "yellow", "pink", "brown",
-        )
-        if profile.dominant_family != first_fam and profile.dominant_family in _CHROMATIC_SET:
-            return False, (
-                f"intra-gallery colour conflict: candidate is {profile.dominant_family} "
-                f"(hue {profile.median_hue:.0f}°) while accepted gallery is {first_fam}"
-            )
-        return True, ""
+    @property
+    def colour_families(self) -> tuple[str, ...]:
+        """The colour families this product's gallery accepted."""
+        return self._colour.families
+
+    @property
+    def colour_settled(self) -> bool:
+        """False when this product's gallery holds more than one colour family - a choice
+        only the owner can settle, so the run reports it instead of guessing (S17)."""
+        return self._colour.settled
+
+    @property
+    def colour_sightings(self) -> tuple[tuple[str, int], ...]:
+        """Each accepted family with how often it appeared - the owner's counts."""
+        return self._colour.sightings
 
     def duplicate_reason(
         self, image: Image.Image, *, fingerprint: ImageFingerprint | None = None
@@ -247,14 +328,7 @@ class ProductDedup:
         if self.duplicate_reason(image, fingerprint=current):
             return False
         self._entries.append((url, current))
-        from image_quality import extract_foreground_color_profile
-
-        profile = extract_foreground_color_profile(image)
-        _CHROMATIC_SET = (
-            "purple", "red", "blue", "green", "gold", "orange", "yellow", "pink", "brown",
-        )
-        if profile.is_chromatic and profile.dominant_family in _CHROMATIC_SET:
-            self._accepted_color_families.append(profile.dominant_family)
+        self._colour.record(image)
         return True
 
     @property

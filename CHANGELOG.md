@@ -22,7 +22,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   S7 corner bar exactly as in Option 1. Verified end to end on real web photos (AC,
   refrigerator, washing machine, yellow sale template) and over a loopback-HTTP `--dry-run`.
 
+### Changed
+- **`config.py` is the only home for run settings (owner 2026-10-16).** The JSON overlay is
+  gone: `--config` no longer exists, `load_config_file` is deleted, and `build_config` reads its
+  numbers straight from `PipelineConfig`.  Precedence is now **CLI flag > code default** — no
+  file found by working directory, no second copy at the repo root that can silently diverge,
+  and nothing that looks like a setting but is commented out.  Verified behaviour-neutral: the
+  only live key in the old overlay was `extra_generic_name_words`, and all twenty of those words
+  are already in the code's noise table; every other key was commented out.  To change a
+  threshold, edit `config.PipelineConfig` (or pass the flag) — it is validated in
+  `__post_init__`, which a loose JSON file never was.
+
 ### Fixed
+- **The gallery colour rule finally runs — and it asks instead of guessing (Safeguard S17,
+  owner 2026-10-16).** It was written on 2026-10-08, it had tests, and README §4 advertised it
+  ever since as "never mix distinct colour families in one gallery" — but
+  `dedup.check_color_consistency()` had **no caller** in either option while the gallery state
+  beside it was filled and never consulted.  One product has one colour, so a red refrigerator
+  photo beside a blue one is two products on one shop page — and `S16` cannot catch it, because
+  S16 compares each picture against the *row's* colour word and says nothing when the row states
+  none (`Homage … 18 Cu Ft (HRF-47662)`).  The rule now runs per candidate right after S16 in
+  both options (`pipeline.gallery_colour_gate`, switch `config.color_gate_enabled`, the field
+  that already governs S16), and it is deliberately slow: the family **locks only when two
+  accepted pictures agree** (`gallery_colour_min_agreement`), so one odd detail shot — a white AC
+  with a black louvre, a gold logo on a grey body — can never define the album or delete the
+  row's real photos.  Neutral pictures are no opinion: they neither set the colour nor break it.
+  Two findings from the fresh-context review are fixed in the same commit: an album that had
+  already accepted two families used to publish as plain `ok` once one of them later won the
+  vote (a lock is a veto, not a verdict — `colour_settled` now asks how many families were
+  accepted), and the family names are no longer a hand-written table of nine, four of which the
+  profiler can never emit; the rule now excludes only the labels that mean "no colour named"
+  (`neutral`, `chromatic`), so a new family in `image_quality` is comparable without editing
+  this file.
+  **And when the album genuinely shows two colours and the row names none, nothing is guessed:**
+  the row stays `PARTIAL`, carries the families it saw (`blue x1, red x1`), and the run ends with
+  `COLOUR NOT STATED (n)` telling him to write the colour once.  Measured over every picture still
+  on disk from past runs — 43 row albums, 196 files (composited finals plus the untouched
+  `audit/raw` downloads): **0 refused, 0 asked**, so no published row shrinks today.  The shared
+  "three angles of one product" fixture was redrawn in one colour, because three angles wearing
+  blue, dark red and yellow are three products, and the guard was right to refuse them.  `--direct`
+  refuses a wrong-family picture too, but the `COLOUR NOT STATED` question is asked only in the
+  scraping option — there are no pages there to blame.
 - **The shade, not the colour, decides the picture (Safeguard S20, owner 2026-10-16).**
   `9140-WB` is sold as Avante Pearl Red, Ruby Red and Diamond Red: one body, three products,
   and `Red` named none of them — so a Pearl Red row happily published a Ruby Red gallery.

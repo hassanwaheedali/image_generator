@@ -75,7 +75,7 @@ Total: **13,621 lines** across 32 source files (21 top-level + 11 gallery_extrac
 /                       repo root (workspace: plan.md, tasks/, verification/, uploads/)
 ├── input/              sheets live here now (moved from image_pipeline/input by daa2922):
 │                       1800_products.csv, sample_products.csv, website_ac.csv
-├── pipeline_config.json   dynamic run-config overlay (identical copy inside image_pipeline/)
+├── pipeline_config.json.disabled   the old run-config overlay, disconnected 2026-10-16
 ├── image_pipeline/     the project (self-contained, pip-installable)
 │   ├── main.py              CLI entry point
 │   ├── config.py            frozen PipelineConfig + env/JSON loaders
@@ -88,7 +88,7 @@ Total: **13,621 lines** across 32 source files (21 top-level + 11 gallery_extrac
 │   ├── gallery_extractors/  registry + per-brand extractors
 │   ├── tests/               18 modules + HTML fixtures + conftest fakes
 │   ├── assets/ input/ docs/ AGENTS.md README.md pyproject.toml
-│   └── pipeline_config.json (second copy of the JSON overlay)
+│   └── (no config overlay since 2026-10-16: `config.py` carries every run number)
 ├── verification/     live-run evidence (contact sheets, probe scripts)
 ├── tasks/ docs/      plan.md, todo.md, riper notes
 └── .agents/          skills + repo-wide rules (dry_dynamic_algorithm, pricing_engine)
@@ -118,7 +118,9 @@ Image hosts: freeimage.host (`FREEIMAGE_API_KEY`) with automatic ImgBB failover 
 | `python3 filter_blurry_images.py` | standalone blur report over `input/` |
 | `pip install -e ".[dev]"` | editable install (flat layout needs the explicit `py-modules` list) |
 
-Config precedence: **CLI flag > JSON config file > code default** (`main.py:163-190`). The JSON file (`--config`, default `pipeline_config.json`) is searched cwd -> project dir -> parent dir and currently overrides: early stop, gallery limits, image quotas, fallback budget, extra generic words.
+Config precedence: **CLI flag > code default** (`main.py:build_config`). The JSON overlay is
+gone (owner 2026-10-16): `--config` no longer exists, `load_config_file` is deleted, and every
+run number is read straight from `config.PipelineConfig`, where `__post_init__` validates it.
 
 ---
 
@@ -182,8 +184,12 @@ All findings were produced by running commands, not reading docs.
 
 Same lesson as last time: prose counts rot. Say "all green", not a number.
 
-### 3. Two `pipeline_config.json` files, resolved by working directory
-`pipeline_config.json` exists at both repo root and `image_pipeline/`. `load_config_file` searches cwd first, then project dir, then parent — so the two copies are interchangeable today (verified identical) but can silently diverge, and behavior then depends on where you run from. One file, or a startup warning, would remove the trap.
+### 3. ~~Two `pipeline_config.json` files, resolved by working directory~~ — closed 2026-10-16
+This was the trap: two identical JSON overlays, cwd deciding which one won. The owner removed the
+mechanism instead of unifying the files — `--config` and `load_config_file` are gone and
+`config.PipelineConfig` is the single source of truth, validated in `__post_init__`. What is left
+of the old file is `pipeline_config.json.disabled` at the repo root: inert, kept only as a record
+of the words it used to add (all twenty are already in the code's noise table).
 
 ### 4. `pipeline.py` is 2,278 lines
 It now owns Path-1/Path-2 ordering, budgets, upload gating, the S20/S21 layout rescue, `BatchRunner`, and all writers. Well-sectioned and tested, but it is the obvious split candidate.
@@ -202,7 +208,8 @@ In order:
 
 1. **Add a minimal CI workflow** running `ruff` + `mypy --strict` + `pytest`. The suite is offline and hermetic; it will just work. This would have caught concern 1 on the day it was introduced.
 2. **Stop naming counts in prose** — "must stay all-green" instead of "330 tests"; same for the radon baseline.
-3. **Single `pipeline_config.json`** (or a drift warning at startup).
+3. ~~**Single `pipeline_config.json`** (or a drift warning at startup)~~ — done differently and
+   better on 2026-10-16: the overlay was deleted, not consolidated.
 4. **Split `pipeline.py`** — the page-ordering/visit logic is the natural first extraction.
 5. **Resolve the `dry_dynamic_algorithm.md` conflict** explicitly.
 6. Live-verify a Midea row end to end: `mideapakistan.store` is in `KNOWN_BRANDS` but **not** in `config.brand_sources`, so the brand-first search is a no-op for Midea rows today (their brand coverage comes only from sheet URLs).
@@ -220,7 +227,6 @@ wc -l image_pipeline/*.py gallery_extractors/*.py -> 13,621 lines / 32 files
 .venv/Scripts/python.exe -m pytest --co -q        -> 526 collected (distribution above)
 .venv/Scripts/python.exe -m radon cc image_pipeline -n C -s --exclude "tests/*" -> 58 blocks
 .venv/Scripts/python.exe image_pipeline/main.py --help -> exit 0
-diff image_pipeline/pipeline_config.json pipeline_config.json -> identical
 git ls-files | wc -l                              -> 249 (142 excluding .agents/)
 ```
 

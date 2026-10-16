@@ -76,18 +76,23 @@ def white_on_white_image(width: int = 800, height: int = 800) -> Image.Image:
 
 
 def second_angle_image(width: int = 900, height: int = 900) -> Image.Image:
-    """A tall product, cleanly on white - structurally different from the first angle."""
+    """A tall product, cleanly on white - structurally different from the first angle.
+
+    It is the *same product* as ``clean_product_image``, so it wears the same colour: three
+    angles of one item in three different colours is not a gallery, it is three products, and
+    S17 is right to refuse it (owner 2026-10-16).
+    """
     image, draw = _canvas(width, height)
-    draw.rounded_rectangle((370, 170, 530, 740), radius=18, fill="#7a1f1f")
-    draw.ellipse((390, 100, 510, 220), fill="#7a1f1f")
+    draw.rounded_rectangle((370, 170, 530, 740), radius=18, fill="#2f5fa8")
+    draw.ellipse((390, 100, 510, 220), fill="#2f5fa8")
     return image
 
 
 def third_angle_image(width: int = 900, height: int = 900) -> Image.Image:
-    """A wide product (washing machine) with a round door: a third distinct angle."""
+    """A wide product (washing machine) with a round door: a third distinct angle, one colour."""
     image, draw = _canvas(width, height)
-    draw.rounded_rectangle((160, 320, 740, 690), radius=20, fill="#e8d43c")
-    draw.ellipse((350, 390, 550, 590), fill="#b9930c")
+    draw.rounded_rectangle((160, 320, 740, 690), radius=20, fill="#2f5fa8")
+    draw.ellipse((350, 390, 550, 590), fill="#1e4f96")
     return image
 
 

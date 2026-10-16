@@ -24,7 +24,6 @@ from config import (
     DEFAULT_STATE_ROOT,
     ConfigError,
     PipelineConfig,
-    load_config_file,
     load_env_file,
 )
 from csv_io import (
@@ -47,6 +46,7 @@ from fetch import (
 from image_host import APILayerHost, FallbackImageHost, FreeImageHost, ImgBBHost
 from models import ProductResult, ProductTask, Status
 from pipeline import (
+    COLOUR_UNSTATED_NOTE,
     BatchRunner,
     DryRunHost,
     PipelineDeps,
@@ -135,11 +135,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int, default=None, help="process at most N products")
     parser.add_argument("--workers", type=int, default=4, help="parallel workers (default 4)")
     parser.add_argument(
-        "--config",
-        default=None,
-        help="path to a JSON config file (default: pipeline_config.json)",
-    )
-    parser.add_argument(
         "--early-stop",
         action="store_true",
         help="stop searching further pages once >= 1 valid image is accepted",
@@ -194,30 +189,27 @@ def configure_logging(config: PipelineConfig, level: str) -> None:
 
 def build_config(args: argparse.Namespace) -> PipelineConfig:
     # Each sheet gets its own run folder, but naming it needs the *resolved* sheet path,
-    # which only exists after this config is built - see name_run_folders().
-    file_cfg = load_config_file(Path(args.config) if getattr(args, "config", None) else None)
-
-    early_stop = bool(getattr(args, "early_stop", False)) or bool(file_cfg.get("early_stop_when_image_found", False))
-    limit_gallery = bool(getattr(args, "limit_gallery", False)) or bool(file_cfg.get("limit_gallery_iteration", False))
-    extra_words = tuple(file_cfg.get("extra_generic_name_words", ()))
-    gallery_publishes_all = bool(file_cfg.get("gallery_publishes_all", True))
+    early_stop = bool(getattr(args, "early_stop", False)) or PipelineConfig.early_stop_when_image_found
+    limit_gallery = bool(getattr(args, "limit_gallery", False)) or PipelineConfig.limit_gallery_iteration
+    extra_words = PipelineConfig.extra_generic_name_words
+    gallery_publishes_all = PipelineConfig.gallery_publishes_all
 
     min_required_images = (
         int(args.min_images)
         if getattr(args, "min_images", None) is not None
-        else int(file_cfg.get("min_required_images", 2))
+        else PipelineConfig.min_required_images
     )
     max_images_per_product = (
         int(args.max_images)
         if getattr(args, "max_images", None) is not None
-        else int(file_cfg.get("max_images_per_product", 10))
+        else PipelineConfig.max_images_per_product
     )
     target_images_per_product = (
         int(args.target_images)
         if getattr(args, "target_images", None) is not None
-        else int(file_cfg.get("target_images_per_product", 3))
+        else PipelineConfig.target_images_per_product
     )
-    fallback_max_pages_per_source = int(file_cfg.get("fallback_max_pages_per_source", 3))
+    fallback_max_pages_per_source = PipelineConfig.fallback_max_pages_per_source
 
     pinned_output = Path(args.output_dir) if args.output_dir else DEFAULT_OUTPUT_ROOT
     pinned_state = Path(args.state_dir) if args.state_dir else DEFAULT_STATE_ROOT
@@ -802,7 +794,34 @@ def main(argv: list[str] | None = None) -> int:
     _write_failed_helper_csvs(everything, tasks, config)
     summarize(everything, config)
     _report_unstated_shades(tasks)
+    _report_colour_variants(everything)
     return 0
+
+
+def _report_colour_variants(results: list[ProductResult]) -> None:
+    """S17's question: rows whose pages offered more than one colour and state none.
+
+    The guard locks a gallery's colour only when two accepted pictures agree, so a row with
+    one blue and one red picture is a real choice the matcher must not make (owner
+    2026-10-16: a wrong colour picture costs a penalty).  Listing those rows once, with the
+    families the pages actually showed, turns a silent mix into one word to write in the
+    sheet - and nothing is printed for a row whose pictures agree.
+    """
+    asked = [
+        result
+        for result in results
+        if COLOUR_UNSTATED_NOTE in result.note and result.images_accepted > 0
+    ]
+    if not asked:
+        return
+    print(
+        f"\nCOLOUR NOT STATED ({len(asked)}) - the pages of these rows show more than one "
+        "colour.\nWrite the colour into the row (e.g. 'Maroon', not nothing) and the other "
+        "colours\nstop being accepted for it:"
+    )
+    for result in asked:
+        detail = result.note.split(COLOUR_UNSTATED_NOTE, 1)[1].split(" - ")[0]
+        print(f"  - {csv_escape(result.title)}  {detail.strip()}")
 
 
 def _report_unstated_shades(tasks: list[ProductTask]) -> None:

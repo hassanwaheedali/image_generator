@@ -48,6 +48,7 @@ from pipeline import (
     _load_prepared_template,
     _row_is_done,
     finalize_and_upload,
+    gallery_colour_gate,
 )
 from url_filters import dedup_key, detect_brand, display_brand
 
@@ -104,6 +105,7 @@ def process_direct_product(
         corr_threshold=config.dedup_corr_threshold,
         hard_corr_threshold=config.dedup_hard_corr_threshold,
         shape_iou_min=config.dedup_shape_iou_min,
+        colour_min_agreement=config.gallery_colour_min_agreement,
     )
     accepted: list[AcceptedImage] = []
     seen_keys: set[str] = set()
@@ -227,6 +229,16 @@ def process_direct_product(
                     _dump_rejected(image, config, task.title, url, "S16")
                 continue
 
+        if gallery_colour_gate(
+            image,
+            dedup,
+            config=config,
+            deps=deps,
+            title=task.title,
+            url=url,
+            rejections=rejections,
+        ):
+            continue  # S17: another colour family is another product's picture
         fingerprint = compute_fingerprint(image)
         duplicate = dedup.duplicate_reason(image, fingerprint=fingerprint)
         if duplicate:
