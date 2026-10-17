@@ -187,6 +187,8 @@ def duplicate_reason(
     NOT the fix for a repeated download: see ``review_shape_match``, which records the
     ambiguity for a human instead of guessing, and ``dedup_key`` in
     :mod:`url_filters`, which prevents the same asset being fetched twice by identity.
+    What *was* the fix is not a threshold change at all: measuring these same numbers on
+    the keyed square rather than the download - :meth:`ProductDedup.record_published`.
     """
     for position, candidate in enumerate(existing, start=1):
         distance = hamming_distance(fingerprint.dhash, candidate.dhash)
@@ -245,6 +247,7 @@ class ProductDedup:
         self._hard_corr = hard_corr_threshold
         self._shape_iou = shape_iou_min
         self._entries: list[tuple[str, ImageFingerprint]] = []
+        self._published: list[ImageFingerprint] = []
         self._colour = GalleryColour(min_agreement=colour_min_agreement)
 
     def check_color_consistency(self, image: Image.Image) -> tuple[bool, str]:
@@ -330,6 +333,29 @@ class ProductDedup:
         self._entries.append((url, current))
         self._colour.record(image)
         return True
+
+    def record_published(self, image: Image.Image) -> str:
+        """S10's second look, on the picture we actually publish.
+
+        Two shops re-hosting one artwork differ in padding, and padding lives in the download -
+        which is what :meth:`duplicate_reason` measures.  Keying removes exactly that noise, so
+        the same pair that slipped past both branches raw is an obvious repeat here.  Records the
+        finished picture and returns "" the first time; returns the reason and records nothing -
+        colour included - when it repeats one already published.
+        """
+        current = compute_fingerprint(image)
+        reason = duplicate_reason(
+            current,
+            self._published,
+            hard_threshold=self._hard,
+            soft_threshold=self._soft,
+            corr_threshold=self._corr,
+            hard_corr_threshold=self._hard_corr,
+            shape_iou_min=self._shape_iou,
+        )
+        if not reason:
+            self._published.append(current)
+        return reason
 
     @property
     def urls(self) -> tuple[str, ...]:

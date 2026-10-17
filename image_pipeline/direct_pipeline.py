@@ -306,6 +306,7 @@ def process_direct_product(
             deps=deps,
             dedup=dedup,
             accepted=accepted,
+            rejections=rejections,
             fingerprint=fingerprint,
         )
 

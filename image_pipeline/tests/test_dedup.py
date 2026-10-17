@@ -55,6 +55,19 @@ def test_same_image_resized_is_duplicate() -> None:
     assert dedup.add(resized, "https://cdn.shop/p/a-1-600x600.png") is False
 
 
+def test_the_second_look_judges_the_picture_we_publish() -> None:
+    """``record_published`` is its own lane: it folds a repeat of a *finished* square and
+    keeps a genuinely different one, independently of what the download looked like."""
+    first = _product(_BLUE, 0)
+    same_again = _product(_BLUE, 0)
+    other_angle = _product(_BLUE, 1)
+    dedup = new_dedup()
+    assert dedup.record_published(first) == ""
+    assert dedup.record_published(same_again) != ""
+    assert dedup.record_published(other_angle) == ""
+    assert len(dedup) == 0, "the second look must not feed the accepted-angle bookkeeping"
+
+
 def test_different_angle_not_duplicate() -> None:
     dedup = new_dedup()
     dedup.add(clean_product_image(), "https://cdn.shop/p/a-1.png")

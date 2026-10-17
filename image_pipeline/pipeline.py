@@ -1126,6 +1126,7 @@ def _salvage_row(
             deps=deps,
             dedup=dedup,
             accepted=accepted,
+            rejections=rejections,
         )
     salvaged = len(accepted) - before
     if salvaged:
@@ -2123,6 +2124,7 @@ def _consume_candidates(
             deps=deps,
             dedup=dedup,
             accepted=accepted,
+            rejections=rejections,
             fingerprint=fingerprint,
         )
 
@@ -2159,6 +2161,7 @@ def _compose_and_save(
     deps: PipelineDeps,
     dedup: ProductDedup,
     accepted: list[AcceptedImage],
+    rejections: Counter[str],
     fingerprint: ImageFingerprint | None = None,
 ) -> None:
     """Stage 5: isolate, 1:1 centre, light unsharp, every selected template, save locally.
@@ -2166,6 +2169,9 @@ def _compose_and_save(
     ``downloaded`` is the picture as the fetch returned it, before the page-furniture gates
     cut it.  ``raw/`` is written from it so the audit always holds what the shop served; the
     cut version lands in ``clean/`` beside it, and only when a cut actually happened.
+
+    Publishes nothing when the *finished* picture repeats one already in the album, and counts
+    that as S10 here - so no caller has to remember the second look exists.
     """
     index = len(accepted) + 1
     # Owner decision 2026-10-15: the studio background is keyed out of the primary image
@@ -2184,6 +2190,15 @@ def _compose_and_save(
         percent=config.unsharp_percent,
         threshold=config.unsharp_threshold,
     )
+    published_repeat = dedup.record_published(square)
+    if published_repeat:
+        # The padding and compression that made two shops' copies of one artwork look
+        # different are gone by now - this is the second look, on the picture we ship.
+        rejections["S10"] += 1
+        deps.decisions.reject(
+            title=task.title, url=used_url, rule_id="S10", detail=published_repeat
+        )
+        return
     served = downloaded if downloaded is not None else image
     raw_path = _save_audit(served, config, task.title, ImageRole.RAW, f"{index:02d}-raw.jpg")
     if served.size != image.size:

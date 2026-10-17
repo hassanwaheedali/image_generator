@@ -1996,6 +1996,96 @@ def test_a_tolerated_page_never_publishes_a_sibling_products_image(tmp_path: Pat
     assert "names another product from this sheet" in decisions
 
 
+def _catalog_artwork(*, offset: float = 0.0, scale: float = 0.5, open_lid: bool = False) -> Image.Image:
+    """One product photographed for a catalog: body, tub, control strip - served with the
+    shop's own padding (``offset`` moves it off-centre, the way two shops crop one file)."""
+    image = Image.new("RGB", (900, 900), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    width = int(900 * scale)
+    left = int((900 - width) * 0.5 + 900 * offset)
+    top = int((900 - width) * 0.5)
+    draw.rounded_rectangle((left, top, left + width, top + width), radius=22, fill="#2f5fa8")
+    draw.ellipse((left + width * 0.18, top + width * 0.18, left + width * 0.82, top + width * 0.55),
+                 fill="#dff0ff")
+    draw.rectangle((left + width * 0.1, top + width * 0.72, left + width * 0.9, top + width * 0.82),
+                   fill="#123a6b")
+    if open_lid:
+        draw.rectangle((left + width * 0.15, top - width * 0.16, left + width * 0.85, top + width * 0.05),
+                       fill="#e8eef7")
+    else:
+        draw.rectangle((left + width * 0.15, top + width * 0.02, left + width * 0.85, top + width * 0.10),
+                       fill="#123a6b")
+    return image
+
+
+def _twin_tub_page(image_urls: tuple[str, ...]) -> str:
+    """One shop's product page: the model in its title and heading, gallery images as given."""
+    images = "".join(f'<img src="{url}">' for url in image_urls)
+    return (
+        "<html><head><title>Haier HTW-100-196S</title></head>"
+        "<body><h1>Haier HTW-100-196S</h1>"
+        f"<div class='product-gallery'>{images}</div></body></html>"
+    )
+
+
+def test_a_rehosted_copy_is_folded_on_the_picture_we_publish(tmp_path: Path) -> None:
+    """Owner, 2026-10-17: the washing-machine run published the same machine twice, because
+    two shops serve the same artwork with different padding.  S10 already catches that pair -
+    measured on the live files, dHash 3 and correlation 0.9972 - but it ran on the **raw**
+    download, where the same pair sits out of reach at dHash 9 / 0.9922.  The picture that
+    ships is the isolated square, so that is the picture the dedup must judge."""
+    config = live_config(tmp_path)
+    wide = "https://friendshome.example/cdn/shop/files/HTW100-196S.jpg"
+    tight = "https://surmawala.example/cdn/shop/files/haier-100-196s.jpg"
+    page_a = "https://friendshome.example/products/haier-htw-100-196s"
+    page_b = "https://surmawala.example/products/haier-htw-100-196s"
+
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {page_a: _twin_tub_page((wide,)), page_b: _twin_tub_page((tight,))},
+        {
+            wide: png_bytes(_catalog_artwork()),
+            tight: png_bytes(_catalog_artwork(offset=0.18)),
+        },
+    )
+    result, accepted = process_product(
+        task(0, "Haier HTW-100-196S Twin Tub Washer", (page_a, page_b)), deps, config
+    )
+
+    assert len(accepted) == 1, "the same picture shipped twice - S10 judged the raw bytes"
+    assert accepted[0].source_url == wide
+    decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
+    assert '"rule_id": "S10"' in decisions                       # folded, and it is on the record
+    assert "re-served copy of accepted image #1" in decisions    # the hard branch, like the live pair
+    assert result.status is not Status.OK                        # one picture is not a full album
+
+
+def test_two_genuine_angles_survive_the_second_look(tmp_path: Path) -> None:
+    """The danger this rule cannot be allowed to create: a lid open and a lid shut are two
+    pictures a shop pays for, and they are the same product.  ``dedup.duplicate_reason``
+    documents a protected pair that is *closer* on raw measurements than some real
+    duplicates, so the second look is only safe while isolation keeps them apart - this is
+    that guarantee, pinned."""
+    config = live_config(tmp_path)
+    shut = "https://cdn.shop.example/p/htw-100-196s-1.jpg"
+    open_url = "https://cdn.shop.example/p/htw-100-196s-2.jpg"
+    page = "https://shop.example/products/haier-htw-100-196s"
+
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {page: _twin_tub_page((shut, open_url))},
+        {
+            shut: png_bytes(_catalog_artwork()),
+            open_url: png_bytes(_catalog_artwork(open_lid=True)),
+        },
+    )
+    _, accepted = process_product(
+        task(0, "Haier HTW-100-196S Twin Tub Washer", (page,)), deps, config
+    )
+
+    assert len(accepted) == 2, "the second angle was folded - the album lost a real picture"
+
+
 def test_a_row_with_one_exact_image_is_never_topped_up_by_the_tolerated_page(
     tmp_path: Path,
 ) -> None:
