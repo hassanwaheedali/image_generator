@@ -339,7 +339,7 @@ back to the rule that kept or rejected it.
 | S12 | **Zero fallback image sources** — only a verified page's own gallery; the scoped whole-page fallback needs a code-anchored URL | `generic_gallery.extract_whole_page_fallback()` | `test_pipeline_has_no_fallback_source`, `test_no_gallery_and_no_model_urls_gives_nothing`, `test_whole_page_fallback_needs_a_verified_page_and_a_model_url` |
 | S13 | Bytes must really be an image (Content-Type, no SVG/animated GIF, ≤15 MB, decode, EXIF rotation) | `image_quality.validate_image_bytes()` | `test_non_image_and_oversize_rejected`, `test_exif_rotation_applied` |
 | S14 | Nothing uploaded until the selection is final; **both platforms or neither**; banner appended **last** | `pipeline.finalize_and_upload()` | `test_ok_product_urls_are_real_images_then_banner`, `test_failed_product_uploads_nothing`, `test_partial_product_gets_one_banner_per_platform` |
-| — | **The template's logo band is never touched** (paste box starts below `header_safe_margin`, template composited on top, its artwork preserved) | `compositing.apply_template()`, `template_content_box()`, `header_safe_margin()` | `test_logo_band_is_byte_identical_after_compositing`, `test_product_is_never_pasted_above_the_safe_margin`, `test_template_decoration_inside_the_content_area_survives`, `test_real_asset_templates_protect_their_band` (mutation-verified) |
+| — | **The template's own art is never touched** - neither the logo band at the top (paste box starts below `header_safe_margin`) nor a shop line at the bottom (the box stops above the measured footer band, and a footer that would collapse the box is ignored) | `compositing.apply_template()`, `template_content_box()`, `header_safe_margin()`, `footer_safe_margin()` | `test_logo_band_is_byte_identical_after_compositing`, `test_product_is_never_pasted_above_the_safe_margin`, `test_template_decoration_inside_the_content_area_survives`, `test_real_asset_templates_protect_their_band` (mutation-verified), `test_the_shipped_website_footer_survives_compositing`, `test_a_footer_that_reaches_into_the_header_is_ignored` |
 | S15.tolerated | A page that shows the model *without* our exact spelling (the sheet's dropped trailing letter) being published as if it proved the model; used **only when the row found zero exact images** — never to top up a partially-solved row | `model_matching.match_product` (`tolerated`) + `pipeline._visit_page` + stage-3b guard | `test_a_tolerated_spelling_is_not_an_exact_match`, `test_the_title_model_wins_over_a_wrong_sheet_link`, `test_a_tolerated_sheet_page_is_published_with_a_flag_when_nothing_else_matches`, `test_a_row_with_one_exact_image_is_never_topped_up_by_the_tolerated_page` |
 | S15 | A page found by search is only a *candidate*: it must pass the same `verify_page` with the **sheet's** model before any image URL is read | `sources.SourceChain.find_candidates()` + `pipeline._visit_page()` | `test_fallback_candidate_is_verified_before_any_image_is_used`, `test_candidate_is_only_a_page_never_an_image`, `test_fallback_recovers_a_row_and_is_labelled_in_the_output` |
 | S1.tail / S15.tail | **The tail-chunk last resort.** A retailer writes our code shortly (drops the series head): `MSEF1C-18HRFN1-QC6` → `18HRFN1 QC6 … GO EASY 1.5 Ton`. The page's *own name* (`<title>` + `<h1>`, never the body) may be published as a flagged `PARTIAL` only when all seven guards hold at once — complete trailing chunk-run (≥2 chunks, whole tokens), a series word the sheet placed after its code (category nouns like *split/inverter/conditioner* corroborate nothing and are refused), the row's stated tonnage (a slug `1-5 ton` is one size, not two), no foreign series head glued on our tail, no series word that the sheet gives to **another** row (`annotate_sibling_terms`, the same evidence S4's URL limb uses — stood down when the name also carries one of this row's *own* line words, exactly as S4's file limb is), the tail owned by exactly **one** sheet row, and no colour conflict on a single-product (uncrowded) name. Fires only on a *neutral* rejection (`match_rule="none"`) — a page already refused for another colourway or another brand is never rescued. Switch: `config.tail_chunk_match_enabled`. | `model_matching.tail_chunk_match()` + `annotate_tail_owners()` + `pipeline._visit_page()` | `test_a_page_printing_the_complete_tail_and_series_words_arms`, `test_a_letter_only_head_on_the_tail_is_refused`, `test_a_page_naming_a_sibling_series_is_refused`, `test_a_page_named_by_our_own_line_word_keeps_its_decorating_sibling`, `test_a_row_whose_only_free_words_are_category_never_arms`, `test_a_slug_hyphen_capacity_does_not_double_count_as_two`, `test_a_page_naming_another_brand_is_never_rescued_by_the_tail`, `test_a_tail_page_on_the_fallback_tier_is_flagged_s15` |
@@ -404,6 +404,7 @@ Typical calibrations (all in `config.py`):
 | Two angles of the same product collapsed into one | `dedup_hamming_threshold` (6), `dedup_hamming_soft_threshold` (14), `dedup_corr_threshold` (0.995) |
 | Product cropped too tightly / too loosely on the template | `product_fill_ratio` (0.92), `padding_px` (6), `isolation_bg_distance` (32.0) |
 | Product touching the template header band | `template_top_scan_ratio` (0.35), `template_header_gap_px` (8), `template_default_top_margin_px` (90) |
+| Product touching the template's bottom text line | `template_footer_guard_enabled` (True), `template_footer_scan_ratio` (0.5), `template_footer_gap_ratio` (0.015), `template_footer_min_band_height` (8) |
 
 Note that **tuning never weakens a safeguard**: the gates stay named functions with their tests; only
 their numeric thresholds move. `--dry-run` writes no platform CSVs and uploads nothing, so it is safe
@@ -496,7 +497,11 @@ python3 -m radon cc . -n C -s --exclude "tests/*"
                                   # code health: 45 blocks at C or worse today (all
                                   # pre-existing hotspots) - a 46th means a function
                                   # gained a grade; extract a named helper instead
-python3 ../verification/smoke_test_10_products.py   # the 10 real rows, every branch (offline)
+python3 ../verification/run_diff.py output/run-before output/run-after
+                                  # which published pictures appeared or disappeared, rejections
+                                  # by rule, and which rows changed source. Selection only - not
+                                  # pixels. Exit 0 identical / 1 it moved / 2 bad input; the
+                                  # default 1 is the gate, --allow-changes opts out.
 ```
 
 The suite covers the S1–S14 table above, resume/checkpoint semantics (skip `ok`/`partial` with
@@ -587,7 +592,7 @@ Every rule is one named place. Nothing is hard-coded in a stage function.
 
 | I want to change… | Edit | Field / constant |
 |---|---|---|
-| the ten-row smoke test | `verification/smoke_test_10_products.py` (real titles, fixture pages, banner/share/CSV checks) |
+| compare two runs' published pictures | `verification/run_diff.py` (repo-root tool, selection not pixels) | `--allow-changes` (default: exit 1 when the set moved) |
 | how many images per product | `config.py` | `target_images_per_product` (3), `min_required_images` (2), `max_images_per_product` (10) |
 | the search sources, or add a shop | `config.py` | `brand_sources`, `retail_shopify_sources`, `retail_woo_sources`, `source_platforms`, `excluded_hosts` |
 | fallback budgets | `config.py` | `fallback_max_pages_per_row` (6), `fallback_max_pages_per_source` (3), `fallback_max_search_per_source`, `image_full_download_max_per_page` (6) / `_max_per_row` (18), `image_probe_bytes`, `sitemap_ttl_days` |

@@ -559,6 +559,43 @@ def header_safe_margin(template: Image.Image, config: PipelineConfig) -> int:
     return 0
 
 
+#: A content box smaller than this is not a box: the measurements are distrusted and the
+#: whole canvas is used instead (see ``template_content_box``).
+_MIN_BOX_SPAN_PX = 8
+
+
+def footer_safe_margin(template: Image.Image, config: PipelineConfig) -> int:
+    """Row where the template's footer band starts, or the canvas height when it has none.
+
+    The website artwork carries a shop line across the bottom (rows 1023-1055 of 1080 in the shipped
+    template), and a fixed bottom ratio put the content box *through* it: live run 2026-10-17 measured
+    the product's feet landing at row 1024, one pixel above the words.  Same idea as
+    ``header_safe_margin`` - measure the template, never hardcode its art - and the same assumption:
+    the shop's art is dark ink on a white canvas, because that is what every shipped template is.  A
+    band only counts as a footer when it starts below ``template_footer_scan_ratio`` of the canvas, so
+    a template whose only ink is a header band is left exactly as it was.
+    """
+    height = int(template.size[1])
+    if not config.template_footer_guard_enabled:
+        return height
+    mask = _non_background_mask(template)
+    if mask.size == 0:
+        return height
+    rows = np.asarray(mask.any(axis=1), dtype=bool)
+    inked = np.where(rows)[0]
+    if inked.size == 0:
+        return height
+    bottom = int(inked[-1])
+    if bottom < height * config.template_footer_scan_ratio:
+        return height
+    top = bottom
+    while top > 0 and bool(rows[top - 1]):
+        top -= 1
+    if bottom - top + 1 < config.template_footer_min_band_height:
+        return height
+    return max(0, top - int(height * config.template_footer_gap_ratio))
+
+
 def template_content_box(
     template: Image.Image, config: PipelineConfig
 ) -> tuple[int, int, int, int]:
@@ -568,7 +605,14 @@ def template_content_box(
     right = width - left
     top = header_safe_margin(template, config)
     bottom = height - int(height * config.template_bottom_margin_ratio)
-    if right - left < 8 or bottom - top < 8:
+    footer = footer_safe_margin(template, config)
+    # A footer may only *shrink* the box, never collapse it.  When the measured band reaches up
+    # into the header - a dark template, a short canvas, art that runs through the middle - the
+    # footer is ignored and the ratio margin stands, because falling through to the whole-canvas
+    # fallback below would paste the product straight over the logo.
+    if footer - top >= _MIN_BOX_SPAN_PX:
+        bottom = min(bottom, footer)
+    if right - left < _MIN_BOX_SPAN_PX or bottom - top < _MIN_BOX_SPAN_PX:
         top = 0
         left = 0
         right = width

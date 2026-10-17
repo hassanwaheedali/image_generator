@@ -760,6 +760,16 @@ class PipelineConfig:
     product_content_min_ratio: float = 0.2
     template_side_margin_ratio: float = 0.04
     template_bottom_margin_ratio: float = 0.03
+    #: Clear space kept between the product and the template's own footer art, as a share of the
+    #: canvas.  The bottom of the content box is the *measured* footer band minus this gap.
+    template_footer_gap_ratio: float = 0.015
+    #: Shortest bottom band treated as a footer at all - a stray pixel row is not shop artwork.
+    template_footer_min_band_height: int = 8
+    #: Share of the canvas below which a band must start to count as a footer, so a template whose
+    #: only art is a header band keeps the bottom margin it always had.
+    template_footer_scan_ratio: float = 0.5
+    #: Switched off, the bottom of the box is the plain ratio again (the pre-2026-10-17 behaviour).
+    template_footer_guard_enabled: bool = True
     template_top_scan_ratio: float = 0.35
     template_header_gap_px: int = 8
     template_default_top_margin_px: int = 90
@@ -1068,6 +1078,8 @@ class PipelineConfig:
             ("product_fill_ratio", self.product_fill_ratio),
             ("template_side_margin_ratio", self.template_side_margin_ratio),
             ("template_bottom_margin_ratio", self.template_bottom_margin_ratio),
+            ("template_footer_gap_ratio", self.template_footer_gap_ratio),
+            ("template_footer_scan_ratio", self.template_footer_scan_ratio),
             ("template_top_scan_ratio", self.template_top_scan_ratio),
         ):
             if not 0.0 < value < 1.0:
@@ -1086,6 +1098,8 @@ class PipelineConfig:
         ):
             if value_int < 0:
                 raise ConfigError(f"{name} must be >= 0")
+        if self.template_footer_min_band_height < 1:
+            raise ConfigError("template_footer_min_band_height must be >= 1 (0 turns one stray row into shop art)")
         if not 0 <= self.promo_band_white_level <= 255:
             raise ConfigError("promo_band_white_level must be in [0, 255]")
         if not 0 <= self.promo_band_gap_min_mean <= 255:

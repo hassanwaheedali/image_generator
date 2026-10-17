@@ -22,6 +22,7 @@ from PIL import Image, ImageDraw
 
 from compositing import (
     apply_template,
+    footer_safe_margin,
     header_safe_margin,
     isolate_main_product,
     template_content_box,
@@ -314,6 +315,84 @@ def test_header_safe_margin_measures_the_template_band(config: PipelineConfig) -
     draw.rectangle((0, 0, 800, 90), fill=(10, 70, 150, 255))
     margin = header_safe_margin(template, config)
     assert 90 <= margin <= 120
+
+
+def _footer_template(size: tuple[int, int] = (1080, 1080), *, footer: bool = True) -> Image.Image:
+    """A canvas shaped like the shipped website artwork: white, with a text band at the bottom."""
+    template = Image.new("RGBA", size, (255, 255, 255, 255))
+    if footer:
+        draw = ImageDraw.Draw(template)
+        draw.rectangle((0, size[1] - 57, size[0], size[1] - 25), fill=(20, 20, 20, 255))
+    return template
+
+
+def test_footer_safe_margin_measures_the_text_band(config: PipelineConfig) -> None:
+    """The bottom of the content box comes from the template's own ink, not a fixed ratio.
+
+    Live washing-machine run 2026-10-17: the website template's footer text starts at row 1023 of
+    1080 while the ratio put the box bottom at 1047, so every product was pasted through the words.
+    """
+    template = _footer_template()
+    gap = int(1080 * config.template_footer_gap_ratio)
+    margin = footer_safe_margin(template, config)
+    assert margin == 1023 - gap, f"expected the box to stop {gap}px above the text, got row {margin}"
+
+
+def test_content_box_stops_above_a_footer_text_band(config: PipelineConfig) -> None:
+    _, _, _, bottom = template_content_box(_footer_template(), config)
+    assert bottom <= 1023, f"the product is still allowed down to row {bottom}, into the text"
+
+
+def test_a_template_without_a_footer_keeps_the_ratio_margin(config: PipelineConfig) -> None:
+    """No footer ink means nothing new is decided: the old bottom margin still applies."""
+    _, _, _, plain = template_content_box(_footer_template(footer=False), config)
+    assert plain == 1080 - int(1080 * config.template_bottom_margin_ratio)
+
+
+def test_a_footer_that_reaches_into_the_header_is_ignored(config: PipelineConfig) -> None:
+    """Adversarial: art that runs through the whole canvas must not collapse the box.
+
+    A collapsed box falls back to the whole canvas, which is exactly how a product ends up
+    pasted over the logo - so the footer rule may only shrink the box, never break it.
+    """
+    template = Image.new("RGBA", (1080, 1080), (255, 255, 255, 255))
+    draw = ImageDraw.Draw(template)
+    draw.rectangle((0, 0, 1080, 1080), fill=(30, 30, 30, 255))          # dark, all inked
+    left, top, right, bottom = template_content_box(template, config)
+    assert top > 0, "the box collapsed to the whole canvas - the logo is no longer safe"
+    assert bottom == 1080 - int(1080 * config.template_bottom_margin_ratio)
+    assert bottom - top > 8 and right - left > 8
+
+
+def test_a_short_canvas_is_not_collapsed_by_its_own_header(config: PipelineConfig) -> None:
+    """On a 120px canvas the header band sits below the midline - it is still not a footer."""
+    template = Image.new("RGBA", (300, 120), (255, 255, 255, 255))
+    ImageDraw.Draw(template).rectangle((0, 0, 300, 70), fill=(10, 70, 150, 255))
+    _, top, _, bottom = template_content_box(template, config)
+    assert bottom > top, f"box inverted: top {top}, bottom {bottom}"
+    assert bottom == 120 - int(120 * config.template_bottom_margin_ratio)
+
+
+def test_the_shipped_website_footer_survives_compositing(tmp_path: Path) -> None:
+    """The real asset this rule was written for: the shop line must not move by one pixel."""
+    config = _shipped_assets_config(tmp_path)
+    template = Image.open(_asset(config, "website")).convert("RGBA")
+    array = np.asarray(template.convert("RGB"), dtype=np.uint8)
+    inked = np.where((array.min(axis=2) < 245).any(axis=1))[0]
+    footer_top = int(inked[-1])
+    while footer_top > 0 and bool((array.min(axis=2) < 245)[footer_top - 1].any()):
+        footer_top -= 1
+    assert footer_top > template.size[1] // 2, "the website template no longer has a footer band"
+
+    square = to_square_canvas(
+        isolate_main_product(clean_product_image(700, 900), config)[0],
+        config.canonical_side,
+        fill_ratio=config.product_fill_ratio,
+    )
+    result = apply_template(square, template, config)
+    before = np.asarray(template, dtype=np.uint8)[footer_top:]
+    after = np.asarray(result.convert("RGBA"), dtype=np.uint8)[footer_top:]
+    assert np.array_equal(before, after), "the product was pasted through the shop's footer text"
 
 
 # --------------------------------------------------------------------------- #

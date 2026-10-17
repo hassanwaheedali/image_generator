@@ -2233,7 +2233,10 @@ def _compose_and_save(
 
 _ASSET_CACHE: dict[str, Image.Image] = {}
 _ASSET_LOCK = threading.Lock()
-_PREPARED_TEMPLATE_CACHE: dict[tuple[str, float, int, int], PreparedTemplate] = {}
+#: Everything that changes what a prepared template's content box looks like, in the exact order
+#: ``_load_prepared_template`` builds it.  A field left out would be silently ignored by the cache.
+_PreparedTemplateKey = tuple[str, float, int, int, float, float, bool, float, float, int]
+_PREPARED_TEMPLATE_CACHE: dict[_PreparedTemplateKey, PreparedTemplate] = {}
 _PREPARED_LOCK = threading.Lock()
 
 
@@ -2256,6 +2259,12 @@ def _load_prepared_template(config: PipelineConfig, path: Path) -> PreparedTempl
         config.template_top_scan_ratio,
         config.template_header_gap_px,
         config.template_white_cutoff,
+        config.template_side_margin_ratio,
+        config.template_bottom_margin_ratio,
+        config.template_footer_guard_enabled,
+        config.template_footer_scan_ratio,
+        config.template_footer_gap_ratio,
+        config.template_footer_min_band_height,
     )
     cached = _PREPARED_TEMPLATE_CACHE.get(cache_key)
     if cached is not None:

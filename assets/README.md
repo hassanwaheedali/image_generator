@@ -26,5 +26,9 @@ runs Digimall and Alfamall only.
   above are the contract the resolver and the tests both depend on.
 - The template's **logo band must never be covered** by a product image
   (`image_pipeline/AGENTS.md`). Keep the band inside the header area the
-  compositing code measures.
+  compositing code measures. Note that the code now measures the **bottom**
+  too: any ink in the lower half of a template is treated as a footer line
+  (shop text, a warranty badge strip) and the product is kept above it. A
+  template whose art runs from the header through the middle is read as
+  having no usable footer, and keeps the plain bottom margin.
 - Do not add per-product artwork here — this folder is fixed assets only.
