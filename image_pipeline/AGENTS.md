@@ -34,8 +34,8 @@ python3 main.py --input sample_input.csv --workers 4        # real run (needs FR
 
 python3 -m ruff check .        # must print: All checks passed!
 python3 -m mypy --strict .     # must print: Success: no issues found
-python3 -m pytest tests -q     # 330 tests, fakes only, no network
-python3 -m radon cc . -n C -s --exclude "tests/*"   # code health: 45 blocks at C or
+python3 -m pytest tests -q     # 782 tests, fakes only, no network
+python3 -m radon cc . -n C -s --exclude "tests/*"   # code health: 63 blocks at C or
                                # worse (baseline) - no function may gain a grade
 ```
 
@@ -45,9 +45,10 @@ variable always wins. **Never print, log, commit or echo the key value.**
 
 ## Code conventions
 
-- One rule = one named function + one direct test + one `rule_id` in `decisions.jsonl`. Rule ids are
-  `S1`..`S18` plus the scoped sub-rules `S4.code` (a sibling capacity of the same number family in the
-  file name - digit structure, not letters), `S7.band`, `S7.seam`, `S7.official`, `S11.fetch`, `S13.fetch`,
+- One rule = one named function + one direct test + one `rule_id` in `decisions.jsonl`. Rule ids are  `S1`..`S18` plus the scoped sub-rules `S4.code` (a sibling capacity of the same number family in the
+  file name - digit structure, not letters), `S22.source_lock` (one album, one shop; another source only
+  tops a short row up, and only with proof) and `S22.coherence` (report-only: an album holding two
+  different bodies), `S7.band`, `S7.seam`, `S7.official`, `S11.fetch`, `S13.fetch`,
   `S15.fetch`, `S15.relaxed`, `S15.tolerated`, `S16` (Visual Color Gate), `S17` (Intra-Gallery Consistency)
   and `S18` (Crop Closure - the one guard that never rejects: it grows the isolation box so a crop
   cannot cut the product, and is switched off by `isolation_crop_closure = False`).
@@ -56,6 +57,11 @@ variable always wins. **Never print, log, commit or echo the key value.**
   white/grey studios and colourful products on white never fire it.
   Option 2 (`main.py --direct`) runs the sheet's direct image URLs with no scraping: the same
   download/gates/compose/upload machinery via `direct_pipeline.process_direct_product`.
+  A **report-only** rule - one that judges the row instead of refusing a picture - keeps its rule id in
+  this list and appears in the row's `note` / the run report rather than `decisions.jsonl`, because a
+  decision line needs a picture that was actually decided about (`S22.coherence`, `S20.unstated`,
+  `S18`).  It must also be incapable of failing the row: `pipeline._coherence_note` swallows an
+  unreadable square rather than raising through the summary stage.
 - **One config field per threshold.** No magic numbers in stage functions - everything tunable lives in
   `config.PipelineConfig` and is validated in `__post_init__`.
 - `pipeline.py` never imports `requests` / `curl_cffi` / filesystem-network code directly: it talks to

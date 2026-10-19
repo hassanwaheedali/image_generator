@@ -26,7 +26,7 @@ from conftest import (
 )
 from PIL import Image, ImageDraw
 
-from config import PipelineConfig
+from config import ConfigError, PipelineConfig
 from csv_io import (
     atomic_write_csv,
     hash_source_urls,
@@ -53,6 +53,7 @@ from pipeline import (
     BatchRunner,
     DryRunHost,
     PipelineDeps,
+    _coherence_note,
     _dump_rejected,
     _layout_rescue_verdict,
     _page_download_allowance,
@@ -2086,14 +2087,19 @@ def test_two_genuine_angles_survive_the_second_look(tmp_path: Path) -> None:
     assert len(accepted) == 2, "the second angle was folded - the album lost a real picture"
 
 
-def _front_load_page(image_urls: tuple[str, ...]) -> str:
-    """A shop page proven to be the 13 kg row, carrying the gallery the owner found."""
+def _front_load_page_for(model: str, image_urls: tuple[str, ...]) -> str:
+    """A shop page whose title and heading prove one model, carrying the gallery given."""
     images = "".join(f'<img src="{url}">' for url in image_urls)
     return (
-        "<html><head><title>Haier 1301217E</title></head>"
-        "<body><h1>Haier 1301217E</h1>"
+        f"<html><head><title>{model}</title></head>"
+        f"<body><h1>{model}</h1>"
         f"<div class='product-gallery'>{images}</div></body></html>"
     )
+
+
+def _front_load_page(image_urls: tuple[str, ...]) -> str:
+    """A shop page proven to be the 13 kg row, carrying the gallery the owner found."""
+    return _front_load_page_for("Haier 1301217E", image_urls)
 
 
 def test_the_sibling_capacity_of_the_row_is_refused_as_s4_code(tmp_path: Path) -> None:
@@ -2142,6 +2148,324 @@ def test_the_sibling_refusal_runs_only_while_the_switch_is_on(tmp_path: Path) ->
 
     decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
     assert '"rule_id": "S4.code"' not in decisions
+
+
+def _album_shot(body: tuple[int, int, int], dial_x: int) -> Image.Image:
+    """One catalog photo: an appliance body on studio white, with the dial moved so the
+    album's own dedup keeps the shots apart."""
+    image = Image.new("RGB", (900, 900), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((200, 130, 700, 780), radius=24, fill=body)
+    draw.ellipse((dial_x, 170, dial_x + 90, 260), fill=(70, 70, 78))
+    strip = tuple(max(0, channel - 25) for channel in body)
+    draw.rectangle((250, 640, 650, 720), fill=strip)
+    return image
+
+
+_WHITE_BLACK = (150, 152, 158)     # one spinner: a grey body with a dark tub band
+_BEIGE_BLUE = (222, 205, 170)      # the other variant the same gallery served
+
+
+def test_an_album_holding_two_bodies_is_flagged_in_the_note(tmp_path: Path) -> None:
+    """Owner, 2026-10-17 on `haier-6050`: "look pictures 1 to 3 then 4-5 entirely different,
+    what logic is this".  The pipeline cannot delete the minority without deleting correct
+    pictures elsewhere (measured: a single detail shot spans the same distance), so the row
+    says it out loud in the report and leaves the call to the owner."""
+    config = replace(
+        live_config(tmp_path), target_images_per_product=5, max_images_per_product=5
+    )
+    urls = [f"https://shop.example/cdn/files/haier-6050-{index}.jpg" for index in range(1, 6)]
+    page = "https://shop.example/products/haier-6050"
+    shots = (
+        (_WHITE_BLACK, 260), (_WHITE_BLACK, 330), (_WHITE_BLACK, 400),
+        (_BEIGE_BLUE, 260), (_BEIGE_BLUE, 380),
+    )
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {page: _front_load_page_for("Haier 6050", tuple(urls))},
+        {url: png_bytes(_album_shot(*shot)) for url, shot in zip(urls, shots, strict=True)},
+    )
+    result, accepted = process_product(
+        task(0, "Haier 6050 Top Load Washer", (page,)), deps, config
+    )
+
+    assert len(accepted) >= 4, [image.source_url for image in accepted]
+    assert "two different-looking bodies" in result.note
+    assert result.status is Status.OK                       # flagged, never failed
+
+
+def test_the_coherence_note_can_be_switched_off(tmp_path: Path) -> None:
+    config = replace(
+        live_config(tmp_path),
+        target_images_per_product=5,
+        max_images_per_product=5,
+        album_coherence_note_enabled=False,
+    )
+    urls = [f"https://shop.example/cdn/files/haier-6050-{index}.jpg" for index in range(1, 6)]
+    page = "https://shop.example/products/haier-6050"
+    shots = (
+        (_WHITE_BLACK, 260), (_WHITE_BLACK, 330), (_WHITE_BLACK, 400),
+        (_BEIGE_BLUE, 260), (_BEIGE_BLUE, 380),
+    )
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {page: _front_load_page_for("Haier 6050", tuple(urls))},
+        {url: png_bytes(_album_shot(*shot)) for url, shot in zip(urls, shots, strict=True)},
+    )
+    result, accepted = process_product(
+        task(0, "Haier 6050 Top Load Washer", (page,)), deps, config
+    )
+
+    assert len(accepted) >= 4
+    assert "two different-looking bodies" not in result.note
+
+
+def test_a_single_stray_image_never_owns_the_album(tmp_path: Path) -> None:
+    """`album_lock_min_curated` is the difference between a gallery and a page that happens
+    to carry one picture.  A stray hero must not close the row's other sources - that would
+    turn the safeguard into a starvation bug (owner: "the official page has only one hero")."""
+    config = live_config(tmp_path)
+    stray = "https://cdn.friendshome.example/files/haier-130-1217E-hero.jpg"
+    gallery = (
+        "https://cdn.surmawala.example/files/haier-130-1217E-1.jpg",
+        "https://cdn.surmawala.example/files/haier-130-1217E-2.jpg",
+    )
+    page_a = "https://friendshome.example/products/haier-1301217e"
+    page_b = "https://surmawala.example/products/haier-1301217e"
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {
+            page_a: _front_load_page_for("Haier 1301217E", (stray,)),
+            page_b: _front_load_page_for("Haier 1301217E", gallery),
+        },
+        {
+            stray: png_bytes(_catalog_artwork()),
+            gallery[0]: png_bytes(_catalog_artwork(open_lid=True)),
+            gallery[1]: png_bytes(_catalog_artwork(offset=-0.3, scale=0.42)),
+        },
+    )
+    _, accepted = process_product(
+        task(0, "Haier 1301217E Front Load Washer", (page_a, page_b)), deps, config
+    )
+
+    assert [image.source_url for image in accepted] == [stray, *gallery]
+    decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
+    assert "S22.source_lock" not in decisions
+
+
+def test_the_album_home_is_the_page_host_not_the_image_cdn(tmp_path: Path) -> None:
+    """Two shops, one CDN.  `cdn.shopify.com` serves thousands of stores, so keying the home
+    on the *image* host would let any Shopify shop into a locked gallery - the page is the
+    source, exactly as the owner framed it ("one source, not one here and one from other")."""
+    config = live_config(tmp_path)
+    shared_cdn = "https://cdn.shopify.com/files"
+    home_one = f"{shared_cdn}/haier-130-1217E-1.jpg"
+    home_two = f"{shared_cdn}/haier-130-1217E-2.jpg"
+    other = f"{shared_cdn}/haier-130-1217E-3.jpg"
+    page_a = "https://friendshome.example/products/haier-1301217e"
+    page_b = "https://traders.example/products/haier-1301217e"
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {
+            page_a: _front_load_page_for("Haier 1301217E", (home_one, home_two)),
+            page_b: _front_load_page_for("Haier 1301217E", (other,)),
+        },
+        {
+            home_one: png_bytes(_catalog_artwork()),
+            home_two: png_bytes(_catalog_artwork(open_lid=True)),
+            other: png_bytes(_catalog_artwork(offset=-0.3, scale=0.42)),
+        },
+    )
+    _, accepted = process_product(
+        task(0, "Haier 1301217E Front Load Washer", (page_a, page_b)), deps, config
+    )
+
+    assert [image.source_url for image in accepted] == [home_one, home_two]
+    decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
+    assert '"rule_id": "S22.source_lock"' in decisions
+    assert "album belongs to friendshome.example" in decisions
+    assert other in decisions                   # the same CDN host is no ticket in
+
+
+def test_the_last_resort_never_breaks_the_album(tmp_path: Path) -> None:
+    """Stage 3c publishes below-floor pictures when a row is short - and it is still an
+    album rule.  The trap is the *order*: shop A is visited while no home exists yet, so its
+    below-floor photo becomes an offer; shop B's gallery then becomes the home; and the last
+    resort must not slip A's picture in afterwards, because a second shop's reject is
+    exactly the mixed gallery S22 exists to prevent (owner 2026-10-07: one correct picture
+    beats a bigger mixed one)."""
+    small = _jpeg_bytes(clean_product_image(700, 700, "#d4af37"))
+    # min_lossy_image_bytes puts this payload below the byte floor; salvage_min_sharpness=0.0
+    # then closes the "a sharp below-floor file is good enough" door (that branch needs a
+    # positive bar), so it really becomes a last-resort offer and stage 3c runs.  With
+    # min_required_images=3 two published pictures still leave the row short.
+    config = live_config(
+        tmp_path,
+        min_lossy_image_bytes=len(small) + 2000,
+        salvage_min_sharpness=0.0,
+        min_required_images=3,
+    )
+    offer = "https://cdn.traders.example/files/product-photo-9.jpg"     # names no code
+    home = (
+        "https://cdn.friendshome.example/files/haier-130-1217E-1.jpg",
+        "https://cdn.friendshome.example/files/haier-130-1217E-2.jpg",
+    )
+    page_a = "https://traders.example/products/haier-1301217e"
+    page_b = "https://friendshome.example/products/haier-1301217e"
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {
+            page_a: _front_load_page_for("Haier 1301217E", (offer,)),
+            page_b: _front_load_page_for("Haier 1301217E", home),
+        },
+        {
+            offer: small,
+            home[0]: png_bytes(_catalog_artwork()),
+            home[1]: png_bytes(_catalog_artwork(open_lid=True)),
+        },
+    )
+    result, accepted = process_product(
+        task(0, "Haier 1301217E Front Load Washer", (page_a, page_b)), deps, config
+    )
+
+    assert [image.source_url for image in accepted] == list(home)
+    assert all(image.page_url == page_b for image in accepted)   # every picture names its home
+    decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
+    assert '"rule_id": "S22.source_lock"' in decisions
+    assert "last-resort picture offered by another source" in decisions
+    assert result.status is Status.PARTIAL       # 2 of the 3 this config now asks for
+
+
+def test_a_note_that_cannot_tighten_its_groups_is_refused_as_a_config_error(tmp_path: Path) -> None:
+    """One config field per threshold, and the pair has to be able to agree: with a group
+    allowed to be as wide as the gap that separates two groups, no album can ever qualify and
+    S22.coherence is silently dead.  ``__post_init__`` says so instead."""
+    with pytest.raises(ConfigError, match="below album_coherence_value_gap"):
+        live_config(
+            tmp_path,
+            album_coherence_group_spread_max=0.30,
+            album_coherence_value_gap=0.18,
+        )
+
+
+def test_a_missing_square_stops_the_note_not_the_row(tmp_path: Path) -> None:
+    """S22.coherence re-reads the published squares, so a file the platform could not produce
+    would otherwise raise inside the summary stage and turn a row that published real pictures
+    into ``Status.FAILED`` - a report-only rule with the teeth to fail a product (fresh-context
+    review 2026-10-19).  The note gives up instead."""
+    config = live_config(tmp_path)
+    urls = [f"https://shop.example/cdn/files/haier-6050-{index}.jpg" for index in range(1, 6)]
+    page = "https://shop.example/products/haier-6050"
+    shots = (
+        (_WHITE_BLACK, 260), (_WHITE_BLACK, 330), (_WHITE_BLACK, 400),
+        (_BEIGE_BLUE, 260), (_BEIGE_BLUE, 380),
+    )
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {page: _front_load_page_for("Haier 6050", tuple(urls))},
+        {url: png_bytes(_album_shot(*shot)) for url, shot in zip(urls, shots, strict=True)},
+    )
+    _, accepted = process_product(
+        task(0, "Haier 6050 Top Load Washer", (page,)),
+        deps,
+        replace(config, target_images_per_product=5, max_images_per_product=5),
+    )
+    broken = replace(accepted[0], square_path=tmp_path / "gone.jpg")
+
+    assert _coherence_note([*accepted[1:], broken], config) == ""
+
+
+def test_the_last_resort_never_mixes_two_shops(tmp_path: Path) -> None:
+    """The other half of the same rule: a row whose pages never looked like a gallery has no
+    home, so the first last-resort picture must **claim** one.  Without that claim the offers
+    simply publish in list order and the album is shop A's photo beside shop B's - the mix S22
+    exists to prevent, arriving through the door S22 was never asked about (fresh-context
+    review 2026-10-19)."""
+    first_small = _jpeg_bytes(_album_shot(_WHITE_BLACK, 260))
+    second_small = _jpeg_bytes(_album_shot(_WHITE_BLACK, 400))
+    config = live_config(
+        tmp_path,
+        min_lossy_image_bytes=max(len(first_small), len(second_small)) + 2000,
+        salvage_min_sharpness=0.0,
+    )
+    shot_a = "https://cdn.traders.example/files/product-photo-8.jpg"
+    shot_b = "https://cdn.friendshome.example/files/product-photo-9.jpg"
+    page_a = "https://traders.example/products/haier-1301217e"
+    page_b = "https://friendshome.example/products/haier-1301217e"
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {
+            # one picture per page: neither page is a gallery, so neither can lock the album
+            page_a: _front_load_page_for("Haier 1301217E", (shot_a,)),
+            page_b: _front_load_page_for("Haier 1301217E", (shot_b,)),
+        },
+        {shot_a: first_small, shot_b: second_small},
+    )
+    result, accepted = process_product(
+        task(0, "Haier 1301217E Front Load Washer", (page_a, page_b)), deps, config
+    )
+
+    assert len(accepted) == 1                       # the first last resort wins the album
+    decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
+    assert '"rule_id": "S22.source_lock"' in decisions
+    assert "last-resort picture offered by another source" in decisions
+    assert result.status is Status.PARTIAL          # and it says so instead of mixing
+
+
+def test_the_last_resort_publishes_two_pictures_from_one_shop(tmp_path: Path) -> None:
+    """The claim must not starve the row it just made: two below-floor pictures from the same
+    shop are one album, so both publish - 1 image is not the price of the rule above."""
+    first_small = _jpeg_bytes(_album_shot(_WHITE_BLACK, 260))
+    second_small = _jpeg_bytes(_album_shot(_WHITE_BLACK, 400))
+    config = live_config(
+        tmp_path,
+        min_lossy_image_bytes=max(len(first_small), len(second_small)) + 2000,
+        salvage_min_sharpness=0.0,
+    )
+    shot_a = "https://cdn.traders.example/files/product-photo-8.jpg"
+    shot_b = "https://cdn.traders.example/files/product-photo-9.jpg"
+    page = "https://traders.example/products/haier-1301217e"
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {page: _front_load_page_for("Haier 1301217E", (shot_a, shot_b))},
+        {shot_a: first_small, shot_b: second_small},
+    )
+    _, accepted = process_product(
+        task(0, "Haier 1301217E Front Load Washer", (page,)), deps, config
+    )
+
+    assert len(accepted) == 2
+    assert all(image.page_url == page for image in accepted)
+
+
+def test_a_short_row_with_no_gallery_takes_another_shop_with_proof(tmp_path: Path) -> None:
+    """The claim is a veto, not a wall: the same proof that admits a second source in the
+    normal path admits one here, because the file carries this row's own code."""
+    first_small = _jpeg_bytes(_album_shot(_WHITE_BLACK, 260), quality=90)
+    second_small = _jpeg_bytes(_album_shot(_WHITE_BLACK, 400), quality=15)
+    config = live_config(
+        tmp_path,
+        min_lossy_image_bytes=max(len(first_small), len(second_small)) + 2000,
+        salvage_min_sharpness=0.0,
+    )
+    shot_a = "https://cdn.traders.example/files/product-photo-8.jpg"
+    shot_b = "https://cdn.friendshome.example/files/haier-130-1217E-2.jpg"
+    page_a = "https://traders.example/products/haier-1301217e"
+    page_b = "https://friendshome.example/products/haier-1301217e"
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {
+            page_a: _front_load_page_for("Haier 1301217E", (shot_a,)),
+            page_b: _front_load_page_for("Haier 1301217E", (shot_b,)),
+        },
+        {shot_a: first_small, shot_b: second_small},
+    )
+    _, accepted = process_product(
+        task(0, "Haier 1301217E Front Load Washer", (page_a, page_b)), deps, config
+    )
+
+    assert len(accepted) == 2                       # proven, so the album grows
+    assert {image.page_url for image in accepted} == {page_a, page_b}
 
 
 def test_a_second_source_never_joins_a_gallery_that_already_has_enough(tmp_path: Path) -> None:

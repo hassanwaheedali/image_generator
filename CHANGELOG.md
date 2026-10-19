@@ -8,6 +8,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **S22.source_lock — one album is one shop's gallery (owner 2026-10-17).** "it must download image
+  from one source not too many, because too many can cause different varieties ... we choose the best
+  one from one, not one here and one from other source". The first page that both publishes a picture
+  and carries `album_lock_min_curated` (2) curated candidates owns the row's album, keyed on the
+  **page's** host — never the image host, because `cdn.shopify.com` serves thousands of shops. Other
+  shops' pictures are refused with `S22.source_lock`; a row that ended short of `min_required_images`
+  may still be topped up, but only by a file whose own name proves this row's code
+  (`url_anchored_to_row`). Stage 3c's last resort is held to the same rule — an offer collected before
+  the home existed is not a side door afterwards. Every published picture now records the page it came
+  from (`AcceptedImage.page_url`), so the audit shows the album's home. Measured by replaying the
+  recorded runs: washing machines 39 -> 35 pictures (4 refused, 1 of them kept by that proof, across 4
+  rows), AC 88 -> 86, Midea untouched. `album_source_lock_enabled=False` reverts publication in one line.
+- **S22.coherence — an album holding two bodies says so (report-only).**
+  `image_quality.album_coherence_note` groups the published squares by foreground value and notes the
+  row when two tight groups (`album_coherence_min_group`, `album_coherence_value_gap`,
+  `album_coherence_group_spread_max`) sit apart. It **never rejects**: measured on both recorded runs
+  the bar fires on 2 of 28 albums — the real `haier-6050` mix and one Gree false flag — and correct
+  albums span as much value as mixed ones (a detail shot and a shop's flash move one machine from 0.43
+  to 0.84), so any bar that deletes the beige pair in `haier-6050` deletes real pictures elsewhere.
+- **S4.code — a model's identity read from its digit structure (owner 2026-10-17).** The 13 kg
+  `1301217E` row published the 8 kg `hwm80-1217` twice because the files share the `1217` tail and no
+  earlier limb compares the digits *before* it. `model_matching.code_digit_clusters` reads each
+  contiguous code as the groups the shop actually wrote, drops photo counters and collapses a doubled
+  sheet title, and accuses only when two codes share a whole digit group of >= 3 (the family) and
+  disagree on the head; a code that confirms this row clears the file, and a colourway inside the code
+  (`…1217E` vs `…1217B`) is identity, not decoration. Measured blast radius: 2 of 147 published
+  pictures across the 4 recorded runs (both of them the wrong-product files), 0 of 88 in the AC run, 0
+  of 20 in the Midea run, and 0 accusations over the 1504 (title, url) pairs in
+  `input/1800_products.csv`. Switch: `model_code_shape_gate`, tail size `model_code_tail_min`.
+- **`verification/run_diff.py` — proof of what a gate change published.** Diff two run folders:
+  published pictures that appeared or disappeared, rejections by rule, and rows that changed source.
+  Selection only, not pixels. Exit 0 identical / 1 it moved / 2 bad input, so the diff is a gate on
+  every future matcher or colour change, not a judgement call.
 - **Option 2: `main.py --direct` — direct image URLs, no scraping.** The sheet's URL column is
   read as the product's own image URLs; per row the pipeline downloads, validates, composes on
   both templates, uploads (both-or-neither, banner last) and writes the same import CSVs. No
@@ -34,6 +67,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `__post_init__`, which a loose JSON file never was.
 
 ### Fixed
+- **The artwork no longer prints over the template's own footer text (owner 2026-10-17,
+  `midea-mf200-w90-g`).** What looked like a watermark at the bottom of the published picture was
+  `assets/website/template.png`'s own `kiachahiye` caption: the product box was fitted to the frame,
+  not to the space above the caption, so a tall product sat on top of it. Compositing now reserves the
+  caption band and centres the product in what remains, which is also the "a little space will be
+  better" ask — the unit stops at the ink instead of reaching the edge. Cropping was never the fix, and
+  cropping the product to dodge the text would have cut the product.
+- **S10 judges the picture we publish, not the bytes the shop served (owner 2026-10-17,
+  `haier-htw-100-196s`).** "same product exactly same image repeated twice". Two of a gallery's
+  downloads differed by a few pixels in the raw payload and so escaped the dHash + correlation dedup —
+  and then both were cleaned, cropped to the same body box and composed onto the same square, where the
+  duplicates the owner saw actually live. The fingerprint is now taken a second time on the finished
+  square (`ProductDedup.record_published`), so a repeat that only appears after compositing is caught
+  before it is saved.
 - **The gallery colour rule finally runs — and it asks instead of guessing (Safeguard S17,
   owner 2026-10-16).** It was written on 2026-10-08, it had tests, and README §4 advertised it
   ever since as "never mix distinct colour families in one gallery" — but

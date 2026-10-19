@@ -210,8 +210,10 @@ class AcceptedImage:
     raw_path: Path
     square_path: Path
     final_paths: tuple[tuple[str, Path], ...]
-    #: The page this picture was taken from (``S22.source_lock`` keeps an album to one
-    #: source, and an owner reviewing a mixed gallery needs to see where each file came from).
+    #: The page that offered this picture (``S22.source_lock`` keeps an album to one source,
+    #: and an owner reviewing a mixed gallery needs to see where each file came from).  Empty
+    #: only for ``--direct``, where there is no page: the sheet hands over image URLs, so the
+    #: accept line records no ``page=`` and the source lock has nothing to lock.
     page_url: str = ""
 
     def final_path(self, key: str) -> Path:

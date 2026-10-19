@@ -2008,3 +2008,58 @@ def test_clean_outer_studio_background_stands_down_on_a_wall_that_is_already_whi
     keyed = np.asarray(clean_outer_studio_background(studio(40), config))
     assert int(keyed[0, 0, 0]) == 255, "a coloured wall was left on the picture"
 
+
+
+# --------------------------------------------------------------------------- #
+# S22.coherence - the advisory note for an album holding two bodies (owner 2026-10-17)
+# --------------------------------------------------------------------------- #
+
+def _body_at(value: float) -> Image.Image:
+    """One catalog shot: a solid body of the given brightness on a studio-white ground."""
+    from image_quality import to_rgb
+
+    image = Image.new("RGB", (400, 400), (255, 255, 255))
+    level = round(value * 255)
+    ImageDraw.Draw(image).rectangle((90, 60, 310, 340), fill=(level, level, level))
+    return to_rgb(image)
+
+
+def _coherence(album: list[Image.Image]) -> str:
+    from image_quality import album_coherence_note
+
+    return album_coherence_note(
+        album, min_group=2, value_gap=0.18, group_spread_max=0.12
+    )
+
+
+def test_coherence_note_names_an_album_that_holds_two_bodies() -> None:
+    """The live case: the shop's own gallery for `haier-6050` is three white/black spinners
+    beside two beige/blue ones, every file named `HWS-60-50*`.  Nothing text-based separates
+    them and both bodies are neutral, so S17 has no opinion - the note names it for a human."""
+    note = _coherence([_body_at(0.60)] * 3 + [_body_at(0.85)] * 2)
+    assert "two different-looking bodies" in note
+    assert "3 at value 0.6" in note and "beside 2 at 0.8" in note
+
+
+def test_coherence_note_stays_quiet_for_a_normal_album() -> None:
+    """Measured on the recorded runs before writing the rule: a *correct* album spans as much
+    as a mixed one (detail shots and a shop flash take one machine from 0.43 to 0.84), which
+    is why this never rejects.  One picture out of step is not a second product."""
+    for album in (
+        [_body_at(0.60)] * 4 + [_body_at(0.90)],                      # one odd detail shot
+        [_body_at(0.60), _body_at(0.90)],                             # no majority either way
+        [_body_at(0.60 + 0.04 * step) for step in range(4)],          # one body, four exposures
+        [_body_at(0.62)] * 3 + [_body_at(0.75)] * 3,                  # 0.13 apart: one body in two lights
+    ):
+        assert _coherence(album) == "", album
+
+
+def test_coherence_note_admits_one_graded_continuum_reads_as_two() -> None:
+    """The bar's known limit, kept in a test so it stays a limit and not a surprise: four
+    exposures stepped 0.11 / 0.20 / 0.11 do look like two tight groups split by a wide gap.
+    On the recorded runs this costs one false note in 27 correct albums - which is affordable
+    only because a note deletes nothing (fresh-context review 2026-10-19)."""
+    note = _coherence(
+        [_body_at(0.42), _body_at(0.53), _body_at(0.73), _body_at(0.84)]
+    )
+    assert "two different-looking bodies" in note

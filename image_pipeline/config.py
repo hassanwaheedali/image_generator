@@ -230,6 +230,19 @@ class PipelineConfig:
     # publishes a picture and looks like a real gallery owns the album; pictures from other
     # shops join only to top a short row up, and only when the file proves this row's code.
     album_source_lock_enabled: bool = True
+    #: S22.coherence is a NOTE, never a rejection (measured 2026-10-19 on both recorded
+    #: runs): a correct album spans as much as a mixed one - detail shots and a shop's flash
+    #: move one machine's foreground value from 0.43 to 0.84 - so any bar that deletes the
+    #: beige pair in `haier-6050` deletes real pictures from other rows.  Set False to stop
+    #: the note itself.
+    album_coherence_note_enabled: bool = True
+    #: How far apart the two bodies must sit (foreground mean value) to be worth a note.
+    album_coherence_value_gap: float = 0.18
+    #: Each group must be tighter than this inside itself, so one odd detail shot is not a
+    #: second product.
+    album_coherence_group_spread_max: float = 0.12
+    #: Fewer than this on either side and the album has no majority to speak of.
+    album_coherence_min_group: int = 2
     #: A page with fewer curated candidates than this is one stray image, not a gallery, so
     #: it never owns the album (a single hero shot must not close the row's other sources).
     album_lock_min_curated: int = 2
@@ -923,6 +936,23 @@ class PipelineConfig:
             raise ConfigError(
                 "album_lock_min_curated must be >= 2 (one stray image is not a gallery "
                 "and must not close the row's other sources)"
+            )
+        if self.album_coherence_min_group < 2:
+            raise ConfigError(
+                "album_coherence_min_group must be >= 2 (with a group of one there is no "
+                "majority to call the other picture the odd one out)"
+            )
+        for name, value in (
+            ("album_coherence_value_gap", self.album_coherence_value_gap),
+            ("album_coherence_group_spread_max", self.album_coherence_group_spread_max),
+        ):
+            if not 0.0 < value < 1.0:
+                raise ConfigError(f"{name} must be in (0, 1) - it compares mean colour values")
+        if self.album_coherence_group_spread_max >= self.album_coherence_value_gap:
+            raise ConfigError(
+                "album_coherence_group_spread_max must stay below album_coherence_value_gap: "
+                "a group may only be as wide as it is allowed to be separated, otherwise no "
+                "album can ever qualify and the note is silently dead"
             )
         if self.gallery_colour_min_agreement < 2:
             raise ConfigError(

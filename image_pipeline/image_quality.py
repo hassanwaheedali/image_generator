@@ -9,7 +9,7 @@ from __future__ import annotations
 import io
 import logging
 import threading
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -1098,6 +1098,59 @@ def is_hue_in_arc(hue: float, start: float, end: float) -> bool:
     if start <= end:
         return start <= hue <= end
     return hue >= start or hue <= end
+
+
+def album_coherence_note(
+    images: Sequence[Image.Image],
+    *,
+    min_group: int,
+    value_gap: float,
+    group_spread_max: float,
+) -> str:
+    """S22.coherence (advisory, never a rejection): does this album hold two bodies?
+
+    A shop's own gallery can carry two physical variants under one model code - the owner's
+    ``haier-6050`` album is three white/black spinners plus two beige/blue ones, every file
+    named ``HWS-60-50*``, all from one page.  No text signal separates them, and the colour
+    page holds no answer either: both variants are neutral-bodied, which S17 treats as "no
+    opinion" by design.
+
+    Measured before writing this (2026-10-19, both recorded runs): a *correct* album spans
+    just as much as a mixed one - detail shots, an open lid and a shop's own flash push the
+    foreground value of one machine from 0.43 to 0.84 (``haier-1-5-ton-ocean-white``), while
+    the two variants of ``haier-6050`` sit 0.18 apart.  Any bar that deletes the beige pair
+    deletes real pictures from other rows, so the pipeline records the row and leaves the
+    decision to the owner instead of guessing.
+
+    A pair of groups qualifies only when each is tight inside itself (``group_spread_max``),
+    the two sit at least ``value_gap`` apart, and each holds at least ``min_group`` pictures -
+    one odd detail shot is a normal album, not two products.
+
+    Honest limit of that bar: an album of four graded exposures at 0.42 / 0.53 / 0.73 / 0.84
+    is one machine photographed from brightest to darkest, and it reads here as two groups of
+    two.  Measured on the recorded runs this is rare - of the 27 albums that are really one
+    product, exactly one (a Gree AC) reads as two - which is exactly why a note is what comes
+    out and not a rejection: the cost of the false flag is a line in a report, the cost of the
+    same bar as a verdict is a row's real pictures.
+    """
+    if len(images) < min_group * 2:
+        return ""
+    values = sorted(
+        float(extract_foreground_color_profile(image).mean_value) for image in images
+    )
+    for cut in range(min_group, len(values) - min_group + 1):
+        low, high = values[:cut], values[cut:]
+        if (
+            high[0] - low[-1] >= value_gap
+            and low[-1] - low[0] <= group_spread_max
+            and high[-1] - high[0] <= group_spread_max
+        ):
+            return (
+                f"album holds two different-looking bodies: {len(low)} at value "
+                f"{low[0]:.2f}-{low[-1]:.2f} beside {len(high)} at "
+                f"{high[0]:.2f}-{high[-1]:.2f} - check the source gallery"
+            )
+    return ""
 
 
 def verify_image_color(

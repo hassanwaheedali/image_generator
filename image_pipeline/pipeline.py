@@ -60,6 +60,7 @@ from fetch import FetchError, PermanentAPIError
 from gallery_extractors import ExtractionContext, extract_candidates, shopify_json, woo_json
 from image_quality import (
     ImageValidationError,
+    album_coherence_note,
     dimensions_from_header,
     marketing_panel_split,
     official_gallery_pass,
@@ -885,6 +886,7 @@ def process_product(
         _salvage_row(
             task=task,
             keys=keys,
+            brand=brand,
             config=config,
             deps=deps,
             dedup=dedup,
@@ -894,9 +896,16 @@ def process_product(
             notes=notes,
             stages=stages,
             offers=salvage,
+            album=album,
         )
 
     # ---- stage 4/5 summary -------------------------------------------------
+    if config.album_coherence_note_enabled:
+        coherence = _coherence_note(accepted, config)
+        if coherence:
+            # Advisory only, and deliberately so: see image_quality.album_coherence_note for
+            # the measurement that rules out rejecting here.
+            notes.append(coherence)
     colour_ambiguous = not keys.colour_word and not dedup.colour_settled
     if colour_ambiguous:
         seen = ", ".join(f"{family} x{count}" for family, count in dedup.colour_sightings)
@@ -1066,6 +1075,7 @@ def _salvage_row(
     *,
     task: ProductTask,
     keys: ModelKeys,
+    brand: str | None,
     config: PipelineConfig,
     deps: PipelineDeps,
     dedup: ProductDedup,
@@ -1075,6 +1085,7 @@ def _salvage_row(
     notes: list[str],
     stages: list[str],
     offers: list[SalvageOffer],
+    album: _AlbumSource,
 ) -> None:
     """Stage 3c: publish quality-floor rejects when nothing better exists.
 
@@ -1088,6 +1099,29 @@ def _salvage_row(
     for offer in offers:
         if _row_is_done(accepted, config):
             break
+        if not _source_allowed(
+            album=album,
+            config=config,
+            page_url=offer.candidate.page_url,
+            url=offer.used_url,
+            keys=keys,
+            brand=brand,
+            own_terms=task.own_terms,
+            accepted=accepted,
+        ):
+            # The last resort is not a side door: this offer was found while no home existed
+            # yet, and publishing it now would rebuild the mixed album S22 exists to prevent.
+            rejections["S22.source_lock"] += 1
+            deps.decisions.reject(
+                title=task.title,
+                url=offer.used_url,
+                rule_id="S22.source_lock",
+                detail=(
+                    f"album belongs to {album.host}; last-resort picture offered "
+                    "by another source"
+                ),
+            )
+            continue
         if dedup.is_duplicate(offer.image):
             continue
         if keys.colour_word and not is_display_product(task.title):
@@ -1127,6 +1161,7 @@ def _salvage_row(
             candidate=offer.candidate,
             used_url=offer.used_url,
             source_label=offer.source_label,
+            page_url=offer.candidate.page_url,
             image=offer.image,
             config=config,
             deps=deps,
@@ -1134,6 +1169,7 @@ def _salvage_row(
             accepted=accepted,
             rejections=rejections,
         )
+        album.claim(offer.candidate.page_url)
     salvaged = len(accepted) - before
     if salvaged:
         notes.append(
@@ -1211,7 +1247,7 @@ class _AlbumSource:
     """
 
     def __init__(self, min_curated: int) -> None:
-        self._min_curated = max(2, min_curated)
+        self._min_curated = min_curated
         self._host = ""
 
     @property
@@ -1227,6 +1263,17 @@ class _AlbumSource:
         if curated >= self._min_curated:
             self._host = _source_host(page_url)
 
+    def claim(self, page_url: str) -> None:
+        """Claim the album for the page of the first picture that actually published.
+
+        The last-resort stage needs this: a row whose pages never looked like a gallery has
+        no home, and publishing its offers in list order would then mix shop A with shop B -
+        the exact thing S22 exists to prevent.  Once the first one is published the album has
+        a home, and every later offer answers to it.
+        """
+        if not self._host:
+            self._host = _source_host(page_url)
+
     def admits(self, page_url: str) -> bool:
         """True while the page is the home, or before any home exists."""
         return not self._host or _source_host(page_url) == self._host
@@ -1235,6 +1282,52 @@ class _AlbumSource:
 def _source_host(url: str) -> str:
     """The shop a page belongs to: its host, minus the ``www.`` decoration."""
     return (urlsplit(url).hostname or "").lower().removeprefix("www.")
+
+
+def _source_allowed(
+    *,
+    album: _AlbumSource,
+    config: PipelineConfig,
+    page_url: str,
+    url: str,
+    keys: ModelKeys,
+    brand: str | None,
+    own_terms: frozenset[str],
+    accepted: list[AcceptedImage],
+) -> bool:
+    """May this file join the album?  One answer, asked in two places (S22.source_lock).
+
+    The home admits itself.  Another shop may fill a row that is still short of
+    ``min_required_images``, but only with proof - the file has to carry this row's own key
+    or line word, the same evidence S4 demands.  The answer is computed when the picture is
+    *published*, not when it is found: a below-floor reject from shop A becomes an offer
+    while no home exists yet, and A may not slip in later through the last resort.
+    """
+    if not config.album_source_lock_enabled or album.admits(page_url):
+        return True
+    return len(accepted) < config.min_required_images and url_anchored_to_row(
+        url, keys, brand=brand, own_terms=own_terms
+    )
+
+
+def _coherence_note(accepted: list[AcceptedImage], config: PipelineConfig) -> str:
+    """What S22.coherence says about this row's album, or "" - and never an exception.
+
+    The squares are re-read from disk because the note judges the pictures the shop will
+    publish, not the bytes the shop served (the same reason S10 judges twice).  A report-only
+    rule must not be able to fail a row that already published, so an unreadable square ends
+    the note instead of ending the product.
+    """
+    try:
+        images = [Image.open(image.square_path).convert("RGB") for image in accepted]
+    except OSError:
+        return ""
+    return album_coherence_note(
+        images,
+        min_group=config.album_coherence_min_group,
+        value_gap=config.album_coherence_value_gap,
+        group_spread_max=config.album_coherence_group_spread_max,
+    )
 
 
 def _row_is_done(accepted: list[AcceptedImage], config: PipelineConfig) -> bool:
@@ -1839,25 +1932,6 @@ def _consume_candidates(
         verdict = _decide_candidate(candidate, keys, seen_keys)
         if (
             verdict is None
-            and config.album_source_lock_enabled
-            and not album.admits(page_url)
-            and not (
-                len(accepted) < config.min_required_images
-                and url_anchored_to_row(
-                    candidate.url, keys, brand=brand, own_terms=task.own_terms
-                )
-            )
-        ):
-            # S22.source_lock (owner 2026-10-17): one album is one shop's gallery.  Another
-            # source may still top a short row up, but only with proof - the file has to
-            # carry this row's own key or line word, which is what kept the 8 kg sibling
-            # out of the 13 kg gallery from ever being a candidate for the gap.
-            verdict = (
-                "S22.source_lock",
-                f"album belongs to {album.host or 'this page'}; picture offered by another source",
-            )
-        if (
-            verdict is None
             and config.capacity_code_gate_enabled
             and url_names_other_capacity_code(candidate.url, keys)
         ):
@@ -1937,6 +2011,23 @@ def _consume_candidates(
             verdict = (
                 "S4",
                 f"image URL names another maker ({foreign_maker})",
+            )
+        if verdict is None and not _source_allowed(
+            album=album,
+            config=config,
+            page_url=page_url,
+            url=candidate.url,
+            keys=keys,
+            brand=brand,
+            own_terms=task.own_terms,
+            accepted=accepted,
+        ):
+            # S22.source_lock (owner 2026-10-17): one album is one shop's gallery.  Checked
+            # after every identity limb, so a file that is *also* another product is logged
+            # as that - the actionable reason - and not hidden behind the source rule.
+            verdict = (
+                "S22.source_lock",
+                f"album belongs to {album.host}; picture offered by another source",
             )
         if verdict is not None:
             rule, detail = verdict
