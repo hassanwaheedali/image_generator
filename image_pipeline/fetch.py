@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import mimetypes
 import random
 import threading
 import time
 from collections.abc import Callable
 from http import HTTPStatus
+from pathlib import Path
 from typing import Any, Final, TypeVar
 from urllib.parse import urlsplit
 
@@ -306,6 +308,43 @@ class CurlCffiImageFetcher:
             )
         except Exception:                                   # pragma: no cover - network
             return None
+
+
+class LocalImageFetcher:
+    """``ImageFetcher`` for Option 3 (``--images-dir``): every "download" is a file read.
+
+    Implementing the protocol is what lets the Option 2 processor run untouched -
+    an unreadable or oversized file raises ``FetchError`` and dies as S13.fetch,
+    exactly like a dead link does in Option 2.
+    """
+
+    def __init__(self, max_bytes: int) -> None:
+        self._max_bytes = max_bytes
+
+    def fetch_image(self, url: str, referer: str) -> BinaryResponse:
+        path = Path(url)
+        try:
+            size = path.stat().st_size
+        except OSError as exc:
+            raise FetchError(f"cannot read local image {url}: {exc}") from exc
+        if size > self._max_bytes:
+            raise FetchError(f"local image {url} is {size} bytes, over the {self._max_bytes} limit")
+        try:
+            content = path.read_bytes()
+        except OSError as exc:
+            raise FetchError(f"cannot read local image {url}: {exc}") from exc
+        return BinaryResponse(
+            url=url,
+            status_code=200,
+            content=content,
+            # An unknown extension yields ""; validate_image_bytes then identifies
+            # the format from the magic bytes instead.
+            content_type=mimetypes.guess_type(path.name)[0] or "",
+        )
+
+    def probe_image(self, url: str, referer: str, max_bytes: int) -> BinaryResponse | None:
+        # Nothing to range-request on disk; the protocol allows declining the probe.
+        return None
 
 
 class CurlCffiJsonHttp:
