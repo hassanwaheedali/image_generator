@@ -8,11 +8,14 @@ import pytest
 from conftest import clean_product_image, jpeg_bytes, png_bytes
 
 from config import ConfigError, PipelineConfig
-from csv_io import MAX_PREFIX_CHARS, filename_prefix, local_filename_prefix
+from csv_io import MAX_PREFIX_CHARS, filename_prefix, hash_source_urls, local_filename_prefix
 from fetch import FetchError, LocalImageFetcher
+from main import _product_path, build_config, build_parser, discover_product_folders
 from model_matching import build_model_keys
 from models import ProductTask
+from platforms import resolve_platforms
 from protocols import ImageFetcher
+from url_filters import IMAGE_EXTENSIONS
 
 
 def _config(tmp_path: Path, **overrides: object) -> PipelineConfig:
@@ -141,3 +144,171 @@ class TestLocalFilenamePrefix:
     def test_product_task_defaults_to_no_override(self) -> None:
         task = ProductTask(index=0, title="anything", source_urls=("a",))
         assert task.name_prefix_override is None
+
+
+def _parent(tmp_path: Path) -> Path:
+    root = tmp_path / "products"
+    root.mkdir(exist_ok=True)
+    return root
+
+
+def _folder(root: Path, name: str, images: int = 3) -> Path:
+    folder = root / name
+    folder.mkdir(parents=True, exist_ok=True)
+    for n in range(images):
+        (folder / f"{n + 1}.jpg").write_bytes(jpeg_bytes(clean_product_image()))
+    return folder
+
+
+class TestDiscoverProductFolders:
+    def test_flat_folder_title_is_exact_and_paths_sort_by_name(self, tmp_path: Path) -> None:
+        root = _parent(tmp_path)
+        folder = _folder(root, "MSAG2B-12HRDN1-QC0 White")
+        (folder / "10.jpg").write_bytes(jpeg_bytes(clean_product_image()))
+        tasks = discover_product_folders(root)
+        assert len(tasks) == 1
+        task = tasks[0]
+        assert task.title == "MSAG2B-12HRDN1-QC0 White"
+        # Plain name sort, like the sheet's URL order: 1, 10, 2, 3.
+        assert task.source_urls == (
+            _product_path(folder / "1.jpg"),
+            _product_path(folder / "10.jpg"),
+            _product_path(folder / "2.jpg"),
+            _product_path(folder / "3.jpg"),
+        )
+
+    def test_nested_folder_joins_the_title_with_one_space(self, tmp_path: Path) -> None:
+        root = _parent(tmp_path)
+        outer = root / "MSAG2B-12HRDN1-QC0"
+        (outer / "Black").mkdir(parents=True)
+        (outer / "White").mkdir(parents=True)
+        (outer / "Black" / "1.jpg").write_bytes(jpeg_bytes(clean_product_image()))
+        (outer / "White" / "1.png").write_bytes(png_bytes(clean_product_image()))
+        tasks = discover_product_folders(root)
+        assert [t.title for t in tasks] == ["MSAG2B-12HRDN1-QC0 Black", "MSAG2B-12HRDN1-QC0 White"]
+
+    def test_flat_and_nested_mix_in_one_parent(self, tmp_path: Path) -> None:
+        root = _parent(tmp_path)
+        _folder(root, "Plain Product")
+        nested = root / "Model X"
+        (nested / "Golden").mkdir(parents=True)
+        (nested / "Golden" / "a.jpg").write_bytes(jpeg_bytes(clean_product_image()))
+        titles = [t.title for t in discover_product_folders(root)]
+        assert titles == ["Model X Golden", "Plain Product"]
+
+    def test_junk_and_hidden_entries_are_invisible(self, tmp_path: Path) -> None:
+        root = _parent(tmp_path)
+        folder = _folder(root, "Product")
+        (folder / "notes.txt").write_text("hi", encoding="utf-8")
+        (folder / ".DS_Store").write_bytes(b"junk")
+        hidden = root / ".hidden"
+        hidden.mkdir()
+        (hidden / "1.jpg").write_bytes(jpeg_bytes(clean_product_image()))
+        tasks = discover_product_folders(root)
+        assert len(tasks) == 1
+        assert len(tasks[0].source_urls) == 3  # notes.txt and .DS_Store are not pictures
+
+    def test_empty_product_folder_survives_as_a_short_row(self, tmp_path: Path) -> None:
+        root = _parent(tmp_path)
+        (root / "Empty One").mkdir()
+        tasks = discover_product_folders(root)
+        assert [t.source_urls for t in tasks] == [()]
+
+    def test_loose_images_in_the_parent_are_an_error(self, tmp_path: Path) -> None:
+        root = _parent(tmp_path)
+        (root / "stray.jpg").write_bytes(jpeg_bytes(clean_product_image()))
+        _folder(root, "Product")
+        with pytest.raises(ValueError, match="loose"):
+            discover_product_folders(root)
+
+    def test_folder_with_images_and_subfolders_is_ambiguous(self, tmp_path: Path) -> None:
+        root = _parent(tmp_path)
+        folder = _folder(root, "Model Y")
+        (folder / "Black").mkdir()
+        with pytest.raises(ValueError, match="Model Y"):
+            discover_product_folders(root)
+
+    def test_folders_inside_a_colourway_are_not_silently_dropped(self, tmp_path: Path) -> None:
+        # Model Z/Black/{1.jpg, Zoom/2.jpg}: the same shape, one level deeper, must
+        # raise like it does at the flat level - not lose Zoom's picture quietly.
+        root = _parent(tmp_path)
+        black = root / "Model Z" / "Black"
+        black.mkdir(parents=True)
+        (black / "1.jpg").write_bytes(jpeg_bytes(clean_product_image()))
+        (black / "Zoom").mkdir()
+        (black / "Zoom" / "2.jpg").write_bytes(jpeg_bytes(clean_product_image()))
+        with pytest.raises(ValueError, match="Black"):
+            discover_product_folders(root)
+
+    def test_parent_without_products_is_an_error(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="subfolder"):
+            discover_product_folders(_parent(tmp_path))
+
+    def test_extensions_come_from_the_shared_list(self, tmp_path: Path) -> None:
+        root = _parent(tmp_path)
+        folder = _folder(root, "Product", images=0)
+        for suffix in sorted(IMAGE_EXTENSIONS):
+            (folder / f"pic.{suffix}").write_bytes(b"x")
+        (folder / "movie.mp4").write_bytes(b"x")
+        tasks = discover_product_folders(root)
+        assert len(tasks[0].source_urls) == len(IMAGE_EXTENSIONS)
+
+
+class TestImagesDirCli:
+    def _args(self, *argv: str):
+        return build_parser().parse_args(list(argv))
+
+    def test_images_dir_implies_direct_mode(self, tmp_path: Path) -> None:
+        config = build_config(self._args("--images-dir", str(tmp_path), "--dry-run"))
+        assert config.local_images_mode and config.direct_mode
+
+    def test_plain_run_stays_option_one(self, tmp_path: Path) -> None:
+        config = build_config(self._args("--input", "sheet.csv", "--dry-run"))
+        assert not config.local_images_mode and not config.direct_mode
+
+    def test_conflicts_with_input_and_direct(self, tmp_path: Path) -> None:
+        from main import resolve_run_input
+
+        config = build_config(self._args("--images-dir", str(tmp_path), "--dry-run"))
+        with pytest.raises(ConfigError, match="images-dir"):
+            resolve_run_input(self._args("--images-dir", str(tmp_path), "--input", "s.csv"), config)
+        with pytest.raises(ConfigError, match="images-dir"):
+            resolve_run_input(self._args("--images-dir", str(tmp_path), "--direct"), config)
+
+    def test_build_tasks_sets_the_stem_override_after_the_merge(self, tmp_path: Path) -> None:
+        from main import _build_tasks
+
+        root = _parent(tmp_path)
+        _folder(root, "MSAG2B-12HRDN1-QC0 Black")
+        config = _config(tmp_path, direct_mode=True, local_images_mode=True)
+        tasks, _ = _build_tasks(config, root)
+        assert tasks[0].name_prefix_override == "MSAG2B-12HRDN1-QC0_BLACK"
+
+    def test_local_tasks_carry_paths_and_hash_like_urls(self, tmp_path: Path) -> None:
+        from main import _build_tasks
+
+        root = _parent(tmp_path)
+        _folder(root, "Product One")
+        config = _config(tmp_path, direct_mode=True, local_images_mode=True)
+        tasks, _ = _build_tasks(config, root)
+        assert len(tasks[0].source_urls) == 3
+        assert hash_source_urls(tasks[0].source_urls)  # checkpoint keying works on paths
+
+    def test_resolve_run_input_wants_a_real_folder(self, tmp_path: Path) -> None:
+        from main import resolve_run_input
+
+        root = _parent(tmp_path)
+        config = build_config(self._args("--images-dir", str(root), "--dry-run"))
+        assert resolve_run_input(self._args("--images-dir", str(root)), config) == root.resolve()
+        with pytest.raises(ConfigError, match="folder"):
+            resolve_run_input(self._args("--images-dir", str(tmp_path / "nope")), config)
+
+
+class TestBuildDepsLocalFetcher:
+    def test_local_mode_swaps_the_image_fetcher(self, tmp_path: Path) -> None:
+        from decisions import DecisionLog
+        from main import build_deps
+
+        config = _config(tmp_path, direct_mode=True, local_images_mode=True)
+        deps = build_deps(config, DecisionLog(config.decisions_path), resolve_platforms(config, "website"))
+        assert isinstance(deps.image_fetcher, LocalImageFetcher)

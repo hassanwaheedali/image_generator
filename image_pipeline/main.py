@@ -31,6 +31,7 @@ from csv_io import (
     hash_source_urls,
     load_banner_cache,
     load_checkpoint,
+    local_filename_prefix,
     merge_duplicate_titles,
     read_input,
 )
@@ -41,6 +42,7 @@ from fetch import (
     CurlCffiJsonHttp,
     CurlCffiPageFetcher,
     DomainRateLimiter,
+    LocalImageFetcher,
     PermanentAPIError,
 )
 from image_host import APILayerHost, FallbackImageHost, FreeImageHost, ImgBBHost
@@ -131,6 +133,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Option 2: the sheet's URL column holds direct image URLs - download, template "
         "and publish them; no pages are fetched and nothing is scraped",
     )
+    parser.add_argument(
+        "--images-dir",
+        default=None,
+        metavar="PARENT",
+        help="Option 3: PARENT folder with one subfolder per product (folder name = Title, "
+        "its image files = the product's pictures); no sheet, no scraping, no downloading",
+    )
     parser.add_argument("--redo", nargs="*", default=[], help="exact titles to force re-process")
     parser.add_argument("--limit", type=int, default=None, help="process at most N products")
     parser.add_argument("--workers", type=int, default=4, help="parallel workers (default 4)")
@@ -220,7 +229,8 @@ def build_config(args: argparse.Namespace) -> PipelineConfig:
         state_dir=pinned_state,
         input_dir=Path(args.input_dir),
         dry_run=bool(args.dry_run),
-        direct_mode=bool(args.direct),
+        direct_mode=bool(args.direct or args.images_dir),
+        local_images_mode=bool(args.images_dir),
         workers=int(args.workers),
         limit=args.limit,
         redo_titles=tuple(args.redo or ()),
@@ -300,6 +310,131 @@ def resolve_input_path(input_arg: str | None, input_dir: Path) -> Path:
         f"no input sheet specified and none found in '{input_dir}' or 'uploads/'. "
         "Place your .csv or .xlsx file in the 'input/' folder or specify --input <path>."
     )
+
+
+# --------------------------------------------------------------------------- #
+# Option 3 (--images-dir): a parent folder of product folders, no sheet, no URLs
+# --------------------------------------------------------------------------- #
+def _sortkey(path: Path) -> tuple[str, str]:
+    return (path.name.lower(), path.name)
+
+
+def _product_path(path: Path) -> str:
+    """A file's POSIX path in the spelling every consumer of ``source_urls`` expects."""
+    return path.resolve().as_posix()
+
+
+def _folder_images(folder: Path) -> tuple[str, ...]:
+    from url_filters import IMAGE_EXTENSIONS
+
+    files = [p for p in folder.iterdir() if p.is_file() and not p.name.startswith(".")]
+    images = [p for p in files if p.suffix.lower().lstrip(".") in IMAGE_EXTENSIONS]
+    return tuple(_product_path(p) for p in sorted(images, key=_sortkey))
+
+
+def _folder_products(folder: Path) -> list[tuple[str, tuple[str, ...]]]:
+    """(title, images) for one product folder: its own images, or its colourway children."""
+    images = _folder_images(folder)
+    children = [p for p in _visible_children(folder) if p.is_dir()]
+    if images and children:
+        raise ValueError(
+            f"{folder.name}: has both image files and subfolders, so the title is ambiguous - "
+            "give it its own folder, or move the images into the colourway subfolders"
+        )
+    if images or not children:
+        return [(folder.name, images)]
+    return [
+        (f"{folder.name} {child.name}", _colourway_images(folder.name, child))
+        for child in children
+    ]
+
+
+def _colourway_images(model: str, colour: Path) -> tuple[str, ...]:
+    """A colourway folder's pictures; folders *inside* it would hide a whole product."""
+    images = _folder_images(colour)
+    if any(p.is_dir() for p in _visible_children(colour)):
+        raise ValueError(
+            f"{colour.name} (inside {model}): has pictures and folders of its own - "
+            "nesting goes one colour deep; give the inner folder a full product name"
+        )
+    return images
+
+
+def _visible_children(parent: Path) -> list[Path]:
+    return sorted((p for p in parent.iterdir() if not p.name.startswith(".")), key=_sortkey)
+
+
+def _reject_stray_images(parent: Path, entries: list[Path]) -> None:
+    from url_filters import IMAGE_EXTENSIONS
+
+    stray = [p for p in entries if p.is_file() and p.suffix.lower().lstrip(".") in IMAGE_EXTENSIONS]
+    if stray:
+        names = f"{stray[0].name} and {len(stray) - 1} more" if len(stray) > 1 else stray[0].name
+        raise ValueError(
+            f"{parent} holds loose images ({names}) beside "
+            "the product folders - did you point --images-dir at a product instead of its parent?"
+        )
+
+
+def discover_product_folders(parent: Path) -> list[ProductTask]:
+    """One task per product folder; the folder name is the Title, verbatim.
+
+    Two layouts are read and never mixed: a subfolder holding image files is one
+    product; a subfolder holding *only* subfolders contributes ``Outer Inner``
+    products (colourways).  The parent itself holds neither images nor loose files.
+    """
+    entries = _visible_children(parent)
+    _reject_stray_images(parent, entries)
+    children = [p for p in entries if p.is_dir()]
+    if not children:
+        raise ValueError(
+            f"{parent} holds no product subfolders - give each product its own folder inside it"
+        )
+    products = [product for child in children for product in _folder_products(child)]
+    return [
+        ProductTask(index=index, title=title, source_urls=images)
+        for index, (title, images) in enumerate(products)
+    ]
+
+
+def _build_tasks(config: PipelineConfig, input_path: Path) -> tuple[list[ProductTask], list[str]]:
+    """The run's tasks: Option 3 reads folders, every other mode reads the sheet."""
+    if config.local_images_mode:
+        from model_matching import build_model_keys
+
+        merged, warnings = merge_duplicate_titles(discover_product_folders(input_path))
+        # merge_duplicate_titles rebuilds the tasks, so the stem is applied after it.
+        # It keys on the lowercased title, so every spelling of one title shares it.
+        return [
+            replace(
+                task,
+                name_prefix_override=local_filename_prefix(build_model_keys(task.title), task.title),
+            )
+            for task in merged
+        ], warnings
+    return merge_duplicate_titles(read_input(input_path, direct=config.direct_mode))
+
+
+def resolve_run_input(args: argparse.Namespace, config: PipelineConfig) -> Path:
+    """What this run is named after: the sheet, or Option 3's parent folder."""
+    if args.images_dir is None:
+        return resolve_input_path(args.input, config.input_dir)
+    for other, what in (("input", "the sheet"), ("direct", "direct image URLs")):
+        if getattr(args, other):
+            raise ConfigError(f"--images-dir replaces {what}; drop --{other} or use one mode")
+    parent = Path(args.images_dir)
+    if not parent.is_dir():
+        raise ConfigError(f"--images-dir needs a folder of product folders: {args.images_dir}")
+    return parent
+
+
+def _mode_description(config: PipelineConfig) -> str:
+    """One line a human reads at startup to know which of the three modes is running."""
+    if config.local_images_mode:
+        return "local image folders (no sheet, no scraping, no downloading)"
+    if config.direct_mode:
+        return "direct (user-supplied image URLs, no scraping)"
+    return "scrape and verify"
 
 
 def run_folder(input_path: Path) -> str:
@@ -463,7 +598,13 @@ def build_deps(
     )
     return PipelineDeps(
         page_fetcher=CurlCffiPageFetcher(config, limiter),
-        image_fetcher=CurlCffiImageFetcher(config, limiter),
+        # Option 3 keeps the Option 2 processor untouched: the only difference is
+        # where fetch_image's bytes come from - disk instead of the network.
+        image_fetcher=(
+            LocalImageFetcher(config.max_image_bytes)
+            if config.local_images_mode
+            else CurlCffiImageFetcher(config, limiter)
+        ),
         image_host=host,
         decisions=decisions,
         banner_cache=load_banner_cache(config.banner_cache_path),
@@ -651,6 +792,14 @@ def _learn_differentiators(config: PipelineConfig, tasks: list[ProductTask]) -> 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.check_image and args.images_dir:
+        # check-image judges single files by hand; it must not silently ignore a folder.
+        print(
+            "configuration error: --check-image judges files given on the command line; "
+            "drop --images-dir",
+            file=sys.stderr,
+        )
+        return 2
     if args.check_image:
         # This mode reads only local files: no sheet, no assets, no API key, no network.
         return _check_local_images(
@@ -666,7 +815,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        input_path = resolve_input_path(args.input, config.input_dir)
+        input_path = resolve_run_input(args, config)
     except ConfigError as exc:
         print(f"configuration error: {exc}", file=sys.stderr)
         return 2
@@ -684,7 +833,7 @@ def main(argv: list[str] | None = None) -> int:
     LOG.info("input: %s", input_path.resolve())
     LOG.info(
         "mode: %s | dry-run: %s | workers: %d",
-        "direct (user-supplied image URLs, no scraping)" if config.direct_mode else "scrape and verify",
+        _mode_description(config),
         config.dry_run,
         config.workers,
     )
@@ -706,9 +855,10 @@ def main(argv: list[str] | None = None) -> int:
     LOG.info("publishing on: %s", ", ".join(platform.display_name for platform in platforms.platforms))
 
     try:
-        tasks, warnings = merge_duplicate_titles(read_input(input_path, direct=config.direct_mode))
+        tasks, warnings = _build_tasks(config, input_path)
     except (OSError, ValueError) as exc:
-        print(f"cannot read input sheet: {exc}", file=sys.stderr)
+        what = "product folders" if config.local_images_mode else "input sheet"
+        print(f"cannot read {what}: {exc}", file=sys.stderr)
         return 2
     for warning in warnings:
         LOG.warning("%s", warning)
