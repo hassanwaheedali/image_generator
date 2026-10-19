@@ -661,6 +661,12 @@ class PipelineConfig:
     #: everything from the download onward reuses the Option 1 machinery.
     direct_mode: bool = False
 
+    #: Option 3 (``--images-dir``): a parent folder, one subfolder per product; the
+    #: folder name is the Title verbatim and its image files are the row's "downloads".
+    #: Always paired with ``direct_mode`` - the only difference between the two is
+    #: where the bytes come from (disk instead of the network).
+    local_images_mode: bool = False
+
     #: Safeguard S19: store theme templates (iShopping's yellow frame, promo art with
     #: the shop's own logo and design) break isolation and must never be composited.
     #: The evidence is the background only - the four corner patches.  A product
@@ -990,6 +996,8 @@ class PipelineConfig:
             raise ConfigError("workers must be >= 1")
         if self.limit is not None and self.limit < 1:
             raise ConfigError("limit must be >= 1 when given")
+        if self.local_images_mode and not self.direct_mode:
+            raise ConfigError("local_images_mode requires direct_mode: it only changes where the images come from")
 
     def _validate_platforms(self) -> None:
         # Imported lazily: platforms.py reads ConfigError from this module, so a
