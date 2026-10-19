@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import argparse
+import io
+import threading
 from pathlib import Path
 
 import pytest
 from conftest import clean_product_image, jpeg_bytes, png_bytes
+from PIL import Image, ImageFilter
 
 from config import ConfigError, PipelineConfig
 from csv_io import MAX_PREFIX_CHARS, filename_prefix, hash_source_urls, local_filename_prefix
@@ -255,7 +259,7 @@ class TestDiscoverProductFolders:
 
 
 class TestImagesDirCli:
-    def _args(self, *argv: str):
+    def _args(self, *argv: str) -> argparse.Namespace:
         return build_parser().parse_args(list(argv))
 
     def test_images_dir_implies_direct_mode(self, tmp_path: Path) -> None:
@@ -312,3 +316,137 @@ class TestBuildDepsLocalFetcher:
         config = _config(tmp_path, direct_mode=True, local_images_mode=True)
         deps = build_deps(config, DecisionLog(config.decisions_path), resolve_platforms(config, "website"))
         assert isinstance(deps.image_fetcher, LocalImageFetcher)
+
+
+# --------------------------------------------------------------------------- #
+# The Option 3 processor: Option 2's flow over files read from disk
+# --------------------------------------------------------------------------- #
+from conftest import (  # noqa: E402
+    FakeImageHost,
+    FakePageFetcher,
+    make_assets,
+    synthetic_platforms,
+)
+from test_direct_pipeline import _themed_template, _white_product_photo, _white_product_photo_alt  # noqa: E402
+
+from decisions import DecisionLog  # noqa: E402
+from direct_pipeline import process_direct_product  # noqa: E402
+from models import Status  # noqa: E402
+from pipeline import PipelineDeps  # noqa: E402
+
+
+def _png_bytes(image: Image.Image) -> bytes:
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _local_assets(tmp_path: Path) -> Path:
+    folder = tmp_path / "assets"
+    folder.mkdir(parents=True, exist_ok=True)
+    make_assets(folder)
+    return folder
+
+
+def _local_config(tmp_path: Path, **overrides: object) -> PipelineConfig:
+    return PipelineConfig(
+        dry_run=True,
+        direct_mode=True,
+        local_images_mode=True,
+        assets_dir=_local_assets(tmp_path),
+        output_dir=tmp_path / "out",
+        state_dir=tmp_path / "state",
+        **overrides,  # type: ignore[arg-type]
+    )
+
+
+def _local_deps(tmp_path: Path) -> PipelineDeps:
+    return PipelineDeps(
+        page_fetcher=FakePageFetcher({}),
+        image_fetcher=LocalImageFetcher(max_bytes=15 * 1024 * 1024),
+        image_host=FakeImageHost(),
+        decisions=DecisionLog(tmp_path / "decisions.jsonl"),
+        banner_cache={},
+        banner_cache_lock=threading.Lock(),
+        platforms=synthetic_platforms(_local_assets(tmp_path)),
+        source_searcher=None,
+    )
+
+
+def _local_task(tmp_path: Path, images: list[Image.Image], title: str = "Cool Breeze 12X AC") -> ProductTask:
+    folder = tmp_path / "products" / title
+    folder.mkdir(parents=True, exist_ok=True)
+    paths: list[str] = []
+    for n, image in enumerate(images):
+        path = folder / f"{n + 1}.png"
+        path.write_bytes(_png_bytes(image))
+        paths.append(_product_path(path))
+    keys = build_model_keys(title)
+    return ProductTask(
+        index=0, title=title, source_urls=tuple(paths),
+        name_prefix_override=local_filename_prefix(keys, title),
+    )
+
+
+def _decisions_text(tmp_path: Path) -> str:
+    path = tmp_path / "decisions.jsonl"
+    return path.read_text(encoding="utf-8") if path.exists() else ""
+
+
+class TestLocalProcessor:
+    def test_publishes_from_files_and_writes_named_finals(self, tmp_path: Path) -> None:
+        task = _local_task(tmp_path, [_white_product_photo(), _white_product_photo_alt()])
+        result, accepted = process_direct_product(task, _local_deps(tmp_path), _local_config(tmp_path))
+        assert result.status is Status.OK
+        assert len(accepted) == 2
+        assert len(result.urls_for("digi")) == 3  # two photos + the closing banner
+        stem = task.name_prefix_override
+        assert stem  # the folder title's stem, computed once by the same helper
+        finals = sorted(p.name for p in (tmp_path / "out" / "images" / "digi").rglob("*.jpg"))
+        assert finals == [f"{stem}_1.jpg", f"{stem}_2.jpg", f"{stem}_3.jpg"]
+        # The decision line names the file, not a URL: the audit trail points at the folder.
+        text = _decisions_text(tmp_path)
+        assert '"rule_id": "accept"' in text
+        assert task.source_urls[0] in text
+
+    def test_colourway_stem_names_the_finals_across_platforms(self, tmp_path: Path) -> None:
+        task = _local_task(tmp_path, [_white_product_photo(), _white_product_photo_alt()],
+                           title="MSAG2B-12HRDN1-QC0 White")
+        assert task.name_prefix_override == "MSAG2B-12HRDN1-QC0_WHITE"
+        result, accepted = process_direct_product(task, _local_deps(tmp_path), _local_config(tmp_path))
+        assert result.status is Status.OK
+        for platform in ("digi", "alfa"):
+            folder = next((tmp_path / "out" / "images" / platform).iterdir())
+            names = sorted(p.name for p in folder.iterdir())
+            assert names[:2] == ["MSAG2B-12HRDN1-QC0_WHITE_1.jpg", "MSAG2B-12HRDN1-QC0_WHITE_2.jpg"]
+
+    def test_blurry_picture_dies_at_s13_blur(self, tmp_path: Path) -> None:
+        crisp = _white_product_photo()
+        blurred = crisp.filter(ImageFilter.GaussianBlur(radius=8))
+        task = _local_task(tmp_path, [blurred, crisp, blurred])
+        result, accepted = process_direct_product(task, _local_deps(tmp_path), _local_config(tmp_path))
+        assert len(accepted) == 1
+        assert result.status is Status.PARTIAL
+        assert "S13.blur" in _decisions_text(tmp_path)
+
+    def test_branded_store_template_dies_at_s19(self, tmp_path: Path) -> None:
+        task = _local_task(tmp_path, [_themed_template((248, 198, 0))])
+        result, accepted = process_direct_product(task, _local_deps(tmp_path), _local_config(tmp_path))
+        assert accepted == []
+        assert result.status is Status.FAILED
+        assert "S19" in _decisions_text(tmp_path)
+
+    def test_missing_file_dies_at_s13_fetch(self, tmp_path: Path) -> None:
+        task = _local_task(tmp_path, [_white_product_photo(), _white_product_photo_alt()])
+        Path(task.source_urls[0]).unlink()  # the folder changed after discovery
+        result, accepted = process_direct_product(task, _local_deps(tmp_path), _local_config(tmp_path))
+        assert len(accepted) == 1
+        assert result.status is Status.PARTIAL
+        assert "S13.fetch" in _decisions_text(tmp_path)
+
+    def test_the_same_picture_twice_is_queued_once(self, tmp_path: Path) -> None:
+        photo = _white_product_photo()
+        task = _local_task(tmp_path, [photo, photo])
+        result, accepted = process_direct_product(task, _local_deps(tmp_path), _local_config(tmp_path))
+        assert len(accepted) == 1
+        assert "re-served copy" in _decisions_text(tmp_path)  # S10 pixel dedup fired
