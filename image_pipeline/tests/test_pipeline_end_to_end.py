@@ -2220,11 +2220,12 @@ def test_the_coherence_note_can_be_switched_off(tmp_path: Path) -> None:
     assert "two different-looking bodies" not in result.note
 
 
-def test_a_single_stray_image_never_owns_the_album(tmp_path: Path) -> None:
-    """`album_lock_min_curated` is the difference between a gallery and a page that happens
-    to carry one picture.  The stray publishes and holds the album only until the row's real
-    gallery is found - then the gallery owns it, and the row's pictures keep coming from one
-    shop (owner: "the official page has one hero"; "we choose the best one from one")."""
+def test_a_second_shop_s_gallery_joins_only_file_by_file(tmp_path: Path) -> None:
+    """The row's first picture settles the home even when that page carries one stray file.
+    A second shop is then a stranger like any other: each of its files is admitted by its
+    **own** name (`haier-130-1217E-1.jpg` proves the row; a nameless file from the same page
+    would not) and only while the row is still short of `min_required_images`.  Nothing here
+    needs the page's size, which is why `album_lock_min_curated` no longer exists."""
     config = live_config(tmp_path)
     stray = "https://cdn.friendshome.example/files/haier-130-1217E-hero.jpg"
     gallery = (
@@ -2249,9 +2250,12 @@ def test_a_single_stray_image_never_owns_the_album(tmp_path: Path) -> None:
         task(0, "Haier 1301217E Front Load Washer", (page_a, page_b)), deps, config
     )
 
-    assert [image.source_url for image in accepted] == [stray, *gallery]
+    assert [image.source_url for image in accepted] == [stray, gallery[0]]
     decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
-    assert "S22.source_lock" not in decisions
+    # The row reached min_required_images with one proven stranger, so the second one is
+    # refused: the top-up door fills a short row, it does not import a whole gallery.
+    assert '"rule_id": "S22.source_lock"' in decisions
+    assert "album belongs to friendshome.example" in decisions
 
 
 def test_the_album_home_is_the_page_host_not_the_image_cdn(tmp_path: Path) -> None:
@@ -2502,47 +2506,42 @@ def test_two_single_image_shops_never_make_one_album(tmp_path: Path) -> None:
     assert "album belongs to friendshome.example" in decisions
 
 
-def test_a_gallery_takes_the_album_from_a_stray_file(tmp_path: Path) -> None:
-    """The exception that keeps the rule from becoming a starvation bug: the row's first
-    picture came from a shop with one file on the page, and the brand's own six-view gallery
-    is found later.  The gallery is the better album, so it owns the row from there on and
-    its own views keep publishing - the stray is not thrown away, it is simply not followed
-    by third shops."""
-    config = replace(
-        live_config(tmp_path), target_images_per_product=4, max_images_per_product=4
-    )  # keep the row searching, so the third shop is reached and judged
-    stray = "https://cdn.friendshome.example/files/haier-130-1217E-hero.jpg"
-    gallery = tuple(
-        f"https://cdn.surmawala.example/files/haier-130-1217E-{index}.jpg" for index in (1, 2)
+def test_a_bigger_gallery_is_still_not_a_ticket(tmp_path: Path) -> None:
+    """The live leak this closes (washing-machine dry-run, 2026-10-19): the `851708` row
+    published ``hwm-85-1709.png`` - another model - from a second shop, and a Midea row
+    published a nameless ``UntitledProject_71``, because any page offering two gallery images
+    used to **take the album over** from the shop that published first.  A page's size says
+    nothing about whether its files are this product; only the file's own name does.  So the
+    home never moves, and this gallery is judged like any other stranger: prove the row or
+    stay out."""
+    config = live_config(tmp_path)
+    own = "https://cdn.pak-electronics.example/files/85-1708-1.png"
+    page_own = "https://pak-electronics.example/products/haier-851708"
+    sibling_gallery = (
+        "https://cdn.lahorelectronics.example/files/hwm-85-1709.png",   # another model
+        "https://cdn.lahorelectronics.example/files/promo-strip.png",
     )
-    stranger = "https://cdn.aysonline.example/files/image003.jpg"
-    page_a = "https://friendshome.example/products/haier-1301217e"
-    page_b = "https://surmawala.example/products/haier-1301217e"
-    page_c = "https://aysonline.example/products/haier-1301217e"
+    page_gallery = "https://lahorelectronics.example/products/haier-851708"
     deps, _, _, _ = build_deps(
         tmp_path,
         {
-            page_a: _front_load_page_for("Haier 1301217E", (stray,)),
-            page_b: _front_load_page_for("Haier 1301217E", gallery),
-            page_c: _front_load_page_for("Haier 1301217E", (stranger,)),
+            page_own: _front_load_page_for("Haier 851708", (own,)),
+            page_gallery: _front_load_page_for("Haier 851708", sibling_gallery),
         },
         {
-            stray: png_bytes(_catalog_artwork()),
-            gallery[0]: png_bytes(_catalog_artwork(open_lid=True)),
-            gallery[1]: png_bytes(_catalog_artwork(offset=-0.3, scale=0.42)),
-            stranger: png_bytes(_catalog_artwork(offset=0.1)),
+            own: png_bytes(_catalog_artwork()),
+            sibling_gallery[0]: png_bytes(_catalog_artwork(open_lid=True)),
+            sibling_gallery[1]: png_bytes(_catalog_artwork(offset=-0.3, scale=0.42)),
         },
     )
     _, accepted = process_product(
-        task(0, "Haier 1301217E Front Load Washer", (page_a, page_b, page_c)), deps, config
+        task(0, "Haier 851708 Top Load Washer", (page_own, page_gallery)), deps, config
     )
 
-    pages = [image.page_url for image in accepted]
-    assert pages.count(page_b) >= 2                 # the gallery publishes its own views
-    assert stranger not in [image.source_url for image in accepted]
-    assert set(pages) == {page_a, page_b}           # and no third shop joins
+    assert [image.source_url for image in accepted] == [own]
     decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
-    assert "album belongs to surmawala.example" in decisions
+    assert '"rule_id": "S22.source_lock"' in decisions
+    assert "album belongs to pak-electronics.example" in decisions
 
 
 def test_a_second_source_never_joins_a_gallery_that_already_has_enough(tmp_path: Path) -> None:

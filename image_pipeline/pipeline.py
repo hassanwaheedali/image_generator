@@ -14,7 +14,7 @@ import logging
 import shutil
 import threading
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -629,7 +629,7 @@ def process_product(
     )
     #: S22.source_lock: the shop whose gallery this album belongs to, claimed by the first
     #: real gallery that publishes a picture.
-    album = _AlbumSource(config.album_lock_min_curated)
+    album = _AlbumSource()
     salvage: list[SalvageOffer] = []
     #: S20.mixed-shade: the (head, shade) the first shade-bearing page fixed this gallery to.
     gallery_colour: list[tuple[str, str]] = []
@@ -1103,7 +1103,6 @@ def _salvage_row(
             album=album,
             config=config,
             page_url=offer.candidate.page_url,
-            candidates=(offer.candidate,),
             url=offer.used_url,
             keys=keys,
             brand=brand,
@@ -1170,7 +1169,7 @@ def _salvage_row(
             accepted=accepted,
             rejections=rejections,
         )
-        album.settle(offer.candidate.page_url, ())
+        album.settle(offer.candidate.page_url)
     salvaged = len(accepted) - before
     if salvaged:
         notes.append(
@@ -1241,53 +1240,33 @@ class _AlbumSource:
     sets differ in crop, in light and - live in the washing-machine run - in which
     variant of the model stands in the frame.
 
-    The home is the **page that first gives the row a published picture**, so no album is
-    ever one picture from this shop and one from that one.  Two exceptions, both measured
-    on the recorded runs before writing them: a page carrying a real gallery
-    (``album_lock_min_curated`` curated candidates) is the best album and may take the home
-    from a shop that only handed over a stray file, and any other shop still fills a row that
-    is short of ``min_required_images`` when its file proves the row (``_source_allowed``).
-    The key is the **page's** host, never the image host: ``cdn.shopify.com`` serves
-    thousands of shops.
+    The home is the page that gave the row its **first published picture**, and nothing
+    else takes it over.  An earlier version let any page carrying two or more gallery
+    images seize the album; live on 2026-10-19 that door published
+    ``hwm-85-1709.png`` on the `851708` row and a nameless ``UntitledProject_71`` on a
+    Midea one, because a retailer page always "looks like a gallery" - the size of a
+    page's catalogue says nothing about whether its files are *this* product.  So the
+    only way in from another shop is proof: the file's own name carries this row's code
+    (``_source_allowed``).  The key is the **page's** host, never the image host:
+    ``cdn.shopify.com`` serves thousands of shops.
     """
 
-    def __init__(self, min_curated: int) -> None:
-        self._min_curated = min_curated
+    def __init__(self) -> None:
         self._host = ""
-        self._is_gallery = False
 
     @property
     def host(self) -> str:
         """The shop the album belongs to, or "" while no home is claimed."""
         return self._host
 
-    def curated(self, candidates: Sequence[ImageCandidate]) -> int:
-        """How many of this page's candidates come from its own gallery."""
-        return sum(1 for candidate in candidates if candidate.source in GALLERY_IMAGE_SOURCES)
-
-    def looks_like_gallery(self, candidates: Sequence[ImageCandidate]) -> bool:
-        """True when this page is a gallery of its own, not one stray file."""
-        return self.curated(candidates) >= self._min_curated
-
-    def settle(self, page_url: str, candidates: Sequence[ImageCandidate]) -> None:
-        """Record that this page published a picture, and move the album to it if it should.
-
-        A page that published takes the home while the row has none; a real gallery takes it
-        from a stray file, because the gallery is the better album; a settled gallery is never
-        displaced by a single file from somewhere else.
-        """
-        gallery = self.looks_like_gallery(candidates)
-        if not self._host or (gallery and not self._is_gallery):
+    def settle(self, page_url: str) -> None:
+        """The page that published the row's first picture owns the album, once."""
+        if not self._host:
             self._host = _source_host(page_url)
-            self._is_gallery = gallery
 
-    def admits(self, page_url: str, candidates: Sequence[ImageCandidate]) -> bool:
-        """True while the page is the home, the album is still unclaimed, or it is a gallery."""
-        return (
-            not self._host
-            or _source_host(page_url) == self._host
-            or self.looks_like_gallery(candidates)
-        )
+    def admits(self, page_url: str) -> bool:
+        """True while the page is the home, or before any home exists."""
+        return not self._host or _source_host(page_url) == self._host
 
 
 def _source_host(url: str) -> str:
@@ -1300,7 +1279,6 @@ def _source_allowed(
     album: _AlbumSource,
     config: PipelineConfig,
     page_url: str,
-    candidates: Sequence[ImageCandidate],
     url: str,
     keys: ModelKeys,
     brand: str | None,
@@ -1309,15 +1287,14 @@ def _source_allowed(
 ) -> bool:
     """May this file join the album?  One answer, asked in two places (S22.source_lock).
 
-    The home admits itself, an unclaimed album admits anyone, and a page carrying its own
-    gallery is admitted because it is the better album.  Any other shop may fill a row that
-    is still short of ``min_required_images``, but only with proof - the file has to carry
-    this row's own key or line word, the same evidence S4 demands.  The answer is computed
-    when the picture is *published*, not when it is found: a below-floor reject from shop A
-    becomes an offer while no home exists yet, and A may not slip in later through the last
-    resort.
+    The home admits itself, and an album nobody has claimed yet admits anyone.  Every other
+    shop may fill a row that is still short of ``min_required_images``, but only with proof -
+    the file has to carry this row's own key or line word, the same evidence S4 demands.  The
+    answer is computed when the picture is *published*, not when it is found: a below-floor
+    reject from shop A becomes an offer while no home exists yet, and A may not slip in later
+    through the last resort.
     """
-    if not config.album_source_lock_enabled or album.admits(page_url, candidates):
+    if not config.album_source_lock_enabled or album.admits(page_url):
         return True
     return len(accepted) < config.min_required_images and url_anchored_to_row(
         url, keys, brand=brand, own_terms=own_terms
@@ -2030,7 +2007,6 @@ def _consume_candidates(
             album=album,
             config=config,
             page_url=page_url,
-            candidates=candidates,
             url=candidate.url,
             keys=keys,
             brand=brand,
@@ -2326,7 +2302,7 @@ def _consume_candidates(
         if len(accepted) > published_before:
             # The page that published owns the album - and a real gallery takes it over from
             # a shop that only handed over a stray file (S22.source_lock).
-            album.settle(page_url, candidates)
+            album.settle(page_url)
 
 
 def _probe_dimensions(

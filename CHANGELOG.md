@@ -56,6 +56,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refrigerator, washing machine, yellow sale template) and over a loopback-HTTP `--dry-run`.
 
 ### Changed
+- **A page's size is not a ticket (S22.source_lock, 2026-10-19).** The tightening above still
+  let any page offering ≥2 gallery images **take the album over** from the shop that published
+  first. On the washing-machine proof run that door published `hwm-85-1709.png` — another model
+  — on the `851708` row, a nameless `UntitledProject_71_…` on a Midea row, and two
+  `WhatsApp-Image-…` files on rows the owner had already complained about: 7 of 41 publishing
+  rows still held more than one shop. A retailer page always "looks like a gallery", so the size
+  of a page proves nothing about whether its files are *this* product. The exception is deleted:
+  the first published picture's shop owns the album, full stop, and every other shop is admitted
+  file by file only by the canonical proof (`url_anchored_to_row`) and only while the row is
+  short. `album_lock_min_curated` is removed with it — no dead config field.
 - **The album has one owner from its first picture (S22.source_lock, 2026-10-19).** The lock used
   to form only on a page that looked like a gallery (`album_lock_min_curated` curated candidates),
   so a row fed by two shops that each carried a single file had **no home at all** and mixed them
