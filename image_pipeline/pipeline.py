@@ -363,7 +363,7 @@ def finalize_and_upload(
     # The stem the pictures were written under.  Recomputing it here rather than
     # reading it back off the paths keeps the sheet's ``images`` column and the files
     # on disk derived from one call, so they cannot drift apart.
-    prefix = filename_prefix(keys, task.title)
+    prefix = task.name_prefix_override or filename_prefix(keys, task.title)
 
     try:
         per_platform = _upload_finals(task, images, deps, config, platforms)
@@ -2393,7 +2393,7 @@ def _compose_and_save(
     )
     # One stem shared by every platform: the same photograph is then comparable across
     # ``digi/``, ``alfa/`` and ``website/`` by filename alone (owner decision 2026-10-13).
-    name = f"{filename_prefix(keys, task.title)}_{index}.jpg"
+    name = f"{task.name_prefix_override or filename_prefix(keys, task.title)}_{index}.jpg"
     final_paths: list[tuple[str, Path]] = []
     for platform in deps.platforms.platforms:
         prepared = _load_prepared_template(config, platform.template_path)

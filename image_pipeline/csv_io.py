@@ -241,6 +241,80 @@ def filename_prefix(keys: ModelKeys, title: str) -> str:
     return f"product-{digest[:8]}"
 
 
+#: Title words are split on anything a filename may not carry.
+_TITLE_WORD_RE = re.compile(r"[^A-Za-z0-9]+")
+
+
+def _title_rest_words(keys: ModelKeys, title: str) -> tuple[str, ...]:
+    """The title's distinguishing words, uppercased: what is left after the code.
+
+    Every alphanumeric piece of every code token is the code, not a word - a code
+    like "MSAG2B-12HRDN1-QC0" is one token, but splitting the title on punctuation
+    shatters it into three.
+    """
+    code_pieces = {
+        piece.casefold() for token in keys.tokens for piece in _TITLE_WORD_RE.split(token) if piece
+    }
+    words = (_prefix_token(word.upper()) for word in _TITLE_WORD_RE.split(title) if word)
+    return tuple(word for word in words if word and word.casefold() not in code_pieces)
+
+
+def _stem_loses_punctuation(title: str, tokens: tuple[str, ...]) -> bool:
+    """True when the title carries a character the stem cannot carry back.
+
+    The fold keeps ASCII letters, digits and " "; a code token keeps its own
+    internal hyphens verbatim ("MSAG2B-12HRDN1-QC0").  Anything else - a "_",
+    a "/", a "(", a "ß" - is distinguishing information two different folder
+    names could hinge on, and the stem would print them identically.
+    """
+    bare = title
+    for token in tokens:
+        bare = bare.replace(token, " ", 1)
+    return any(not (ch.isascii() and ch.isalnum()) and ch != " " for ch in bare)
+
+
+def _fold_is_lossy(keys: ModelKeys, title: str, stem: str, rest: tuple[str, ...]) -> bool:
+    """True when the stem cannot tell two different titles apart.
+
+    Three ways that happens: ``filename_prefix`` cut code tokens, the REST words
+    did not fit the budget, or the title carries punctuation the stem drops -
+    "Black/White", "Black-White" and "Black White" fold to the same words but
+    are different folder names.
+    """
+    tokens = tuple(clean for clean in (_prefix_token(token) for token in keys.tokens) if clean)
+    if stem != "_".join(tokens):
+        return True  # filename_prefix dropped or hard-sliced code tokens
+    if "_".join((stem, *rest)) != _join_within_budget((stem, *rest), MAX_PREFIX_CHARS):
+        return True  # the REST words did not fit the budget
+    return _stem_loses_punctuation(title, tokens)
+
+
+def local_filename_prefix(keys: ModelKeys, title: str) -> str:
+    """Option 3 stem: the folder title's own words join the model code.
+
+    Colourways of one code live in separate folders (``…QC0 Black``, ``…QC0 White``)
+    but share the D7 code-only stem, and WordPress identifies media by filename -
+    one stem would replace the other colourway's pictures.  The rest of the title
+    uppercased keeps every folder's files distinct; whenever that fold could hide a
+    difference between two titles (budget cuts, dropped punctuation) the stem ends
+    in a hash of the exact title instead, so distinct titles never share a stem.
+    """
+    stem = filename_prefix(keys, title)
+    if not keys.tokens:
+        # The no-code fallback already hashes the whole title, so it is unique per
+        # folder; there is no shared code stem to disambiguate.
+        return stem
+    rest = _title_rest_words(keys, title)
+    if _fold_is_lossy(keys, title, stem, rest):
+        # The stem is cut to make room: one already at the budget would swallow the
+        # digest whole.  The REST words go - appending them could push it back out.
+        digest = sha256_bytes(title.encode("utf-8"))[:6]
+        return guard_windows_name(f"{stem[: MAX_PREFIX_CHARS - 7]}_{digest}")
+    if not rest:
+        return stem
+    return guard_windows_name(_join_within_budget((stem, *rest), MAX_PREFIX_CHARS))
+
+
 # --------------------------------------------------------------------------- #
 # atomic writers
 # --------------------------------------------------------------------------- #
