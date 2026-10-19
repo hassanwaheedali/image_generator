@@ -210,6 +210,9 @@ class AcceptedImage:
     raw_path: Path
     square_path: Path
     final_paths: tuple[tuple[str, Path], ...]
+    #: The page this picture was taken from (``S22.source_lock`` keeps an album to one
+    #: source, and an owner reviewing a mixed gallery needs to see where each file came from).
+    page_url: str = ""
 
     def final_path(self, key: str) -> Path:
         """The composed final for one platform.

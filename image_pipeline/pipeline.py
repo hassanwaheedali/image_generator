@@ -14,7 +14,7 @@ import logging
 import shutil
 import threading
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -626,6 +626,9 @@ def process_product(
         config.image_full_download_max_per_page,
         config.image_full_download_max_per_row,
     )
+    #: S22.source_lock: the shop whose gallery this album belongs to, claimed by the first
+    #: real gallery that publishes a picture.
+    album = _AlbumSource(config.album_lock_min_curated)
     salvage: list[SalvageOffer] = []
     #: S20.mixed-shade: the (head, shade) the first shade-bearing page fixed this gallery to.
     gallery_colour: list[tuple[str, str]] = []
@@ -722,6 +725,7 @@ def process_product(
             rejections=rejections,
             notes=notes,
             budget=budget,
+            album=album,
             salvage=salvage,
             gallery_colour=gallery_colour,
             defer_tolerated=True,
@@ -858,6 +862,7 @@ def process_product(
             rejections=rejections,
             notes=notes,
             budget=budget,
+            album=album,
             salvage=salvage,
             gallery_colour=gallery_colour,
             defer_tolerated=False,
@@ -1190,6 +1195,48 @@ class _DownloadBudget:
         return self._row_left <= 0
 
 
+class _AlbumSource:
+    """Which page owns this row's album (safeguard S22.source_lock).
+
+    Owner, 2026-10-17: "it must download image from one source not too many, because too
+    many can cause different varieties ... we choose the best one from one, not one here
+    and one from other source".  A gallery is one product photographed once; two shops'
+    sets differ in crop, in light and - live in the washing-machine run - in which
+    variant of the model stands in the frame.
+
+    The home is the first page that both gives the row a published picture and looks like
+    a gallery of its own (``album_lock_min_curated`` curated candidates), so a page
+    carrying one stray hero image never closes the row's other sources.  The key is the
+    **page's** host, never the image host: ``cdn.shopify.com`` serves thousands of shops.
+    """
+
+    def __init__(self, min_curated: int) -> None:
+        self._min_curated = max(2, min_curated)
+        self._host = ""
+
+    @property
+    def host(self) -> str:
+        """The shop the album belongs to, or "" while no home is claimed."""
+        return self._host
+
+    def lock(self, page_url: str, candidates: Sequence[ImageCandidate]) -> None:
+        """Claim the album for this page, once, if the page is a real gallery."""
+        if self._host:
+            return
+        curated = sum(1 for candidate in candidates if candidate.source in GALLERY_IMAGE_SOURCES)
+        if curated >= self._min_curated:
+            self._host = _source_host(page_url)
+
+    def admits(self, page_url: str) -> bool:
+        """True while the page is the home, or before any home exists."""
+        return not self._host or _source_host(page_url) == self._host
+
+
+def _source_host(url: str) -> str:
+    """The shop a page belongs to: its host, minus the ``www.`` decoration."""
+    return (urlsplit(url).hostname or "").lower().removeprefix("www.")
+
+
 def _row_is_done(accepted: list[AcceptedImage], config: PipelineConfig) -> bool:
     """Enough images for this row: early stop if configured, or customer target capped by max."""
     if config.early_stop_when_image_found and len(accepted) >= 1:
@@ -1355,6 +1402,7 @@ def _visit_page(
     rejections: Counter[str],
     notes: list[str],
     budget: _DownloadBudget,
+    album: _AlbumSource,
     salvage: list[SalvageOffer],
     gallery_colour: list[tuple[str, str]],
     defer_tolerated: bool = False,
@@ -1545,6 +1593,7 @@ def _visit_page(
         official_page=host_is_official(resolved_url, brand),
         source_label=source_label,
         budget=budget,
+        album=album,
         salvage=salvage,
     )
     return _PageOutcome(True, True, resolved_url, relaxed, tolerated=tolerated_reason or tail_flag)
@@ -1762,6 +1811,7 @@ def _consume_candidates(
     rejections: Counter[str],
     source_label: str,
     budget: _DownloadBudget,
+    album: _AlbumSource,
     salvage: list[SalvageOffer],
     official_page: bool = False,
 ) -> None:
@@ -1787,6 +1837,25 @@ def _consume_candidates(
             break
 
         verdict = _decide_candidate(candidate, keys, seen_keys)
+        if (
+            verdict is None
+            and config.album_source_lock_enabled
+            and not album.admits(page_url)
+            and not (
+                len(accepted) < config.min_required_images
+                and url_anchored_to_row(
+                    candidate.url, keys, brand=brand, own_terms=task.own_terms
+                )
+            )
+        ):
+            # S22.source_lock (owner 2026-10-17): one album is one shop's gallery.  Another
+            # source may still top a short row up, but only with proof - the file has to
+            # carry this row's own key or line word, which is what kept the 8 kg sibling
+            # out of the 13 kg gallery from ever being a candidate for the gap.
+            verdict = (
+                "S22.source_lock",
+                f"album belongs to {album.host or 'this page'}; picture offered by another source",
+            )
         if (
             verdict is None
             and config.capacity_code_gate_enabled
@@ -2131,12 +2200,14 @@ def _consume_candidates(
             )
 
         seen_keys.add(dedup_key(candidate.url))
+        published_before = len(accepted)
         _compose_and_save(
             task=task,
             keys=keys,
             candidate=candidate,
             used_url=used_url,
             source_label=source_label,
+            page_url=page_url,
             image=image,
             downloaded=downloaded,
             config=config,
@@ -2146,6 +2217,10 @@ def _consume_candidates(
             rejections=rejections,
             fingerprint=fingerprint,
         )
+        if len(accepted) > published_before:
+            # The first picture this page gives the row claims the album for it, provided
+            # the page is a gallery and not one stray file (S22.source_lock).
+            album.lock(page_url, candidates)
 
 
 def _probe_dimensions(
@@ -2174,6 +2249,7 @@ def _compose_and_save(
     candidate: ImageCandidate,
     used_url: str,
     source_label: str,
+    page_url: str = "",
     image: Image.Image,
     downloaded: Image.Image | None = None,
     config: PipelineConfig,
@@ -2250,6 +2326,7 @@ def _compose_and_save(
             raw_path=raw_path,
             square_path=square_path,
             final_paths=tuple(final_paths),
+            page_url=page_url,
         )
     )
     dedup.add(image, candidate.url, fingerprint=fingerprint)
@@ -2260,6 +2337,7 @@ def _compose_and_save(
         detail=(
             f"source={source_label} gallery={candidate.source} "
             f"degraded_isolation={degraded} downloaded={used_url}"
+            + (f" page={page_url}" if page_url else "")
         ),
     )
     LOG.info("[accept] %s | %s | %s", task.title, source_label, candidate.source)

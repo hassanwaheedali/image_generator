@@ -2144,6 +2144,103 @@ def test_the_sibling_refusal_runs_only_while_the_switch_is_on(tmp_path: Path) ->
     assert '"rule_id": "S4.code"' not in decisions
 
 
+def test_a_second_source_never_joins_a_gallery_that_already_has_enough(tmp_path: Path) -> None:
+    """Owner, 2026-10-17: "it must download image from one source not too many ... we choose
+    the best one from one, not one here and one from other source".  Two shops' sets of the
+    same model differ in crop, in light and - in the washing-machine run - in which variant
+    stands in the frame, so the page that owns the album is the album."""
+    config = live_config(tmp_path)
+    first = "https://friendshome.example/cdn/files/haier-130-1217E-1.jpg"
+    second = "https://friendshome.example/cdn/files/haier-130-1217E-2.jpg"
+    other = "https://surmawala.example/cdn/files/haier-130-1217E-3.jpg"
+    page_a = "https://friendshome.example/products/haier-1301217e"
+    page_b = "https://surmawala.example/products/haier-1301217e"
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {page_a: _front_load_page((first, second)), page_b: _front_load_page((other,))},
+        {
+            first: png_bytes(_catalog_artwork()),
+            second: png_bytes(_catalog_artwork(open_lid=True)),
+            other: png_bytes(_catalog_artwork(offset=-0.3, scale=0.42)),
+        },
+    )
+    _, accepted = process_product(
+        task(0, "Haier 1301217E Front Load Washer", (page_a, page_b)), deps, config
+    )
+
+    assert [image.source_url for image in accepted] == [first, second]
+    assert all(image.page_url == page_a for image in accepted)   # every picture names its home
+    decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
+    assert '"rule_id": "S22.source_lock"' in decisions
+    assert "album belongs to friendshome.example" in decisions
+
+
+def test_a_short_row_takes_another_source_only_when_the_file_proves_the_row(
+    tmp_path: Path,
+) -> None:
+    """The top-up door, and what it requires: the row is below ``min_required_images``, so a
+    second shop may join - but only with proof.  ``haier-1301217e-front.png`` carries the
+    row's own key; ``IMG_9931.png`` carries nothing, and an unprovable picture from a second
+    source is exactly the wrong-product risk the lock exists to stop."""
+    config = live_config(tmp_path)
+    hero = "https://friendshome.example/cdn/files/haier-130-1217E-1.jpg"
+    junk = "https://friendshome.example/cdn/files/promo-banner-1200x400.jpg"
+    proven = "https://surmawala.example/cdn/files/haier-1301217e-front.png"
+    unproven = "https://traders.example/cdn/files/IMG_9931.png"
+    page_a = "https://friendshome.example/products/haier-1301217e"
+    page_b = "https://surmawala.example/products/haier-1301217e"
+    page_c = "https://traders.example/products/haier-1301217e"
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {
+            page_a: _front_load_page((hero, junk)),
+            page_b: _front_load_page((proven,)),
+            page_c: _front_load_page((unproven,)),
+        },
+        {
+            hero: png_bytes(_catalog_artwork()),
+            junk: png_bytes(_catalog_artwork(scale=0.98)),
+            proven: png_bytes(_catalog_artwork(open_lid=True)),
+            unproven: png_bytes(_catalog_artwork(offset=-0.3, scale=0.42)),
+        },
+    )
+    _, accepted = process_product(
+        task(0, "Haier 1301217E Front Load Washer", (page_a, page_b, page_c)), deps, config
+    )
+
+    assert [image.source_url for image in accepted] == [hero, proven]
+    decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
+    assert '"rule_id": "S22.source_lock"' in decisions
+    assert "traders.example" in decisions                        # the unproven file is the refusal
+
+
+def test_the_source_lock_runs_only_while_the_switch_is_on(tmp_path: Path) -> None:
+    """One switch, one behaviour: with ``album_source_lock_enabled=False`` the row reads
+    exactly as it did before this rule existed - all three sources may fill it."""
+    config = replace(live_config(tmp_path), album_source_lock_enabled=False)
+    first = "https://friendshome.example/cdn/files/haier-130-1217E-1.jpg"
+    second = "https://friendshome.example/cdn/files/haier-130-1217E-2.jpg"
+    other = "https://surmawala.example/cdn/files/haier-130-1217E-3.jpg"
+    page_a = "https://friendshome.example/products/haier-1301217e"
+    page_b = "https://surmawala.example/products/haier-1301217e"
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {page_a: _front_load_page((first, second)), page_b: _front_load_page((other,))},
+        {
+            first: png_bytes(_catalog_artwork()),
+            second: png_bytes(_catalog_artwork(open_lid=True)),
+            other: png_bytes(_catalog_artwork(offset=-0.3, scale=0.42)),
+        },
+    )
+    _, accepted = process_product(
+        task(0, "Haier 1301217E Front Load Washer", (page_a, page_b)), deps, config
+    )
+
+    assert len(accepted) == 3, [image.source_url for image in accepted]
+    decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
+    assert "S22.source_lock" not in decisions
+
+
 def test_a_row_with_one_exact_image_is_never_topped_up_by_the_tolerated_page(
     tmp_path: Path,
 ) -> None:

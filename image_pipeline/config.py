@@ -224,6 +224,15 @@ class PipelineConfig:
     # *target* still stops the search after 3 images; this is only the hard ceiling on
     # how many may be published.  `--max-images` overrides it per run.
     max_images_per_product: int = 10
+    # Owner decision 2026-10-17 (washing-machine review): "it must download image from one
+    # source not too many, because too many can cause different varieties ... we choose the
+    # best one from one, not one here and one from other source".  The first page that both
+    # publishes a picture and looks like a real gallery owns the album; pictures from other
+    # shops join only to top a short row up, and only when the file proves this row's code.
+    album_source_lock_enabled: bool = True
+    #: A page with fewer curated candidates than this is one stray image, not a gallery, so
+    #: it never owns the album (a single hero shot must not close the row's other sources).
+    album_lock_min_curated: int = 2
     #: A page that carries its own curated gallery (the brand's ``.sd_imgs`` / swiper
     #: slides, JSON-LD product payload, Shopify/Woo/Magento product payload) is read to
     #: the end instead of stopping at ``target_images_per_product``.  Reason, from the
@@ -910,6 +919,11 @@ class PipelineConfig:
             raise ConfigError("gallery_publishes_all_min must be >= 1")
         if self.min_required_images < 1:
             raise ConfigError("min_required_images must be >= 1")
+        if self.album_lock_min_curated < 2:
+            raise ConfigError(
+                "album_lock_min_curated must be >= 2 (one stray image is not a gallery "
+                "and must not close the row's other sources)"
+            )
         if self.gallery_colour_min_agreement < 2:
             raise ConfigError(
                 "gallery_colour_min_agreement must be >= 2: one picture never defines a gallery"
