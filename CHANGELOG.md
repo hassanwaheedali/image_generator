@@ -56,6 +56,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refrigerator, washing machine, yellow sale template) and over a loopback-HTTP `--dry-run`.
 
 ### Changed
+- **The album has one owner from its first picture (S22.source_lock, 2026-10-19).** The lock used
+  to form only on a page that looked like a gallery (`album_lock_min_curated` curated candidates),
+  so a row fed by two shops that each carried a single file had **no home at all** and mixed them
+  freely — live in the final washing-machine dry-run: `haier-1301217GB` published one picture from
+  `friendshome.pk` and one from `aysonline.pk`, the exact "one here and one from other source" the
+  owner reported. Now the page that publishes the row's first picture owns the album; a page
+  carrying its own gallery takes it over from a stray file (the gallery is the better album) and a
+  stray never displaces a settled gallery; every other shop still fills a short row only with the
+  canonical proof. Measured on that same run: 42 publishing rows, 4 of them mixed shops, and 3 of
+  their pictures were second-shop files naming no code — that is the whole cost. `album_lock_min_curated`
+  now decides who may *take over* an album, not who may start one.
 - **`config.py` is the only home for run settings (owner 2026-10-16).** The JSON overlay is
   gone: `--config` no longer exists, `load_config_file` is deleted, and `build_config` reads its
   numbers straight from `PipelineConfig`.  Precedence is now **CLI flag > code default** — no

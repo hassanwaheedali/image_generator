@@ -243,8 +243,12 @@ class PipelineConfig:
     album_coherence_group_spread_max: float = 0.12
     #: Fewer than this on either side and the album has no majority to speak of.
     album_coherence_min_group: int = 2
-    #: A page with fewer curated candidates than this is one stray image, not a gallery, so
-    #: it never owns the album (a single hero shot must not close the row's other sources).
+    #: How many curated candidates make a page a **gallery** for S22.source_lock.  The page
+    #: that publishes the row's first picture owns the album either way; this bar decides what
+    #: may take it over - a page with its own gallery, because that is the better album, while
+    #: one more stray file from a second shop never displaces it (owner 2026-10-19: the
+    #: washing-machine run still mixed two shops precisely because neither looked like a
+    #: gallery, so nothing owned the album and nothing refused the mix).
     album_lock_min_curated: int = 2
     #: A page that carries its own curated gallery (the brand's ``.sd_imgs`` / swiper
     #: slides, JSON-LD product payload, Shopify/Woo/Magento product payload) is read to

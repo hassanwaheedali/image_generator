@@ -2222,8 +2222,9 @@ def test_the_coherence_note_can_be_switched_off(tmp_path: Path) -> None:
 
 def test_a_single_stray_image_never_owns_the_album(tmp_path: Path) -> None:
     """`album_lock_min_curated` is the difference between a gallery and a page that happens
-    to carry one picture.  A stray hero must not close the row's other sources - that would
-    turn the safeguard into a starvation bug (owner: "the official page has only one hero")."""
+    to carry one picture.  The stray publishes and holds the album only until the row's real
+    gallery is found - then the gallery owns it, and the row's pictures keep coming from one
+    shop (owner: "the official page has one hero"; "we choose the best one from one")."""
     config = live_config(tmp_path)
     stray = "https://cdn.friendshome.example/files/haier-130-1217E-hero.jpg"
     gallery = (
@@ -2466,6 +2467,82 @@ def test_a_short_row_with_no_gallery_takes_another_shop_with_proof(tmp_path: Pat
 
     assert len(accepted) == 2                       # proven, so the album grows
     assert {image.page_url for image in accepted} == {page_a, page_b}
+
+
+def test_two_single_image_shops_never_make_one_album(tmp_path: Path) -> None:
+    """The live shape the lock used to miss (final washing-machine dry-run, 2026-10-19):
+    `haier-1301217GB` published one picture from friendshome.pk and one from aysonline.pk
+    because **neither** page looked like a gallery, so no home was ever claimed and the
+    "one source" rule had nothing to enforce.  The page that published first owns the album
+    either way; a shop that carries a real gallery still takes it over, and a stranger still
+    gets in with proof - so this refuses the mix without starving the row."""
+    config = live_config(tmp_path)
+    stray_a = "https://cdn.friendshome.example/files/haier-130-1217GB-1.jpg"
+    stray_b = "https://cdn.aysonline.example/files/image002.jpg"   # names no code, no line
+    page_a = "https://friendshome.example/products/haier-1301217gb"
+    page_b = "https://aysonline.example/products/haier-1301217gb"
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {
+            page_a: _front_load_page_for("Haier 1301217GB", (stray_a,)),
+            page_b: _front_load_page_for("Haier 1301217GB", (stray_b,)),
+        },
+        {
+            stray_a: png_bytes(_catalog_artwork()),
+            stray_b: png_bytes(_catalog_artwork(open_lid=True)),
+        },
+    )
+    _, accepted = process_product(
+        task(0, "Haier 1301217GB Front Load Washer", (page_a, page_b)), deps, config
+    )
+
+    assert [image.source_url for image in accepted] == [stray_a]
+    decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
+    assert '"rule_id": "S22.source_lock"' in decisions
+    assert "album belongs to friendshome.example" in decisions
+
+
+def test_a_gallery_takes_the_album_from_a_stray_file(tmp_path: Path) -> None:
+    """The exception that keeps the rule from becoming a starvation bug: the row's first
+    picture came from a shop with one file on the page, and the brand's own six-view gallery
+    is found later.  The gallery is the better album, so it owns the row from there on and
+    its own views keep publishing - the stray is not thrown away, it is simply not followed
+    by third shops."""
+    config = replace(
+        live_config(tmp_path), target_images_per_product=4, max_images_per_product=4
+    )  # keep the row searching, so the third shop is reached and judged
+    stray = "https://cdn.friendshome.example/files/haier-130-1217E-hero.jpg"
+    gallery = tuple(
+        f"https://cdn.surmawala.example/files/haier-130-1217E-{index}.jpg" for index in (1, 2)
+    )
+    stranger = "https://cdn.aysonline.example/files/image003.jpg"
+    page_a = "https://friendshome.example/products/haier-1301217e"
+    page_b = "https://surmawala.example/products/haier-1301217e"
+    page_c = "https://aysonline.example/products/haier-1301217e"
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {
+            page_a: _front_load_page_for("Haier 1301217E", (stray,)),
+            page_b: _front_load_page_for("Haier 1301217E", gallery),
+            page_c: _front_load_page_for("Haier 1301217E", (stranger,)),
+        },
+        {
+            stray: png_bytes(_catalog_artwork()),
+            gallery[0]: png_bytes(_catalog_artwork(open_lid=True)),
+            gallery[1]: png_bytes(_catalog_artwork(offset=-0.3, scale=0.42)),
+            stranger: png_bytes(_catalog_artwork(offset=0.1)),
+        },
+    )
+    _, accepted = process_product(
+        task(0, "Haier 1301217E Front Load Washer", (page_a, page_b, page_c)), deps, config
+    )
+
+    pages = [image.page_url for image in accepted]
+    assert pages.count(page_b) >= 2                 # the gallery publishes its own views
+    assert stranger not in [image.source_url for image in accepted]
+    assert set(pages) == {page_a, page_b}           # and no third shop joins
+    decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
+    assert "album belongs to surmawala.example" in decisions
 
 
 def test_a_second_source_never_joins_a_gallery_that_already_has_enough(tmp_path: Path) -> None:
