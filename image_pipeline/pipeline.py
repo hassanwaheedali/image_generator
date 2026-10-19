@@ -82,6 +82,7 @@ from model_matching import (
     url_belongs_to_other_model,
     url_names_foreign_brand,
     url_names_other_capacity_code,
+    url_names_other_family_code,
     url_names_other_product_line,
     url_names_sibling_product,
 )
@@ -1798,6 +1799,24 @@ def _consume_candidates(
             verdict = (
                 "S4",
                 "image URL names another capacity code than this row (different model)",
+            )
+        if (
+            verdict is None
+            and config.model_code_shape_gate
+            and url_names_other_family_code(candidate.url, keys, tail_min=config.model_code_tail_min)
+            and not url_anchored_to_row(
+                candidate.url, keys, brand=brand, own_terms=task.own_terms
+            )
+        ):
+            # S4's fourth half (owner's washing-machine review, 2026-10-17): the 13 kg
+            # "1301217E" row published the 8 kg "hwm80-1217" - the same number family, a
+            # different machine.  Neither prefix nor capacity shape can compare two codes
+            # that are pure digits, so the digit structure does it: a shared tail with a
+            # different head names another model.  The file stays when it carries one of
+            # the row's own keys - a comparison sheet says both numbers.
+            verdict = (
+                "S4.code",
+                "image file names another capacity of this number family (sibling model)",
             )
         if (
             verdict is None

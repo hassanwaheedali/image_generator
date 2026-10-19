@@ -46,7 +46,8 @@ variable always wins. **Never print, log, commit or echo the key value.**
 ## Code conventions
 
 - One rule = one named function + one direct test + one `rule_id` in `decisions.jsonl`. Rule ids are
-  `S1`..`S18` plus the scoped sub-rules `S7.band`, `S7.seam`, `S7.official`, `S11.fetch`, `S13.fetch`,
+  `S1`..`S18` plus the scoped sub-rules `S4.code` (a sibling capacity of the same number family in the
+  file name - digit structure, not letters), `S7.band`, `S7.seam`, `S7.official`, `S11.fetch`, `S13.fetch`,
   `S15.fetch`, `S15.relaxed`, `S15.tolerated`, `S16` (Visual Color Gate), `S17` (Intra-Gallery Consistency)
   and `S18` (Crop Closure - the one guard that never rejects: it grows the isolation box so a crop
   cannot cut the product, and is switched off by `isolation_crop_closure = False`).

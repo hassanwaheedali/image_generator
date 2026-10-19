@@ -2086,6 +2086,64 @@ def test_two_genuine_angles_survive_the_second_look(tmp_path: Path) -> None:
     assert len(accepted) == 2, "the second angle was folded - the album lost a real picture"
 
 
+def _front_load_page(image_urls: tuple[str, ...]) -> str:
+    """A shop page proven to be the 13 kg row, carrying the gallery the owner found."""
+    images = "".join(f'<img src="{url}">' for url in image_urls)
+    return (
+        "<html><head><title>Haier 1301217E</title></head>"
+        "<body><h1>Haier 1301217E</h1>"
+        f"<div class='product-gallery'>{images}</div></body></html>"
+    )
+
+
+def test_the_sibling_capacity_of_the_row_is_refused_as_s4_code(tmp_path: Path) -> None:
+    """Owner, 2026-10-17: the 13 kg "1301217E" row published the 8 kg "hwm80-1217" twice.
+    The digit limb must stop it at the URL, before a byte is fetched, and say which rule
+    refused it on the record."""
+    config = live_config(tmp_path)
+    own = "https://shop.example/cdn/files/haier-130-1217E.jpg"
+    sibling = "https://shop.example/cdn/files/haier-hwm80-1217-washing-machine.jpg"
+    page = "https://shop.example/products/haier-1301217e"
+    deps, _, images_fetched, _ = build_deps(
+        tmp_path,
+        {page: _front_load_page((own, sibling))},
+        {
+            own: png_bytes(_catalog_artwork()),
+            sibling: png_bytes(_catalog_artwork(offset=-0.3, scale=0.42)),
+        },
+    )
+    _, accepted = process_product(
+        task(0, "Haier 1301217E Front Load Washer", (page,)), deps, config
+    )
+
+    assert [image.source_url for image in accepted] == [own]
+    decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
+    assert '"rule_id": "S4.code"' in decisions
+    assert "another capacity of this number family" in decisions
+    assert sibling not in images_fetched.requested
+
+
+def test_the_sibling_refusal_runs_only_while_the_switch_is_on(tmp_path: Path) -> None:
+    """One switch, one behaviour: with ``model_code_shape_gate=False`` the row reads exactly
+    as it did before this rule existed."""
+    config = replace(live_config(tmp_path), model_code_shape_gate=False)
+    own = "https://shop.example/cdn/files/haier-130-1217E.jpg"
+    sibling = "https://shop.example/cdn/files/haier-hwm80-1217-washing-machine.jpg"
+    page = "https://shop.example/products/haier-1301217e"
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {page: _front_load_page((own, sibling))},
+        {
+            own: png_bytes(_catalog_artwork()),
+            sibling: png_bytes(_catalog_artwork(offset=-0.3, scale=0.42)),
+        },
+    )
+    process_product(task(0, "Haier 1301217E Front Load Washer", (page,)), deps, config)
+
+    decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
+    assert '"rule_id": "S4.code"' not in decisions
+
+
 def test_a_row_with_one_exact_image_is_never_topped_up_by_the_tolerated_page(
     tmp_path: Path,
 ) -> None:

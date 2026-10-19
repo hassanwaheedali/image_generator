@@ -28,7 +28,7 @@ from urllib.parse import unquote, urlsplit
 from models import ModelKeys, ProductTask
 from similarity import similar
 from textnorm import WHITESPACE_RE, normalize_key, normalize_text
-from url_filters import KNOWN_BRANDS, page_product_brand
+from url_filters import IMAGE_EXTENSIONS, KNOWN_BRANDS, page_product_brand
 from variant_terms import (
     COLOUR_FAMILIES,
     colour_phrase,
@@ -1627,6 +1627,237 @@ def url_names_other_capacity_code(url: str, keys: ModelKeys) -> bool:
     if not theirs:
         return False
     return not (ours & theirs)
+
+
+#: The shortest digit tail that names a product family rather than a size or a view.
+#: Two digits is a capacity ("60", "50", "18"); three is where a model number begins,
+#: so the three public functions below default to it and ``model_code_tail_min`` can
+#: raise it per run.
+_FAMILY_TAIL_MIN = 3
+
+#: The largest number a trailing photo counter may carry: ``…-1217-1``, ``…-1217-01`` and
+#: ``…-1217-001`` are the first, second and third picture of the drum named just before.
+_COUNTER_MAX_VALUE = 99
+
+#: A number of at most this many digits followed by a unit word is a shipping quantity
+#: ("9kg", "1200w", "1.5ton").  Longer than that, digits plus letters is a model code
+#: wearing a unit lookalike - ``1217GB`` is gold/black on a Haier drum, not 1217 bytes.
+_QUANTITY_MAX_DIGITS = 3
+
+
+def _is_quantity(segment: str) -> bool:
+    """Whether a segment states how much of something there is, not which model it is."""
+    if not UNIT_QUANTITY_RE.match(segment):
+        return False
+    digits = re.match(r"\d+", segment)
+    return digits is not None and len(digits.group()) <= _QUANTITY_MAX_DIGITS
+
+
+def _is_code_noise(segment: str) -> bool:
+    """Whether a name part says how big, how many or when - never which model.
+
+    The tables S4 already trusts: a pixel size (``800x600``), an upload date
+    (``20241201``), an editor counter (``img1234``), a hex asset id, a quantity
+    (``9kg``).  Each of them would otherwise pose as part of a model number.
+    """
+    return _is_quantity(segment) or any(p.match(segment) for p in _NOISE_TOKEN_RES)
+
+
+def code_digit_clusters(text: str) -> tuple[tuple[str, ...], ...]:
+    """The digit groups of every *contiguous* code a text writes, in written order.
+
+    One model code is written as one piece, so a cluster is a run of neighbouring name
+    parts that carry digits: ``Haier-HWS-60-50.webp`` -> ``(("60", "50"),)`` and
+    ``1301217E`` -> ``(("1301217"),)`` - the letters and separators a shop re-arranges at
+    will (``HWM 80-1217``, ``hwm801217``) cannot change the digits.
+    A word *between* two numbers means two statements about the product, and that is the
+    difference between a code and a spec sheet: ``midea-1400-rpm-w120-front-load`` says
+    1400 revolutions and model W120, so it yields ``(1400)`` and ``(120)`` and never the
+    invented ``1400120`` that would accuse the row of another capacity (owner review,
+    2026-10-17 - the same trap for ``kenwood-13-cu-ft-320gd``).  A name part that is
+    commerce noise closes the cluster too.
+    """
+    done: list[tuple[str, ...]] = []
+    current: list[str] = []
+    for segment in re.split(r"[^A-Za-z0-9]+", normalize_text(text)):
+        runs = () if _is_code_noise(segment) else re.findall(r"\d+", segment)
+        if runs:
+            current.extend(runs)
+        elif current:
+            done.append(_complete_code(tuple(current)))
+            current = []
+    if current:
+        done.append(_complete_code(tuple(current)))
+    return tuple(done)
+
+
+def _is_trailing_counter(group: str, rest: tuple[str, ...]) -> bool:
+    """Whether the last group of a cluster is *which picture*, not *which machine*.
+
+    A single digit always is (``HWM_80-1217-1``).  A longer one is a counter only while a
+    family number is already written beside it, so ``HWS-60-50`` keeps its ``50`` and
+    ``W90DG5U34`` keeps its ``34``, while ``…-1217-01`` and ``…-1217-001`` - the shop's
+    second and third photo of the same drum - go.
+    """
+    if len(group) == 1:
+        return True
+    return int(group) <= _COUNTER_MAX_VALUE and any(
+        len(other) >= _FAMILY_TAIL_MIN for other in rest
+    )
+
+
+def _complete_code(runs: tuple[str, ...]) -> tuple[str, ...]:
+    """A cluster as the code it means: photo counters off the end, a doubled code once.
+
+    Then a code written twice collapses to one period: these sheets repeat the model in
+    the title (``WA21CK6745BVRT-WA21CK6745BVRT``) and S4 reads that as a single key, so
+    its digits come out ``21 6745 21 6745`` while every shop writes them once - without
+    the collapse the row refuses its own hero (measured on the Samsung rows of
+    2026-10-17).
+    """
+    while len(runs) >= 2 and _is_trailing_counter(runs[-1], runs[:-1]):
+        runs = runs[:-1]
+    for period in range(1, len(runs) // 2 + 1):
+        if len(runs) % period == 0 and runs[:period] * (len(runs) // period) == runs:
+            return runs[:period]
+    return runs
+
+
+def _colourway_tail(text: str) -> str:
+    """The letters glued after the last digits of a code - the finish inside the model.
+
+    ``1301217E`` and ``1301217GB`` are one number in two colours, and this repository
+    treats that suffix as identity (owner 2026-10-07: the colourway is written inside the
+    model code), so equal digits must never prove them one product.  Only the letters
+    glued to the code itself count - ``…-1217E-white-9kg`` still says ``E`` - and an
+    image extension is not a finish.
+    """
+    body = normalize_text(text)
+    dot = body.rfind(".")
+    if dot >= 0 and body[dot + 1 :] in IMAGE_EXTENSIONS:
+        body = body[:dot]
+    for segment in reversed(re.split(r"[^A-Za-z0-9]+", body)):
+        if not segment or _is_code_noise(segment):
+            continue
+        match = re.search(r"\d+([a-z]*)$", segment)
+        if match:
+            return match.group(1)
+    return ""
+
+
+def _family_tail(
+    our_groups: tuple[str, ...], their_groups: tuple[str, ...], *, tail_min: int
+) -> str:
+    """The number both codes end with, as somebody actually wrote it ("" = no family).
+
+    A group of at least ``tail_min`` digits that both digit strings end in.  Reading
+    the *longest common suffix* instead would eat a head digit: ``1301217`` against
+    ``801217`` shares the suffix ``01217``, which is neither the row's number nor the
+    file's, and the row ``DWF 85-1214`` against its own file ``Dawlance-85214`` shares
+    ``214`` - a coincidence created by a moved hyphen, not a family.
+    """
+    ours, theirs = "".join(our_groups), "".join(their_groups)
+    shared = [
+        group
+        for group in set(our_groups) | set(their_groups)
+        if len(group) >= tail_min and ours.endswith(group) and theirs.endswith(group)
+    ]
+    return max(shared, key=len, default="")
+
+
+def _codes_are_sibling_models(
+    our_groups: tuple[str, ...], their_groups: tuple[str, ...], *, tail_min: int
+) -> bool:
+    """One pair of codes: same family number, different capacity in front of it."""
+    tail = _family_tail(our_groups, their_groups, tail_min=tail_min)
+    if not tail:
+        return False
+    our_digits = "".join(our_groups)
+    their_digits = "".join(their_groups)
+    our_head = our_digits[: len(our_digits) - len(tail)]
+    their_head = their_digits[: len(their_digits) - len(tail)]
+    if not our_head or not their_head:
+        return False
+    # Trailing zeros are the unit, not the machine: a row written "110-688S8" (tenths of
+    # a kilogram) and its own file "haier-11-688-top-load" (kilograms) are one product,
+    # while "130" against "80" is 13 kg beside 8 kg.
+    return our_head.rstrip("0") != their_head.rstrip("0")
+
+
+def code_names_other_family_code(
+    ours: str, theirs: str, *, tail_min: int = _FAMILY_TAIL_MIN
+) -> bool:
+    """Safeguard S4, digit half: the file names a *sibling* of our number family.
+
+    ``True`` -> reject.  Both codes end in the same family number - a group of at least
+    ``tail_min`` digits somebody wrote whole - while the digits before it disagree: the
+    owner's 2026-10-17 run published the 8 kg ``hwm80-1217`` and
+    ``Haier_Single_Washing_Machine_HWM_80-1217-1`` into the gallery of the 13 kg
+    ``1301217E`` row.  S4's prefix half was blind to it (a digit-headed code has no
+    alphabetic prefix, so ``if not product_prefixes: return False`` gave up) and the
+    capacity half needs the ``\\d{2,3}[a-z]`` shape on both sides, which neither code
+    writes.  The digit structure sees it directly: family ``1217`` shared, ``130``
+    against ``80``.
+
+    Each further condition is a false positive the live measurement ruled out: a file
+    that writes the family and no head (``…/1217-front-view.jpg``) claims nothing about
+    the capacity; numbers separated by a word are specs, not one code; a tail nobody
+    wrote whole is a coincidence; and a file that carries our own code clears itself.
+    """
+    if code_confirms_this_model(ours, theirs, tail_min=tail_min):
+        return False
+    return any(
+        _codes_are_sibling_models(our_code, their_code, tail_min=tail_min)
+        for our_code in code_digit_clusters(ours)
+        for their_code in code_digit_clusters(theirs)
+    )
+
+
+def code_confirms_this_model(
+    ours: str, theirs: str, *, tail_min: int = _FAMILY_TAIL_MIN
+) -> bool:
+    """The proof half of the same reading: both sides write one and the same code.
+
+    ``6050`` confirms ``HWS-60-50`` and ``W90DG5U34ABFA`` confirms ``WW90DG5U34ABFA`` -
+    different shops, same machine.  It is a *proof*, so it may only agree or say
+    nothing: ``…U34ABFA`` against ``…U36ABFA`` is two products, and ``1301217E`` against
+    ``1301217GB`` is one number in two colours - the colourway suffix is identity here,
+    so a digit match alone must never claim the two rows are one product.
+    """
+    if _colourway_tail(ours) != _colourway_tail(theirs):
+        return False
+    our_codes = ["".join(cluster) for cluster in code_digit_clusters(ours)]
+    their_codes = ["".join(cluster) for cluster in code_digit_clusters(theirs)]
+    return any(
+        len(digits) >= tail_min and digits == other
+        for digits in our_codes
+        for other in their_codes
+    )
+
+
+def url_names_other_family_code(
+    url: str, keys: ModelKeys, *, tail_min: int = _FAMILY_TAIL_MIN
+) -> bool:
+    """S4's digit half read off an image URL: this row's codes against the file's.
+
+    Only the row's own key tokens speak - a row S4 cannot read a code from stays silent,
+    because its digits are then inches, tonnages and BTU ratings, and a file naming
+    those would be accused for nothing.  One token writing the file's digits clears the
+    file; otherwise a single token that shares the family tail and names a different
+    head rejects it.  Only the file name is read - a category folder or an upload date
+    is not a statement about the product.
+    """
+    if not keys.tokens:
+        return False
+    filename = urlsplit(unquote(url)).path.rsplit("/", 1)[-1]
+    if not filename:
+        return False
+    if any(code_confirms_this_model(code, filename, tail_min=tail_min) for code in keys.tokens):
+        return False
+    return any(
+        code_names_other_family_code(code, filename, tail_min=tail_min)
+        for code in keys.tokens
+    )
 
 
 #: The shortest a word may be to name a product line: ``mega``, ``frost``, ``ifga``

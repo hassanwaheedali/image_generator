@@ -589,6 +589,16 @@ class PipelineConfig:
     #: S4 half: reject a file whose capacity code contradicts the row's (row "18X" vs
     #: file "18G").  Only runs when both sides carry such a code and they share none.
     capacity_code_gate_enabled: bool = True
+    #: S4 half: read the *digit structure* of the model code (owner's washing-machine
+    #: review, 2026-10-17).  The row "1301217E" published the 8 kg sibling "hwm80-1217"
+    #: twice: the prefix limb is blind to a digit-headed code (no alphabetic prefix to
+    #: compare) and the capacity limb needs the "\d{2,3}[a-z]" shape on both sides, which
+    #: neither code writes.  Shared tail, different head -> another model.
+    model_code_shape_gate: bool = True
+    #: The shortest digit tail that names a product family.  Two digits is a capacity
+    #: ("60", "50"), three is where a model number starts, so lowering this reads size
+    #: suffixes as model statements.
+    model_code_tail_min: int = 3
     marketing_layout_enabled: bool = True
     marketing_max_ink_fraction: float = 0.75
     marketing_max_texture: float = 32.0
@@ -1100,6 +1110,8 @@ class PipelineConfig:
                 raise ConfigError(f"{name} must be >= 0")
         if self.template_footer_min_band_height < 1:
             raise ConfigError("template_footer_min_band_height must be >= 1 (0 turns one stray row into shop art)")
+        if self.model_code_tail_min < 3:
+            raise ConfigError("model_code_tail_min must be >= 3 (2 digits is a capacity, not a model family)")
         if not 0 <= self.promo_band_white_level <= 255:
             raise ConfigError("promo_band_white_level must be in [0, 255]")
         if not 0 <= self.promo_band_gap_min_mean <= 255:

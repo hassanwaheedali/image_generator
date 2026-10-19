@@ -9,7 +9,10 @@ import pytest
 from model_matching import (
     build_model_keys,
     capacity_codes,
+    code_confirms_this_model,
+    code_digit_clusters,
     code_like_tokens,
+    code_names_other_family_code,
     extract_colour_families,
     extract_variant_facts,
     find_matching_keys,
@@ -28,6 +31,7 @@ from model_matching import (
     url_belongs_to_other_model,
     url_names_foreign_brand,
     url_names_other_capacity_code,
+    url_names_other_family_code,
     variant_conflicts,
 )
 
@@ -750,6 +754,198 @@ def test_s4_capacity_code_stays_quiet_when_no_code_is_comparable() -> None:
         assert not url_names_other_capacity_code(url, keys), url
     blank = build_model_keys("Orient Split AC Super Dc Inverter")
     assert not url_names_other_capacity_code(_WRONG, blank)
+
+
+# --------------------------------------------------------------------------- #
+# S4, fourth limb - the digit structure of the model code (sibling capacity)
+# --------------------------------------------------------------------------- #
+
+#: The live hole (owner run 2026-10-17, row "Haier 1301217E" - a 13 kg machine): the
+#: gallery that published them named the 8 kg sibling of the same number family.
+_SIBLING_PLAIN = (
+    "https://lahorelectronics.com/wp-content/uploads/2025/09/"
+    "haier-hwm80-1217-washing-machine.webp"
+)
+_SIBLING_INDEXED = (
+    "https://www.alfatah.com.pk/wp-content/uploads/2026/07/"
+    "Haier_Single_Washing_Machine_HWM_80-1217-1.webp"
+)
+_OWN_1301217E = "https://friendshome.pk/cdn/shop/files/130-1217E.jpg"
+
+
+def test_code_digit_clusters_read_only_contiguous_codes() -> None:
+    """Letters and separators are spelling; a *word* between numbers is a new statement."""
+    assert code_digit_clusters("Haier-HWS-60-50.webp") == (("60", "50"),)
+    assert code_digit_clusters("1301217E") == (("1301217",),)
+    assert code_digit_clusters("hwm80-1217") == (("80", "1217"),)
+    # A spec word breaks the cluster, so a speed never becomes part of a model number.
+    assert code_digit_clusters("midea-1400-rpm-w120-front-load") == (("1400",), ("120",))
+    assert code_digit_clusters("kenwood-13-cu-ft-freezer-320gd") == (("13",), ("320",))
+    # Commerce noise: a pixel size, an upload date, a quantity, an editor counter.
+    assert code_digit_clusters("product-hero-800x600.jpg") == ()
+    assert code_digit_clusters("Haier 1301217E 20241201 9kg") == (("1301217",),)
+    assert code_digit_clusters("photo-1217-front-view.jpg") == (("1217",),)
+
+
+def test_a_doubled_title_code_collapses_to_one_and_counters_go() -> None:
+    assert code_digit_clusters("WA21CK6745BVRT-WA21CK6745BVRT") == (("21", "6745"),)
+    assert code_digit_clusters("HWM_80-1217-1") == (("80", "1217"),)
+    assert code_digit_clusters("Haier-Single-HWM-80-1217-01") == (("80", "1217"),)
+    # A short trailer that completes the code itself stays: 60-50 is the model, not photo 50.
+    assert code_digit_clusters("Haier-HWS-60-50-2") == (("60", "50"),)
+
+
+def test_a_shared_family_tail_with_a_different_head_names_another_model() -> None:
+    assert code_names_other_family_code("1301217E", "hwm80-1217")
+    assert code_names_other_family_code("1301217E", "HWM_80-1217-1")
+    assert code_names_other_family_code("1301217E", "Haier_Single_HWM_80-1217-01")
+    assert code_names_other_family_code("110-688S8", "haier-hwm80-688")
+
+
+def test_the_same_digits_written_differently_is_the_same_model() -> None:
+    """Hyphenation, a glued brand, a view counter: the digits decide, not the spelling."""
+    for ours, theirs in (
+        ("1301217E", "130-1217E"),
+        ("1301217E", "haier-130-1217E-white-9kg"),
+        ("6050", "HWS-60-50"),
+        ("6050", "HWS-60-50-2"),
+        ("W90DG5U34ABFA", "WW90DG5U34ABFA"),
+        ("DW-7500C", "7500C"),
+    ):
+        assert code_confirms_this_model(ours, theirs), (ours, theirs)
+        assert not code_names_other_family_code(ours, theirs), (ours, theirs)
+
+
+def test_a_capacity_written_in_kilograms_is_the_one_written_in_tenths() -> None:
+    """Live near-miss: the row ``HAIER 110-688S8`` (tenths of a kilo) and its own shop
+    file ``haier-11-688-top-load`` (kilograms) - the head differs only by the unit."""
+    for ours, theirs in (
+        ("110-688S8", "haier-11-688-top-load"),
+        ("1301217E", "haier-13-kg-1217e-front"),
+        ("1301217E", "haier-1301217e-2"),
+    ):
+        assert not code_names_other_family_code(ours, theirs), (ours, theirs)
+
+
+def test_a_spec_number_never_becomes_the_capacity_head() -> None:
+    """The false rejects a plain "compare the digits" rule commits (owner review
+    2026-10-17, all of them the row's own picture): a rpm rating, a cubic-foot rating
+    and a spaced kilogram all sit *before* a word, so they are not the code's head."""
+    for ours, theirs in (
+        ("MF200-W120", "midea-1400-rpm-w120-front-load"),
+        ("KRF24457-320GD", "kenwood-13-cu-ft-freezer-320gd"),
+        ("MF200-W90-G", "midea-8-5-kg-w90-front-load"),
+    ):
+        assert not code_names_other_family_code(ours, theirs), (ours, theirs)
+
+
+def test_the_digit_limb_stays_quiet_without_a_family_tail_to_share() -> None:
+    """No shared 3+ digit group, or a file that writes only the tail, is no opinion -
+    otherwise every bare-number folder would accuse every other model."""
+    for ours, theirs in (
+        ("1301217E", "1217-front-view"),  # names the family, names no capacity
+        ("1301217E", "WhatsApp-Image-2026-02-21-at-12.38.31-PM"),
+        ("1301217E", "130-1217-12"),  # our number without its finish: no claim, no proof
+        ("18X", "orient-super-18g-eva"),  # capacity pair: the other limb owns this
+        ("HSU-18HFPAA", "hsu-12hfpaa"),  # no group reaches the bar on either side
+    ):
+        assert not code_names_other_family_code(ours, theirs), (ours, theirs)
+        assert not code_confirms_this_model(ours, theirs), (ours, theirs)
+
+
+def test_a_sibling_two_digits_away_is_not_confirmed_as_ours() -> None:
+    """The other half of the same coin: ``…U34ABFA`` and ``…U36ABFA`` are different
+    machines, and a rule that reads them as one would be a false *proof* for T5."""
+    assert not code_confirms_this_model("W90DG5U34ABFA", "WW90DG5U36ABFA")
+    assert not code_names_other_family_code("W90DG5U34ABFA", "WW90DG5U36ABFA")
+
+
+def test_a_tail_nobody_wrote_whole_names_no_family() -> None:
+    """Live near-miss, row 26 of the same run: the sheet writes ``DWF 85-1214`` and the
+    shop writes its own file ``Dawlance-85214``, so the two happen to end in "214" while
+    a moved hyphen - not a different machine - is the whole difference.  A shared
+    fragment that neither side wrote as a number is no opinion."""
+    assert not code_names_other_family_code("DWF 85-1214 MG INV", "Dawlance-85214")
+    assert not code_names_other_family_code("1301217E", "hwm-801217")
+
+
+def test_the_colourway_inside_the_code_is_identity_not_decoration() -> None:
+    """``1301217E`` and ``1301217GB`` are one number in two finishes (the colourway-in-the-
+    code law of 2026-10-07), so a digit match must never *prove* them one product - a
+    false proof is what would let the GB picture into the E gallery at T5.  And ``1217GB``
+    is gold/black, not 1217 gigabytes: read as a unit it would leave the GB row with no
+    number at all and its 8 kg sibling free to join."""
+    assert not code_confirms_this_model("1301217E", "1301217GB")
+    assert code_confirms_this_model("1301217E", "130-1217E")
+    assert code_digit_clusters("1301217GB") == (("1301217",),)
+    keys = build_model_keys("HAIER 1301217GB-HAIER 1301217GB")
+    assert url_names_other_family_code(_SIBLING_INDEXED, keys)
+    assert not url_names_other_family_code(
+        "https://friendshome.pk/cdn/shop/files/130-1217GB.jpg", keys
+    )
+
+
+def test_a_code_written_twice_in_the_row_is_still_one_code() -> None:
+    """Live false positive, the Samsung rows of the same run: the sheet title repeats the
+    model ("WA21CK6745BVRT-WA21CK6745BVRT"), S4 reads that as ONE key, and gluing its
+    digits gives ``216745216745`` - which no shop ever writes.  Against the file that
+    names the same machine once, the repeated half then looks like a different head and
+    the row's own hero is refused."""
+    keys = build_model_keys("WA21CK6745BVRT-WA21CK6745BVRT")
+    assert keys.tokens == ("WA21CK6745BVRT-WA21CK6745BVRT",)
+    url = (
+        "https://samsung.com.pk/p/samsung-21kg-automatic-top-load-washing-machine-"
+        "model-wa21ck6745bvrt.jpg"
+    )
+    assert not url_names_other_family_code(url, keys)
+    assert url_names_other_family_code(
+        "https://samsung.com.pk/p/samsung-17kg-automatic-top-load-washing-machine-"
+        "model-wa17ck6745bdrt.jpg",
+        keys,
+    )
+
+
+def test_s4_code_rejects_both_files_of_the_wrong_product_run() -> None:
+    r"""Measured 2026-10-17: S4's prefix limb is blind to a digit-headed code (``1301217E``
+    has no alphabetic prefix, so ``if not product_prefixes: return False``), and its
+    capacity limb needs the ``\d{2,3}[a-z]`` shape on both sides, which neither code has."""
+    keys = build_model_keys("HAIER 1301217E-HAIER 1301217E")
+    assert not url_belongs_to_other_model(_SIBLING_PLAIN, keys)  # the old half cannot see it
+    assert not url_names_other_capacity_code(_SIBLING_PLAIN, keys)
+    assert url_names_other_family_code(_SIBLING_PLAIN, keys)
+    assert url_names_other_family_code(_SIBLING_INDEXED, keys)
+
+
+@pytest.mark.parametrize(
+    "url",
+    (
+        _OWN_1301217E,
+        # The must-not-die cases, all taken from the live galleries of this run.
+        "https://cdn.shopify.com/files/Haier-HWS-60-50.webp",
+        "https://www.lg.com/pk/images/WW90DG5U34ABFA_001_front.jpg",
+        "https://dawlance.com.pk/media/img1234.png",
+        "https://x.pk/wp-content/uploads/2024/12/DW-7500C-hero-800x600.jpg",
+    ),
+)
+def test_s4_code_keeps_the_row_s_own_spelling_and_the_unreadable_file(url: str) -> None:
+    """Each row here carries a real key token, so a pass means the limb read the digits
+    and stayed quiet - never that it had nothing to compare."""
+    for title in (
+        "HAIER 1301217E-HAIER 1301217E",
+        "HAIER 6050-HAIER 6050",
+        "LG W90DG5U34ABFA",
+        "Dawlance DW-7500C",
+    ):
+        keys = build_model_keys(title)
+        assert keys.tokens, title
+        assert not url_names_other_family_code(url, keys), (title, url)
+
+
+def test_s4_code_is_silent_for_a_row_without_a_model_code() -> None:
+    keys = build_model_keys("Haier Top Load Washing Machine")
+    assert keys.tokens == ()
+    assert not url_names_other_family_code(_SIBLING_PLAIN, keys)
+    assert not url_names_other_family_code(_OWN_1301217E, keys)
 
 
 # --------------------------------------------------------------------------- #
