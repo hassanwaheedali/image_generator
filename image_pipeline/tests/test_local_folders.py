@@ -450,3 +450,83 @@ class TestLocalProcessor:
         result, accepted = process_direct_product(task, _local_deps(tmp_path), _local_config(tmp_path))
         assert len(accepted) == 1
         assert "re-served copy" in _decisions_text(tmp_path)  # S10 pixel dedup fired
+
+
+# --------------------------------------------------------------------------- #
+# main() end to end: folders in, platform CSVs out, no network
+# --------------------------------------------------------------------------- #
+import csv  # noqa: E402
+
+from main import main  # noqa: E402
+
+
+def _photo_folder(root: Path, name: str) -> Path:
+    folder = root / name
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "1.jpg").write_bytes(jpeg_bytes(_white_product_photo()))
+    (folder / "2.jpg").write_bytes(jpeg_bytes(_white_product_photo_alt()))
+    return folder
+
+
+def _read_platform_csv(out: Path, platform: str, filename: str) -> list[dict[str, str]]:
+    with (out / platform / filename).open(newline="", encoding="utf-8-sig") as handle:
+        return list(csv.DictReader(handle))
+
+
+def _run_main(root: Path, assets: Path, out: Path, tmp_path: Path) -> int:
+    return main(
+        [
+            "--images-dir", str(root), "--dry-run", "--platforms", "website,alfa,digi",
+            "--assets-dir", str(assets), "--output-dir", str(out),
+            "--state-dir", str(tmp_path / "state"), "--workers", "1",
+        ]
+    )
+
+
+class TestImagesDirEndToEnd:
+    def test_dry_run_produces_exact_titles_and_unique_names(self, tmp_path: Path) -> None:
+        root = _parent(tmp_path)
+        _photo_folder(root, "MSAG2B-12HRDN1-QC0 Black")
+        _photo_folder(root, "MSAG2B-12HRDN1-QC0 White")
+        _photo_folder(root, "Wireless Headset, Pro 900")  # comma proves CSV quoting
+        (root / "Empty One").mkdir()  # no pictures: fails loudly, the run continues
+
+        assets = tmp_path / "assets"
+        make_assets(assets)  # deliberately has no website artwork
+        blank = Image.new("RGBA", (800, 800), (255, 255, 255, 255))
+        (assets / "website").mkdir()
+        (assets / "website" / "template.png").write_bytes(png_bytes(blank))
+        out = tmp_path / "out"
+        assert _run_main(root, assets, out, tmp_path) == 0
+
+        rows = {r["Title"]: r for r in _read_platform_csv(out, "website", "website_product_images.csv")}
+        assert set(rows) == {"MSAG2B-12HRDN1-QC0 Black", "MSAG2B-12HRDN1-QC0 White", "Wireless Headset, Pro 900"}
+        assert all(r["Image_Urls"] == "" for r in rows.values())  # dry-run lists no URLs
+        assert rows["MSAG2B-12HRDN1-QC0 Black"]["images"].startswith("MSAG2B-12HRDN1-QC0_BLACK_1.jpg")
+        assert rows["MSAG2B-12HRDN1-QC0 White"]["images"].startswith("MSAG2B-12HRDN1-QC0_WHITE_1.jpg")
+
+        # The names in the digi CSV are the names on disk, per platform folder, banner last.
+        digi = next(r for r in _read_platform_csv(out, "digi", "digimall_product_images.csv")
+                    if r["Title"] == "MSAG2B-12HRDN1-QC0 Black")
+        stem = "MSAG2B-12HRDN1-QC0_BLACK"
+        listed = [n.strip() for n in digi["images"].split(",")]
+        assert listed == [f"{stem}_{n}.jpg" for n in (1, 2, 3)]
+        on_disk = sorted(p.name for p in (out / "images" / "digi" / "msag2b-12hrdn1-qc0-black").iterdir())
+        assert on_disk == listed
+
+        failed_text = (out / "failed_products.csv").read_text(encoding="utf-8-sig")
+        assert "Empty One" in failed_text and "no source url" in failed_text
+        assert (out / "run_report.csv").exists() and (out / "decisions.jsonl").exists()
+        assert (out / "README.md").exists()
+
+    def test_missing_website_artwork_skips_the_platform_not_the_run(self, tmp_path: Path) -> None:
+        root = _parent(tmp_path)
+        _photo_folder(root, "MSAG2B-12HRDN1-QC0 Black")
+        assets = tmp_path / "assets"
+        make_assets(assets)  # website absent by design
+        out = tmp_path / "out"
+        assert _run_main(root, assets, out, tmp_path) == 0
+        assert not (out / "website").exists()
+        assert (out / "digi" / "digimall_product_images.csv").exists()
+        log = (out / "pipeline_run.log").read_text(encoding="utf-8")
+        assert "website" in log.lower()  # the skip was announced, not silent
