@@ -57,6 +57,9 @@ variable always wins. **Never print, log, commit or echo the key value.**
   white/grey studios and colourful products on white never fire it.
   Option 2 (`main.py --direct`) runs the sheet's direct image URLs with no scraping: the same
   download/gates/compose/upload machinery via `direct_pipeline.process_direct_product`.
+  Option 3 (`main.py --images-dir`) is the same Option 2 flow over local folders - one subfolder
+  per product, folder name = Title - with `fetch.LocalImageFetcher` reading the files; no gate
+  is skipped and only the file-name stem differs (`csv_io.local_filename_prefix`).
   A **report-only** rule - one that judges the row instead of refusing a picture - keeps its rule id in
   this list and appears in the row's `note` / the run report rather than `decisions.jsonl`, because a
   decision line needs a picture that was actually decided about (`S22.coherence`, `S20.unstated`,

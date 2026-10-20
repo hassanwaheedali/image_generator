@@ -104,6 +104,11 @@ python3 main.py --check-image output/images/orient-.../rejected/S20-1a2b3c4d.jpg
 # Option 2: the URL column holds DIRECT image URLs - download, template and
 # publish with no scraping (store theme templates are skipped by S19)
 python3 main.py --direct --input my_links.csv --dry-run
+
+# Option 3: you already have the pictures - one subfolder per product inside a
+# parent folder (folder name = the exact Title); templates are composed from the
+# files, nothing is scraped or downloaded. Colourways nest too: Model/Black -> "Model Black"
+python3 main.py --images-dir D:/my_products --dry-run
 ```
 
 | Flag | Meaning |
@@ -114,6 +119,7 @@ python3 main.py --direct --input my_links.csv --dry-run
 | `--state-dir` | checkpoint + banner-URL cache (default `state`) |
 | `--dry-run` | no uploads, no platform CSVs; everything else runs |
 | `--direct` | Option 2: reads the sheet's `Images` / `image_urls` column as direct image URLs (a `Source URL` column on the same sheet is ignored - it belongs to Option 1); no pages are fetched, nothing is scraped; S19 skips store theme templates |
+| `--images-dir PARENT` | Option 3: `PARENT` holds one subfolder per product - the folder name is the CSV `Title` verbatim and the image files inside are that product's pictures. No sheet, no scraping, no downloading: every Option 2 gate still runs (blur, S19, white background, colour, dedup), then the same platform folders and CSVs are written; file names are `[code]_[COLOUR]_[N].jpg` so colourways never share a name. A subfolder of only subfolders nests one level (`Model\Black` -> `Model Black`); loose images in the parent, or pictures beside subfolders, stop the run with the folder named. Moving the parent invalidates this run's checkpoint |
 | `--redo TITLE...` | force re-process these exact titles even if the checkpoint says `ok` |
 | `--limit N` | stop after N products (checkpoint still written) |
 | `--workers N` | parallel product workers (default 4; per-domain requests are still rate-limited) |
