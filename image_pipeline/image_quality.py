@@ -959,6 +959,34 @@ def extract_foreground_color_profile(image: Image.Image) -> ForegroundColorProfi
     )
 
 
+def hero_colour_conflict(image: Image.Image, row_colour_families: frozenset[str]) -> str:
+    """Safeguard S16.square: the picture we ship as the row's hero must be the row's colour.
+
+    S16 judges the file the shop served; by the time the product is isolated, cropped and
+    centred the picture that actually goes to the shop is a different artefact, and the run
+    of 2026-10-20 showed the gap: a red patterned door published on a ``Black`` row, a bronze
+    "New Classic Plus" fridge published on three Kenwood colourways.  Those files pass S16
+    because their studio wash and dark trim out-weigh the colour print in the raw frame.
+
+    Only the FIRST image of a row is judged: images 2+ are the parts and details the owner
+    asked to keep, and a fridge's open shelves photograph cool-white, which is no opinion
+    about its colour.  A picture with no chromatic foreground at all is no opinion either -
+    exactly the fail-open that keeps grey and white studios publishing today.
+    """
+    if not row_colour_families:
+        return ""
+    profile = extract_foreground_color_profile(image)
+    if not profile.is_chromatic or profile.dominant_family == "chromatic":
+        return ""
+    if profile.dominant_family in row_colour_families:
+        return ""
+    return (
+        f"the published hero picture reads {profile.dominant_family} "
+        f"({profile.chromatic_ratio:.0%} of the product area), this row sells "
+        f"{'/'.join(sorted(row_colour_families))}"
+    )
+
+
 def body_shape(
     image: Image.Image, *, sample: int = 256, close_px: int = 9, out_size: int = 64
 ) -> np.ndarray | None:

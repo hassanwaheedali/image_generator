@@ -682,6 +682,222 @@ def test_the_unverified_rescue_lifts_only_a_page_that_is_silent(tmp_path: Path) 
         )
 
 
+def test_a_title_only_row_publishes_from_the_search_chain(tmp_path: Path) -> None:
+    """A row whose URL column Step-1 never filled still gets its pictures (owner 2026-10-20:
+    50 refrigerator rows written from the shops, titles only).  The title alone drives the
+    search, and every page rule still runs on what the search returns."""
+    config = live_config(tmp_path)
+    page = """<html><head><title>Haier HSU-12HFPAA Inverter AC</title></head>
+    <body><div class="product-gallery">
+    <img src="https://cdn.haier.com/p/hsu-12hfpaa-1.jpg"></div></body></html>"""
+    searcher = FakeSourceSearcher(
+        candidates=[
+            PageCandidate(
+                url="https://www.surmawala.pk/products/haier-hsu-12hfpaa-inverter-ac",
+                origin="json-search:www.surmawala.pk",
+                method="json-search",
+            )
+        ],
+        report=SourceSearchReport(tried=("www.surmawala.pk:shopify:1",)),
+    )
+    deps, _, _, host = build_deps(
+        tmp_path,
+        {"https://www.surmawala.pk/products/haier-hsu-12hfpaa-inverter-ac": page},
+        {"https://cdn.haier.com/p/hsu-12hfpaa-1.jpg": png_bytes(clean_product_image())},
+    )
+    deps.source_searcher = searcher
+    result, accepted = process_product(
+        task(0, "Haier HSU-12HFPAA Inverter AC", ()), deps, config
+    )
+
+    assert accepted                                    # it found the picture
+    assert searcher.calls != []                        # and it searched from the title alone
+    assert result.status in (Status.OK, Status.PARTIAL)
+    assert host.uploads
+
+
+def test_a_row_with_nothing_published_asks_the_rest_of_the_catalogue(tmp_path: Path) -> None:
+    """Live run refrigerators_50_titles 2026-10-20 (K4): thirteen rows failed with
+    ``sources tried: www.dawlance.com.pk:sitemap:0, www.surmawala.pk:shopify:3,
+    modernelectronics.pk:shopify:3`` while ``japanelectronics.com.pk/products/
+    dawlance-ref-9191-acce-coral-red`` sold the product - two answering shops ate the
+    six-candidate budget, the chain broke, and the shop that had it was never queried.
+
+    The widened hunt is the row's second chance: same rules per page, bigger budget."""
+    config = live_config(tmp_path, fallback_max_pages_per_row_when_nothing_found=24)
+    starved_url = "https://www.surmawala.pk/products/dawlance-ref-9191-acce-refrigerator"
+    japan_url = "https://japanelectronics.com.pk/products/dawlance-ref-9191-acce-refrigerator"
+    japan_image = "https://japanelectronics.com.pk/cdn/dawlance-ref-9191-1.jpg"
+    starved = """<html><head><title>Dawlance REF-9191 ACCE Refrigerator</title></head>
+    <body><p>price on request</p></body></html>"""
+    japan = f"""<html><head><title>Dawlance REF-9191 ACCE Refrigerator</title></head>
+    <body><div class="product-gallery"><img src="{japan_image}"></div></body></html>"""
+    searcher = FakeSourceSearcher(
+        candidates=[
+            PageCandidate(
+                url=starved_url, origin="json-search:www.surmawala.pk", method="json-search"
+            )
+        ],
+        wide_candidates=[
+            PageCandidate(
+                url=starved_url, origin="json-search:www.surmawala.pk", method="json-search"
+            ),
+            PageCandidate(
+                url=japan_url,
+                origin="json-search:japanelectronics.com.pk",
+                method="json-search",
+            ),
+        ],
+        report=SourceSearchReport(tried=("www.surmawala.pk:shopify:1",)),
+    )
+    deps, page_fetcher, _, _ = build_deps(
+        tmp_path,
+        {starved_url: starved, japan_url: japan},
+        {japan_image: png_bytes(clean_product_image())},
+    )
+    deps.source_searcher = searcher
+    result, accepted = process_product(
+        task(0, "Dawlance REF-9191 ACCE Refrigerator", ()), deps, config
+    )
+
+    assert any(call[2] for call in searcher.calls), "an empty row must get the widened hunt"
+    assert japan_url in page_fetcher.requested
+    assert accepted
+    assert result.status in (Status.OK, Status.PARTIAL)
+
+
+def test_a_row_the_wide_hunt_also_came_back_empty_says_it_ran_out_of_budget(
+    tmp_path: Path,
+) -> None:
+    """F6: "not found" must mean *not available*, never "we stopped looking".  The owner reads
+    this note to decide whether to paste a link, so it says what was asked and what was refused."""
+    config = live_config(tmp_path, fallback_max_pages_per_row_when_nothing_found=24)
+    dead_url = "https://www.surmawala.pk/products/dawlance-ref-9193-acce-refrigerator"
+    page = """<html><head><title>Dawlance REF-9193 ACCE Refrigerator</title></head>
+    <body><p>no photos</p></body></html>"""
+    searcher = FakeSourceSearcher(
+        candidates=[
+            PageCandidate(url=dead_url, origin="json-search:www.surmawala.pk", method="json-search")
+        ],
+        report=SourceSearchReport(
+            tried=("www.surmawala.pk:shopify:1", "modernelectronics.pk:shopify:0")
+        ),
+    )
+    deps, _, _, _ = build_deps(tmp_path, {dead_url: page}, {})
+    deps.source_searcher = searcher
+    result, accepted = process_product(
+        task(0, "Dawlance REF-9193 ACCE Refrigerator", ()), deps, config
+    )
+
+    assert not accepted
+    assert "search budget ran out" in result.note
+    assert "www.surmawala.pk:shopify:1" in result.note
+
+
+def test_a_row_that_already_published_never_pays_for_the_wide_hunt(tmp_path: Path) -> None:
+    """The widened budget is for empty rows only: a row that got its pictures from the first
+    hunt costs the same requests it costs today."""
+    config = live_config(tmp_path)
+    page = """<html><head><title>Dawlance REF-9194 ACCE Refrigerator</title></head>
+    <body><div class="product-gallery">
+    <img src="https://cdn.surmawala.pk/dawlance-ref-9194-1.jpg"></div></body></html>"""
+    url = "https://www.surmawala.pk/products/dawlance-ref-9194-acce-refrigerator"
+    searcher = FakeSourceSearcher(
+        candidates=[
+            PageCandidate(url=url, origin="json-search:www.surmawala.pk", method="json-search")
+        ],
+        report=SourceSearchReport(tried=("www.surmawala.pk:shopify:1",)),
+    )
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {url: page},
+        {"https://cdn.surmawala.pk/dawlance-ref-9194-1.jpg": png_bytes(clean_product_image())},
+    )
+    deps.source_searcher = searcher
+    _, accepted = process_product(task(0, "Dawlance REF-9194 ACCE Refrigerator", ()), deps, config)
+
+    assert accepted
+    assert not any(call[2] for call in searcher.calls), "a row with pictures does not re-search"
+
+
+def test_the_shipped_wide_budget_is_smaller_than_the_row_budget_so_no_row_pays_for_it(
+    tmp_path: Path,
+) -> None:
+    """Owner 2026-10-20, and this is the shipped default: on refrigerators_60_titles all 14
+    wide hunts crawled the 18-source catalogue and published **zero** images, so he set
+    ``fallback_max_pages_per_row_when_nothing_found`` below ``fallback_max_pages_per_row``.
+    A small value is a setting, never a ConfigError, and it means a failing row searches once
+    - which is what a run that refuses to start, or crawls for nothing, costs him otherwise."""
+    shipped = live_config(tmp_path)          # no override: the class defaults as they ship
+    assert (
+        shipped.fallback_max_pages_per_row_when_nothing_found
+        <= shipped.fallback_max_pages_per_row
+    ), "the extra hunt is off by the owner's own setting"
+    dead_url = "https://www.surmawala.pk/products/dawlance-ref-9195-acce-refrigerator"
+    page = """<html><head><title>Dawlance REF-9195 ACCE Refrigerator</title></head>
+    <body><p>no photos</p></body></html>"""
+    searcher = FakeSourceSearcher(
+        candidates=[
+            PageCandidate(url=dead_url, origin="json-search:www.surmawala.pk", method="json-search")
+        ],
+        report=SourceSearchReport(tried=("www.surmawala.pk:shopify:1",)),
+    )
+    deps, _, _, _ = build_deps(tmp_path, {dead_url: page}, {})
+    deps.source_searcher = searcher
+    result, accepted = process_product(
+        task(0, "Dawlance REF-9195 ACCE Refrigerator", ()), deps, shipped
+    )
+
+    assert not accepted
+    assert searcher.calls == [("Dawlance REF-9195 ACCE Refrigerator", "dawlance", False)]
+    assert "search budget ran out" not in result.note
+
+
+def test_a_variant_spelling_page_cannot_lend_a_file_naming_another_number(tmp_path: Path) -> None:
+    """Kenwood run 2026-10-20: the `KRF-24457` rows published `22257-5.jpg`, `22257-4.jpg` and
+    `23357-int.jpg` from a page that matched on a tolerated spelling - a different model number
+    each time, and S4 could not see them because those numbers belong to no row of that sheet.
+    A file that writes a number at all must write THIS row's number."""
+    config = live_config(tmp_path)
+    page = """<html><head><title>Homage 15 CFT Top Mount Inverter Refrigerator HR-47452 TECH R-310</title></head>
+    <body><div class="product-gallery">
+    <img src="https://cdn.shopify.com/s/files/22257-5.jpg">
+    <img src="https://cdn.shopify.com/s/files/hr-47452-bkg-front.jpg"></div></body></html>"""
+    deps, _, image_fetcher, host = build_deps(
+        tmp_path,
+        {"https://www.alfatah.com.pk/product/homage-hr-47452-tech-r-310/": page},
+        {
+            "https://cdn.shopify.com/s/files/22257-5.jpg": png_bytes(
+                clean_product_image(1000, 1000, "#1b1b1b")
+            ),
+            "https://cdn.shopify.com/s/files/hr-47452-bkg-front.jpg": png_bytes(
+                clean_product_image(900, 900, "#1b1b1b")
+            ),
+        },
+    )
+    result, accepted = process_product(
+        task(
+            0,
+            "Homage HR-47452 BKG Tech Inverter 15 Cu Ft Glass Door Direct Cool Inverter "
+            "Refrigerator - Black",
+            ("https://www.alfatah.com.pk/product/homage-hr-47452-tech-r-310/",),
+        ),
+        deps,
+        config,
+    )
+
+    rules = [
+        json.loads(line)["rule_id"]
+        for line in (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert "S15.file_code" in rules
+    assert all("22257" not in a.source_url for a in accepted)
+    assert not any("22257" in u for u in image_fetcher.requested)   # refused before any download
+    assert any(a.source_url.endswith("hr-47452-bkg-front.jpg") for a in accepted)
+    assert result.status in (Status.OK, Status.PARTIAL)
+    assert host.uploads
+
+
 def test_fallback_candidate_is_verified_before_any_image_is_used(tmp_path: Path) -> None:
     """S15: a found page that shows another model yields nothing."""
     config = live_config(tmp_path)

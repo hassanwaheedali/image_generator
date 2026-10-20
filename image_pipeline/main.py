@@ -666,6 +666,27 @@ def empty_row_results(tasks: list[ProductTask]) -> list[ProductResult]:
     return results
 
 
+def split_sheet_rows(
+    tasks: list[ProductTask], *, urls_required: bool
+) -> tuple[list[ProductTask], list[ProductTask]]:
+    """`(runnable rows, unusable rows)` - the sheet is partitioned before the batch starts.
+
+    A row with a title and no source URL is runnable in the normal scrape mode: the title alone
+    drives the brand-then-retailer search, and Step-1 often hands over a sheet whose links are
+    still empty (owner 2026-10-20, 50 refrigerator rows written from the shops).  It is an
+    unusable row under Option 2 (`--direct`, where the column holds the image URLs) and Option 3
+    (`--images-dir`, where it holds local folders) - there an empty cell leaves nothing to read,
+    and the row must fail loudly instead of searching a web page nobody asked for.  It is an
+    unusable row in the scrape mode too when `fallback_enabled` is off: with no links and no
+    search, nothing is left to try.
+    """
+    good: list[ProductTask] = []
+    bad: list[ProductTask] = []
+    for row in tasks:
+        (good if row.title and (row.source_urls or not urls_required) else bad).append(row)
+    return good, bad
+
+
 def _check_local_images(
     paths: list[str], config: PipelineConfig, title: str = ""
 ) -> int:
@@ -940,8 +961,15 @@ def main(argv: list[str] | None = None) -> int:
 
     LOG.info("rows to process: %d (limit: %s)", len(tasks), config.limit)
 
-    bad_rows = [task for task in tasks if not task.title or not task.source_urls]
-    good_rows = [task for task in tasks if task.title and task.source_urls]
+    # Options 2 and 3 read the picture straight out of the URL column, so an empty cell there is
+    # an unusable row; in the scrape mode a title-only row still has a search to run - unless the
+    # search itself is switched off, when nothing is left to try.
+    good_rows, bad_rows = split_sheet_rows(
+        tasks,
+        urls_required=(
+            config.direct_mode or config.local_images_mode or not config.fallback_enabled
+        ),
+    )
 
     decisions = DecisionLog(config.decisions_path)
     deps = build_deps(config, decisions, platforms)

@@ -111,13 +111,18 @@ def _is_chromatic(word: str) -> bool:
     return word not in NEUTRAL_COLOURS
 
 
-def _same_colour(one: str, other: str) -> bool:
+def same_colour(one: str, other: str) -> bool:
     """Whether two colour words describe the same picture.
 
     Equal words always do.  Inside one family, two *chromatic* names do not
     (``burgundy`` vs ``red`` is exactly the pair that must be told apart), while two
     finish names do (``chrome`` vs ``grey``).  Across families, never.
+
+    Both sides are read in the vocabulary's own spelling first, because the sheet writes
+    ``Gray`` where the table spells it ``grey`` - without that the two look like two
+    colours and a row's own colour stops being recognised as its own.
     """
+    one, other = _canonical(one), _canonical(other)
     if one == other:
         return True
     if _FAMILY_OF.get(one) != _FAMILY_OF.get(other):
@@ -224,7 +229,7 @@ def shade_agreement(row: tuple[str, str], page: tuple[str, str]) -> ShadeVerdict
     * ``same`` - the two shades are one colour: the same word however it is spelled
       (``matt`` ~ ``matte``, because a page that re-types the word is not a different
       colourway), or two *finish* names the vocabulary already knows as one colour
-      (``silver`` ~ ``chrome``, both grey) - the same carve-out :func:`_same_colour`
+      (``silver`` ~ ``chrome``, both grey) - the same carve-out :func:`same_colour`
       makes for heads, since makers spell a finish several ways and use it as a series name;
     * ``omitted`` - one side states no shade, or the two colours are not the same family.
       The family case is left alone on purpose: :func:`colour_word_conflict` already
@@ -236,11 +241,11 @@ def shade_agreement(row: tuple[str, str], page: tuple[str, str]) -> ShadeVerdict
     """
     row_head, row_shade = row
     page_head, page_shade = page
-    if not row_head or not page_head or not _same_colour(row_head, page_head):
+    if not row_head or not page_head or not same_colour(row_head, page_head):
         return "omitted"
     if not row_shade or not page_shade:
         return "omitted"
-    if similar(row_shade, page_shade) or _same_colour(row_shade, page_shade):
+    if similar(row_shade, page_shade) or same_colour(row_shade, page_shade):
         return "same"
     return "different"
 
@@ -259,7 +264,7 @@ def colour_word_conflict(title_word: str | None, page_text: str) -> bool:
        ("Dawlance **E Chrome** ... Metallic Gold") pose as compatible with a grey row,
        because ``chrome`` sits in the grey family.
 
-    Whether two words are the same colour is :func:`_same_colour`.
+    Whether two words are the same colour is :func:`same_colour`.
     """
     if not title_word:
         return False
@@ -267,7 +272,7 @@ def colour_word_conflict(title_word: str | None, page_text: str) -> bool:
     if not page_words or title_word in page_words:
         return False
     page_word = primary_colour_word(page_text)
-    return page_word is not None and not _same_colour(title_word, page_word)
+    return page_word is not None and not same_colour(title_word, page_word)
 
 
 def primary_colour_conflict(title_text: str, page_text: str) -> bool:

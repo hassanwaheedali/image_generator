@@ -1613,6 +1613,52 @@ def test_learned_word_without_a_shared_series_never_tiers_apart() -> None:
     assert _tier_mismatch(("avante", "plus"), ("avante",))     # same line, one tier up
 
 
+# --------------------------------------------------------------------------- #
+# a product line whose name is also a colour word (owner 2026-10-20: the Dawlance
+# 9173WB is sold as the `Chrome` line, beside its `Avante` and its `Digital Pro`;
+# the colourway the row sells is written elsewhere in the same title)
+# --------------------------------------------------------------------------- #
+def test_a_colour_word_in_the_line_slot_names_the_line() -> None:
+    keys = build_model_keys(
+        "Dawlance 9173WB Chrome 12 Cu Ft Steel Door Direct Cool Non-Inverter Refrigerator "
+        "- Pearl Copper"
+    )
+    assert "chrome" in keys.name_words
+    assert keys.colour_word == "copper"          # the row still sells Pearl Copper
+
+
+def test_the_line_slot_word_vetoes_a_page_naming_a_sibling_line() -> None:
+    """The point of the rule: two lines of one number must not share pictures."""
+    keys = build_model_keys(
+        "Dawlance 9173WB Chrome 12 Cu Ft Steel Door Direct Cool Non-Inverter Refrigerator "
+        "- Pearl Copper"
+    )
+    assert score_match(keys, "Dawlance 9173WB Avante Refrigerator Pearl Copper", "dawlance").series_veto
+    assert not score_match(keys, "Dawlance 9173WB Chrome Refrigerator Pearl Copper", "dawlance").series_veto
+
+
+def test_a_colour_word_stays_a_colour_when_the_row_names_no_other_colour() -> None:
+    """The guard: nothing is promoted while the slot word IS the colourway being sold."""
+    keys = build_model_keys("Dawlance 9173WB Chrome 12 Cu Ft Direct Cool Refrigerator")
+    assert "chrome" not in keys.name_words
+    assert keys.colour_word == "chrome"
+
+
+def test_a_colour_word_before_the_code_is_never_promoted() -> None:
+    """Position is the evidence, so the slot behind the code is the only one that counts."""
+    keys = build_model_keys("Haier Chrome Freezer-On-Top Refrigerator 7 Cu Ft Pearl Blue (HRF-520)")
+    assert "chrome" not in keys.name_words
+
+
+def test_the_row_own_colour_in_another_spelling_is_never_promoted() -> None:
+    """``11kg Gray`` reads as a code-plus-colour, and the row sells that grey - so the word
+    in the slot is the colourway, not a line (found while measuring the catalogue)."""
+    title = "Dawlance Top Load Fully Automatic Washing Machine 11kg Gray (DWT-11671-FLT)"
+    keys = build_model_keys(title)
+    assert keys.colour_word == "grey"
+    assert "gray" not in keys.name_words
+
+
 def test_learning_is_deterministic_and_model_codes_are_not_tier_evidence() -> None:
     from model_matching import learn_series_differentiators
 

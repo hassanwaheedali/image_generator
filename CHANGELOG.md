@@ -8,8 +8,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **`last_resort_marketplace_fallback` — when nothing proves the model, ask the named marketplace (off by
-  default).** The owner's instruction for the rows no shop proves: "if not found at end it picks surmawala
+- **`S15.file_code` — a file that writes a number must write THIS row's number (owner
+  2026-10-20).** A page that reached the row only through a variant spelling
+  (`S15.tolerated`, `S15.tail`, `S15.relaxed`, `S15.unverified`) used to lend any file it held,
+  because `page_proved_model` only excluded `relaxed`/`unverified`. Live run
+  `refrigerators_50_titles`: the `KRF-24457` rows published `22257-5.jpg`, `22257-4.jpg`,
+  `2257-b.jpg` and `23357-int.jpg` — four other model numbers — and `S4` could not accuse them,
+  because those numbers belong to no row of that sheet (S4 only knows the sheet's own codes) and
+  `S4.code` only fires when two codes *share* a digit group. So the gap was a missing **positive**
+  rule, not a broken one: on a non-exact page, an image whose file name carries a code-shaped
+  number must name one of this row's codes. A file with no number in its name (`a1-19-5.webp`)
+  still passes — that is settled tolerated-publishing law — and `S16.square` is what judges it
+  then. Your own 60-row run refused **45** files on this rule.
+  `model_matching.url_claims_a_code` + the `page_matched_exactly` limb of
+  `pipeline._consume_candidates`; test `test_a_variant_spelling_page_cannot_lend_a_file_naming_another_number`.
+- **`S16.square` — the row's colour is judged on the picture that actually ships (owner
+  2026-10-20).** `S16` measured the download, and a glossy door hides its coloured print behind
+  the raw frame's own dark trim: eye-checked on the run's published squares, a **red patterned
+  door** passed for the `HR-47452 … Black` row, a black door with a **red flame print** for
+  `PRINVO-2550 … Gold Silk`, and a bronze fridge badged **"New Classic Plus"** for a
+  `KRF-24457 … Black` row — the same lesson `S10` already learned for duplicates ("judge the
+  picture we publish"). The verdict now runs again on the composed square, through
+  `image_quality.hero_colour_conflict` at `S16`'s own naming bar (a chromatic foreground big
+  enough to name a colour must name the row's colour). **Image 01 only** — his instruction of
+  2026-10-20, and the right one: images 2+ are parts and detail shots, and an open fridge's
+  cool-white shelves are no opinion about its colour (`DMD7951_4-Door_6.jpg` is literally a
+  shelf shot). Measured on the owner's 101 published squares before it shipped: **5 heroes
+  refused, all five a different colourway, 96 kept.** It inherits every `S16` exemption
+  untouched — the two switches, display products, a row stating no colour, a grey/white/black
+  studio shot, and the brand's own page (a safeguard must not cost a brand its own hero).
+  Tests: `test_a_hero_reading_another_colour_is_refused`,
+  `test_a_grey_studio_hero_says_nothing`, `test_a_small_colour_print_says_nothing`,
+  `test_a_row_that_states_no_colour_is_never_refused`, and the exemption case
+  `test_a_tinted_studio_wash_cannot_cost_the_row_the_brands_own_hero`.
+- **The empty-row hunt (`fallback_max_pages_per_row_when_nothing_found`) — and the owner turning
+  it off.** `refrigerators_50_titles` proved the six-page budget too small: every failed row read
+  `sources tried: dawlance:sitemap:0, surmawala:shopify:3, modernelectronics:shopify:3` — two
+  answering shops ate it and `japanelectronics.com.pk`, which sells the row, was never queried
+  (the same run crawled it 30× for other rows). Stage 3a re-runs the chain with a bigger budget
+  **only while the row has published nothing**, and reports `search budget ran out: N source(s)
+  asked, M page(s) looked at and refused` so `failed` means *not available*, never "we stopped
+  looking". Then the 60-row run measured the other half of the answer: **all 14 wide hunts
+  crawled the 18-source catalogue and published zero images**, so the owner set the field to
+  `3` — below the ordinary cap — and the hunt is off as we ship, while any value at or below
+  `fallback_max_pages_per_row` means a failing row searches once. `__post_init__` no longer
+  rejects a small value: it is a setting, and refusing to start the run over it was a bug.
+  `sources.SourceChain.find_candidates(wide=...)` + `pipeline._wide_hunt_for_an_empty_row`;
+  tests `test_a_row_that_found_nothing_asks_the_whole_catalogue`,
+  `test_the_wide_hunt_off_switch_is_its_budget_equal_to_the_ordinary_one`,
+  `test_the_shipped_wide_budget_is_smaller_than_the_row_budget_so_no_row_pays_for_it`.
+- **A row with no `Source_url` now runs the search chain instead of being skipped (owner
+  2026-10-20: "if sourceurl not available … start going on its default fallback").** The sheet
+  arrives from Step-1 with titles filled and links still empty, and `main.py` reported every one
+  of them `no source url` — 50 refrigerator rows, 0 processed. The partition is now one named
+  function, `main.split_sheet_rows(tasks, urls_required=...)`: a title-only row is runnable in
+  the scrape mode — the same chain §3 describes (brand sources, then the retailer search), with
+  every page rule still applied to what comes back — and `urls_required`
+  is set where the URL column *is* the picture (Option 2 `--direct`, Option 3 `--images-dir`) or
+  where the search itself is off (`config.fallback_enabled=False`), because there an empty cell
+  genuinely leaves nothing to try. `process_product` needed no change: it already read the brand
+  as `task.source_urls[0] if task.source_urls else ""` and its Path-2 comment says "(or empty)".
+  Tests: `test_a_row_without_a_url_is_still_searchable_in_the_scrape_mode`,
+  `test_the_url_column_is_the_picture_when_options_2_and_3_run`,
+  `test_an_empty_title_is_a_bad_row_in_every_mode` and the live
+  `test_a_title_only_row_publishes_from_the_search_chain`.
+- **`last_resort_marketplace_fallback` — when nothing proves the model, ask the named marketplace
+  (off by default).** The owner's instruction for the rows no shop proves: "if not found at end it picks surmawala
   … if not found simple says not found". Stage 3d runs only when a row has published nothing after sheet
   pages, fallback search, tolerated spelling and last-resort salvage. It visits the pages offered by
   `last_resort_marketplace_hosts` (default `www.surmawala.pk` and `japanelectronics.com.pk`) and
@@ -65,6 +129,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refrigerator, washing machine, yellow sale template) and over a loopback-HTTP `--dry-run`.
 
 ### Changed
+- **Every product's file name now says which product it is (`csv_io.assign_filename_prefixes`,
+  2026-10-20).** The D7 code-only stem printed 60 different refrigerators as `9178LF_1.jpg`, and
+  three colourways of one code overwrote each other in WordPress, which identifies media by file
+  name. The stem is now `[code]_[SERIES]_[COLOUR]` - `9178LF_DAWLANCE_ICEMAX_MIST_GREEN_1.jpg` -
+  in all three modes (sheet, `--direct`, `--images-dir`), built from the words `model_matching`
+  already extracts, so capacity and warranty text (`14 Cu Ft`, `1.5 Ton`, `12 Years Compressor
+  Warranty`) never enters a name. Rows that still fold to one name - same words, case-only, or cut
+  by the 48-character budget - take a 6-char hash of their exact title; a title with no model code
+  keeps the keyword+hash stem it always had. `--images-dir` goes one step further and adopts the
+  stem the owner already wrote on his own pictures (`9178LF_ICEMAX_GREEN_1.png` keeps that name),
+  falling back to the title only when a folder's files disagree, or when the trailing digits are a
+  camera serial (`IMG_0001`) or part of the model (`DW-1051`) rather than a picture index. Measured:
+  49/49 of the owner's refrigerator folders keep their written name with 0 duplicates; 630/752
+  catalogue rows and 54/60 fridge rows renamed, 0 case-insensitive collisions, no row that states a
+  colour lost it. Rows already in `state/checkpoint.jsonl` keep the name they published, so a rename
+  needs `--no-resume` or `--redo TITLE` - and the old media in the shop then belongs to nothing.
+- **A product line whose name is also a colour word is now read as a line word (owner 2026-10-20,
+  `Dawlance 9173WB Chrome`).** The 9173WB is sold as the **Chrome**, the **Avante** and the
+  **Digital Pro** - three products, one number - but `chrome` sits in the grey family
+  (`variant_terms.COLOUR_FAMILIES`), so `_keep_name_segment` threw it away and the row's only line
+  word was its own brand: no S4 veto, no sibling proof, nothing to tell a Chrome page from an Avante
+  page. The evidence is now the **slot**, not a word list: a colourword written directly behind the
+  model code names the line **only when the row sells a different colourway** elsewhere in the same
+  title (`model_matching._line_slot_names` + `_slot_colour_words`, wired into both title readers -
+  `_name_words` and the learner's `_name_segments`, so they can never disagree).
+  `… 9173WB Chrome 12 Cu Ft Steel Door … - Pearl Copper` now yields
+  `name_words = (dawlance, chrome)` and vetoes `9173WB Avante`, while
+  `Dawlance 9173WB Chrome 12 Cu Ft Refrigerator` - where Chrome *is* the colour being sold - gains
+  nothing, and a colourword **before** the code (`Haier Chrome … Pearl Blue`) is never promoted.
+  Measured over 956 titles (`1800_products.csv`, the 62-row washing-machine sheet, the AC sheet,
+  both refrigerator sheets): **12 rows gain a word, all 12 of them `chrome`** - no other word in the
+  catalogue moves. New tests: `test_a_colour_word_in_the_line_slot_names_the_line`,
+  `test_the_line_slot_word_vetoes_a_page_naming_a_sibling_line`,
+  `test_a_colour_word_stays_a_colour_when_the_row_names_no_other_colour`,
+  `test_a_colour_word_before_the_code_is_never_promoted`,
+  `test_the_row_own_colour_in_another_spelling_is_never_promoted`.
 - **A page's size is not a ticket (S22.source_lock, 2026-10-19).** The tightening above still
   let any page offering ≥2 gallery images **take the album over** from the shop that published
   first. On the washing-machine proof run that door published `hwm-85-1709.png` — another model
@@ -97,6 +197,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `__post_init__`, which a loose JSON file never was.
 
 ### Fixed
+- **`same_colour` ignored its own spelling aliases (found 2026-10-20 while building the line-slot
+  rule).** `_FAMILY_OF` is keyed on the vocabulary's canonical spelling, but the arguments were
+  looked up as written, so `same_colour("gray", "grey")` answered *False* - two spellings of one
+  colour read as two different colours. Every caller inherits it (`shade_agreement`,
+  `colour_word_conflict`), and it would have promoted a row's own colour into a line name
+  (`Dawlance … 11kg Gray (DWT-11671-FLT)` sold as grey). Both sides are canonicalised through
+  `_canonical` first now; `test_the_row_own_colour_in_another_spelling_is_never_promoted` guards it.
 - **A page that never proved the model no longer vouches for its pictures (Safeguard S15.image,
   owner 2026-10-20, `HAIER HRF-418IDGA`).** "look at the pictures it download fallback incorrect pictures
   … I go manual there is only 1 picture not 3". Two Surmawala pages — `hrf-418-ipga-ipra` and

@@ -62,6 +62,7 @@ from image_quality import (
     ImageValidationError,
     album_coherence_note,
     dimensions_from_header,
+    hero_colour_conflict,
     marketing_panel_split,
     official_gallery_pass,
     probe_verdict,
@@ -75,12 +76,14 @@ from image_quality import (
 from model_matching import (
     build_model_keys,
     colourway_words,
+    extract_colour_families,
     is_display_product,
     near_miss_codes,
     relaxed_page_match,
     tail_chunk_match,
     url_anchored_to_row,
     url_belongs_to_other_model,
+    url_claims_a_code,
     url_names_foreign_brand,
     url_names_other_capacity_code,
     url_names_other_family_code,
@@ -782,6 +785,52 @@ def process_product(
                 fallback_report = None
         return fallback_found, fallback_report
 
+    def _wide_hunt_for_an_empty_row() -> None:
+        """F4 (owner 2026-10-20): "available but not found" - a row that published nothing
+        keeps asking shops until it has tried the catalogue.
+
+        The ordinary hunt stops at ``fallback_max_pages_per_row`` candidates, and the
+        refrigerator run proved that too small: every failed row's note read
+        ``sources tried: dawlance:sitemap:0, surmawala:shopify:3, modernelectronics:shopify:3``
+        - two answering shops ate the six pages, the loop broke, and japanelectronics.com.pk,
+        which sells the product, was never queried.  The widened budget is spent only here, on
+        a row that has nothing to show, so a row that published from its own links costs
+        exactly what it costs today.
+
+        The note at the end is the honest part: after the whole catalogue, "not found" means
+        *not available*, never a silent "we stopped looking".
+        """
+        nonlocal fallback_used
+        if accepted or official_solved or not config.fallback_enabled:
+            return
+        if deps.source_searcher is None:
+            return
+        if (
+            config.fallback_max_pages_per_row_when_nothing_found
+            <= config.fallback_max_pages_per_row
+        ):
+            return
+        found, report = _search_sources(task=task, brand=brand, keys=keys, deps=deps, wide=True)
+        fresh = [candidate for candidate in found if candidate.url not in visited_page_urls]
+        fallback_used = bool(found)
+        refused = 0
+        for candidate in fresh:
+            if accepted or (cancel_event is not None and cancel_event.is_set()):
+                break
+            before = len(accepted)
+            _process_candidate_url(candidate.url, f"wide:{candidate.origin}", is_fallback=True)
+            if len(accepted) == before:
+                refused += 1
+        if report is not None and report.tried:
+            notes.append("wide hunt sources tried: " + ", ".join(report.tried))
+        stages.append(f"3a wide hunt: {len(fresh)} new candidate page(s), {len(accepted)} image(s)")
+        if not accepted:
+            sources = len(report.tried) if report is not None else 0
+            notes.append(
+                f"search budget ran out: {sources} source(s) asked, {refused} page(s) "
+                "looked at and refused - this row's pictures are not in the catalogue"
+            )
+
     # Path 1: If sheet contains official manufacturer URLs, visit them first.
     if official_sheet_urls:
         for url in official_sheet_urls:
@@ -833,6 +882,9 @@ def process_product(
         stages.append(f"3 fallback search: {len(fallback_found)} candidate page(s)")
     else:
         stages.append("3 fallback search: skipped (row already solved or disabled)")
+
+    # ---- stage 3a: the widened hunt, only while the row has published nothing ----
+    _wide_hunt_for_an_empty_row()
 
     # ---- stage 3b: the tolerated spelling, only if nothing better exists -----
     # The sheet's link is sometimes the wrong page for the model in its title (live:
@@ -1213,6 +1265,7 @@ def _salvage_row(
             dedup=dedup,
             accepted=accepted,
             rejections=rejections,
+            official_page=host_is_official(offer.candidate.page_url, brand),
         )
         album.settle(offer.candidate.page_url)
     salvaged = len(accepted) - before
@@ -1473,13 +1526,18 @@ def _search_sources(
     brand: str | None,
     keys: ModelKeys,
     deps: PipelineDeps,
+    wide: bool = False,
 ) -> tuple[list[PageCandidate], SourceSearchReport | None]:
-    """Stage 3 lookup.  Never raises: a broken source must not break the row."""
+    """Stage 3 lookup.  Never raises: a broken source must not break the row.
+
+    ``wide`` asks for the "available but not found" budget (see
+    ``config.fallback_max_pages_per_row_when_nothing_found``).
+    """
     if deps.source_searcher is None:
         return [], None
     try:
         found, report = deps.source_searcher.find_candidates(
-            title=task.title, brand=brand, keys=keys
+            title=task.title, brand=brand, keys=keys, wide=wide
         )
     except Exception as exc:                              # pragma: no cover - defensive
         LOG.warning("fallback search failed for %r: %s", task.title, exc)
@@ -1763,6 +1821,9 @@ def _visit_page(
         album=album,
         salvage=salvage,
         page_proved_model=match.match_rule not in ("relaxed", "unverified"),
+        page_matched_exactly=(
+            match.match_rule not in ("relaxed", "unverified", "tail") and not tolerated_reason
+        ),
     )
     return _PageOutcome(True, True, resolved_url, relaxed, tolerated=tolerated_reason or tail_flag)
 
@@ -2011,6 +2072,7 @@ def _consume_candidates(
     salvage: list[SalvageOffer],
     official_page: bool = False,
     page_proved_model: bool = True,
+    page_matched_exactly: bool = True,
 ) -> None:
     """Cheap checks, a header probe, one download, the gates, then compose.
 
@@ -2133,6 +2195,25 @@ def _consume_candidates(
             verdict = (
                 "S15.image",
                 "the page never proved this model and the file names no code of this row",
+            )
+        if (
+            verdict is None
+            and not page_matched_exactly
+            and url_claims_a_code(candidate.url)
+            and not url_anchored_to_row(
+                candidate.url, keys, brand=brand, own_terms=task.own_terms
+            )
+        ):
+            # S15.file_code: the page reached this row on a tolerated spelling or a short tail,
+            # so it prints this model *near* enough - and a file naming a different machine
+            # number outright is nothing to do with this row (Kenwood run 2026-10-20: a
+            # `KRF-24457` row published `22257-5.jpg`, `22257-4.jpg` and `23357-int.jpg`, none
+            # of those numbers belonging to any row of that sheet, so S4's sibling limb was
+            # blind to them).  A file that names no number at all is still allowed - that is
+            # the settled tolerated-publishing contract - and S16.square judges its colour.
+            verdict = (
+                "S15.file_code",
+                "the page matched only a variant spelling and the file names another number",
             )
         if verdict is None and not _source_allowed(
             album=album,
@@ -2429,6 +2510,7 @@ def _consume_candidates(
             accepted=accepted,
             rejections=rejections,
             fingerprint=fingerprint,
+            official_page=official_page,
         )
         if len(accepted) > published_before:
             # The page that published owns the album - and a real gallery takes it over from
@@ -2455,6 +2537,45 @@ def _probe_dimensions(
     return dimensions_from_header(probed.content)
 
 
+def _hero_colour_gate(
+    *,
+    task: ProductTask,
+    keys: ModelKeys,
+    square: Image.Image,
+    used_url: str,
+    official_page: bool,
+    config: PipelineConfig,
+) -> str:
+    """S16.square: judge the row's colour on the picture that actually ships.
+
+    ``_visit_page`` measures the download, where a glossy door can hide its coloured print
+    behind the frame's own dark trim (live run refrigerators_50_titles 2026-10-20: a red
+    patterned door passed for a BLACK row, a bronze fridge for a BLACK row).  After isolation
+    and centring the print *is* the product area, so the finished hero gets the same look.
+
+    Nothing is decided here that S16 does not already decide: the same two switches, the same
+    display-product exemption, the same brand-page chroma exemption (owner 2026-10-11 - the
+    Orient row lost its only correct hero to a studio wash, and the instruction was that a
+    safeguard must not cost a brand its own picture), and the same silence when the row never
+    stated a colour.  Images 2+ are detail shots and are not judged at all.
+    """
+    if not (
+        config.published_colour_gate
+        and config.variant_separation_enabled
+        and config.color_gate_enabled
+        and keys.colour_word
+        and not is_display_product(task.title)
+    ):
+        return ""
+    if (
+        config.color_gate_official_chroma_exempt
+        and official_page
+        and not colour_word_conflict(keys.colour_word, used_url.rsplit("/", 1)[-1])
+    ):
+        return ""
+    return hero_colour_conflict(square, extract_colour_families(keys.colour_word))
+
+
 def _compose_and_save(
     *,
     task: ProductTask,
@@ -2471,6 +2592,7 @@ def _compose_and_save(
     accepted: list[AcceptedImage],
     rejections: Counter[str],
     fingerprint: ImageFingerprint | None = None,
+    official_page: bool = False,
 ) -> None:
     """Stage 5: isolate, 1:1 centre, light unsharp, every selected template, save locally.
 
@@ -2505,6 +2627,22 @@ def _compose_and_save(
         rejections["S10"] += 1
         deps.decisions.reject(
             title=task.title, url=used_url, rule_id="S10", detail=published_repeat
+        )
+        return
+    conflict = "" if index > 1 else _hero_colour_gate(
+        task=task,
+        keys=keys,
+        square=square,
+        used_url=used_url,
+        official_page=official_page,
+        config=config,
+    )
+    if conflict:
+        # The hero is the row's colour statement, so it is judged on the artefact that ships.
+        # Images 2+ are detail shots and stay unjudged.
+        rejections["S16"] += 1
+        deps.decisions.reject(
+            title=task.title, url=used_url, rule_id="S16.square", detail=conflict
         )
         return
     served = downloaded if downloaded is not None else image

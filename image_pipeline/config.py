@@ -216,7 +216,7 @@ class PipelineConfig:
     # ----- quotas ----------------------------------------------------------
     # Customer decision 2026-10-06: aim for 3 images per product when the site has
     # them; fewer than `min_required_images` accepted -> status `partial`.
-    target_images_per_product: int = 3
+    target_images_per_product: int = 10
     min_required_images: int = 2
     #: Owner 2026-10-19, **off by default**: when a row found nothing anywhere, publish from a
     #: marketplace page whose *files* name the model even though its *page* never proved it
@@ -478,6 +478,20 @@ class PipelineConfig:
     #: pages, Surmawala was never searched, and the row failed with "no page matched"
     #: although the shop had the exact product.
     fallback_max_pages_per_source: int = 3
+    #: The wide hunt: a row that published **nothing** may keep asking shops past the
+    #: ordinary budget, because run refrigerators_50_titles showed six pages was too small
+    #: (``sources tried: dawlance:sitemap:0, surmawala:shopify:3, modernelectronics:shopify:3``
+    #: - two answering shops ate the budget and japanelectronics.com.pk, which sells the row,
+    #: was never queried: the same run crawled it 30x for other rows).
+    #: OWNER SETTING 2026-10-20, and this number is his, not the code's: measured on
+    #: refrigerators_60_titles, all 14 wide hunts crawled the 18-source catalogue each and
+    #: published **zero** images, so he set it *below* ``fallback_max_pages_per_row``.  Any
+    #: value at or below that cap simply means the extra hunt never runs and an empty row
+    #: costs the shops it used to.  It is never a ConfigError for being small - a row that
+    #: stops early is his call, a run that refuses to start is a bug.
+    #: Only the *row* cap moves here: ``fallback_max_pages_per_source`` stays, because it is
+    #: the fairness rule that makes a bigger budget mean more shops, not one shop ransacked.
+    fallback_max_pages_per_row_when_nothing_found: int = 3
     fallback_max_search_per_source: int = 1
     source_search_timeout_s: float = 12.0
     sitemap_ttl_days: int = 7
@@ -645,7 +659,17 @@ class PipelineConfig:
     #: own page only the two identity-strength signals run (see
     #: ``color_gate_official_chroma_exempt``), and the "is it a colour or is it a wash"
     #: test is saturation-based instead of raw channel spread.
-    color_gate_enabled: bool = True
+    color_gate_enabled: bool = False
+    #: S16.square (owner 2026-10-20): judge the colour on the picture that actually ships.
+    #: S16 sees the file the shop served; the run's refrigerator batch then published a red
+    #: patterned door on a `Black` row and a bronze "New Classic Plus" fridge on three Kenwood
+    #: colourways, because the raw frame's dark trim and studio wash hid the colour print.
+    #: The check runs on image 01 only - images 2+ are the parts and detail shots the owner
+    #: asked to keep, and an open fridge's cool-white shelves are no opinion about its colour -
+    #: and it reuses S16's own naming bar (a chromatic foreground), so a grey/white/black
+    #: studio shot and a row that states no colour can never be refused by it.  Measured on the
+    #: owner's own 101 published squares: 5 heroes refused, all five a different colourway.
+    published_colour_gate: bool = True
     #: S17's evidence bar (owner 2026-10-16): how many accepted pictures must agree on one
     #: colour family before that family becomes the gallery's colour and a different family
     #: can be refused.  One picture never decides - a detail shot of a white AC with a black
@@ -1001,6 +1025,8 @@ class PipelineConfig:
             )
         if self.fallback_max_pages_per_row < 1:
             raise ConfigError("fallback_max_pages_per_row must be >= 1")
+        if self.fallback_max_pages_per_row_when_nothing_found < 1:
+            raise ConfigError("fallback_max_pages_per_row_when_nothing_found must be >= 1")
         if self.brand_match_min_length < 3:
             raise ConfigError("brand_match_min_length must be >= 3")
         if self.brand_match_min_digits < 1:

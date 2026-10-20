@@ -34,7 +34,7 @@ python3 main.py --input sample_input.csv --workers 4        # real run (needs FR
 
 python3 -m ruff check .        # must print: All checks passed!
 python3 -m mypy --strict .     # must print: Success: no issues found
-python3 -m pytest tests -q     # 832 tests, fakes only, no network
+python3 -m pytest tests -q     # 841 tests, fakes only, no network
 python3 -m radon cc . -n C -s --exclude "tests/*"   # code health: 63 blocks at C or
                                # worse (baseline) - no function may gain a grade
 ```
@@ -50,8 +50,10 @@ variable always wins. **Never print, log, commit or echo the key value.**
   tops a short row up, and only with proof) and `S22.coherence` (report-only: an album holding two
   different bodies), `S7.band`, `S7.seam`, `S7.official`, `S11.fetch`, `S13.fetch`,
   `S15.fetch`, `S15.relaxed`, `S15.tolerated`, `S15.image` (a page matched only on brand + number,
-  so each file must prove the row itself), `S15.unverified` (stage 3d, off by default: a named
-  marketplace shop's page used when the row found nothing anywhere, flagged and never `ok`), `S16` (Visual Color Gate), `S17` (Intra-Gallery Consistency)
+  so each file must prove the row itself), `S15.file_code` (the page matched only a *variant
+  spelling*, and the file names a number that is not this row's), `S15.unverified` (stage 3d, off by
+  default: a named
+  marketplace shop's page used when the row found nothing anywhere, flagged and never `ok`), `S16` (Visual Color Gate), `S16.square` (the same colour verdict on the **published hero**, image 01 only), `S17` (Intra-Gallery Consistency)
   and `S18` (Crop Closure - the one guard that never rejects: it grows the isolation box so a crop
   cannot cut the product, and is switched off by `isolation_crop_closure = False`).
   `S19` (Branded Template Guard, Option 2 `--direct` only): a store's own theme frame is not a

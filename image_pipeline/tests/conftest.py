@@ -178,17 +178,24 @@ class FakeImageFetcher:
 
 @dataclass
 class FakeSourceSearcher:
-    """Fake fallback chain: returns prepared candidates and records the calls."""
+    """Fake fallback chain: returns prepared candidates and records the calls.
+
+    ``wide_candidates`` lets a test give the "available but not found" hunt (F4) a different
+    answer than the ordinary one, which is exactly the situation the hunt exists for: the
+    narrow budget never reached the shop that has the product.
+    """
 
     candidates: list[PageCandidate] = field(default_factory=list)
+    wide_candidates: list[PageCandidate] = field(default_factory=list)
     report: SourceSearchReport = field(default_factory=SourceSearchReport)
-    calls: list[tuple[str, str | None]] = field(default_factory=list)
+    calls: list[tuple[str, str | None, bool]] = field(default_factory=list)
 
     def find_candidates(
-        self, *, title: str, brand: str | None, keys: ModelKeys
+        self, *, title: str, brand: str | None, keys: ModelKeys, wide: bool = False
     ) -> tuple[list[PageCandidate], SourceSearchReport]:
-        self.calls.append((title, brand))
-        return list(self.candidates), self.report
+        self.calls.append((title, brand, wide))
+        chosen = self.wide_candidates if wide and self.wide_candidates else self.candidates
+        return list(chosen), self.report
 
 
 @dataclass

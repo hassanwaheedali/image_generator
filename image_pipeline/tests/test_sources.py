@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlsplit
 
 from config import PipelineConfig
 from model_matching import build_model_keys
@@ -441,6 +441,107 @@ def test_each_source_contributes_at_most_its_share_of_the_budget(tmp_path: Path)
     found, _ = chain.find_candidates(title="x", brand="dawlance", keys=keys)
     assert sum("dawlance" in candidate.origin for candidate in found) == 2
     assert len(found) == 4                                              # 2 brand + 2 retail
+
+
+def test_a_row_that_found_nothing_asks_the_whole_catalogue(tmp_path: Path) -> None:
+    """Live run refrigerators_50_titles 2026-10-20 (K4): every failed row's note read
+    ``sources tried: www.dawlance.com.pk:sitemap:0, www.surmawala.pk:shopify:3,
+    modernelectronics.pk:shopify:3`` - two answering shops filled the six-candidate budget,
+    the loop broke, and ``japanelectronics.com.pk`` - which really has the page
+    (``/products/dawlance-ref-9191-acce-coral-red``, crawled 30x that run for other rows) -
+    was never queried.
+
+    ``wide=True`` is the "available but not found" hunt: the row published nothing, so it
+    keeps asking shops past the ordinary budget.
+    """
+    shops = (
+        "https://www.surmawala.pk",
+        "https://modernelectronics.pk",
+        "https://japanelectronics.com.pk",
+    )
+    pages: dict[str, str] = {}
+    for base in shops:
+        host = urlsplit(base).netloc
+        pages[f"{base}/robots.txt"] = "User-agent: *\nDisallow:\n"
+        payload = json.dumps(
+            {
+                "resources": {
+                    "results": {
+                        "products": [
+                            {
+                                "url": f"/products/dawlance-dw-7500-{host}-{position}",
+                                "title": (
+                                    f"Dawlance Semi Automatic Washing Machine DW-7500 "
+                                    f"{host} {position}"
+                                ),
+                            }
+                            for position in ("10kg", "12kg", "flip-lid")
+                        ]
+                    }
+                }
+            }
+        )
+        for limit in (6, 24):
+            pages[
+                f"{base}/search/suggest.json?q=DW-7500&resources[type]=product"
+                f"&resources[limit]={limit}"
+            ] = payload
+    config = _config(
+        tmp_path,
+        fallback_max_pages_per_row=6,
+        fallback_max_pages_per_source=3,
+        retail_shopify_sources=shops,
+        retail_woo_sources=(),
+        fallback_max_pages_per_row_when_nothing_found=24,
+    )
+    keys = build_model_keys("Dawlance DW-7500 WHITE Twin Tub Washing Machine")
+
+    narrow_http = FakeHttp(pages)
+    narrow_chain = SourceChain(
+        config, narrow_http, sitemap_cache=SitemapCache(tmp_path / "sm_narrow", 7)
+    )
+    narrow, _ = narrow_chain.find_candidates(title="x", brand=None, keys=keys)
+    assert [urlsplit(c.url).netloc for c in narrow] == [
+        "www.surmawala.pk",
+        "www.surmawala.pk",
+        "www.surmawala.pk",
+        "modernelectronics.pk",
+        "modernelectronics.pk",
+        "modernelectronics.pk",
+    ], "the two answering shops must fill the ordinary six-page budget and stop the loop"
+    assert not any("japanelectronics" in url for url in narrow_http.requested)
+
+    wide_http = FakeHttp(pages)
+    wide_chain = SourceChain(
+        config, wide_http, sitemap_cache=SitemapCache(tmp_path / "sm_wide", 7)
+    )
+    wide, wide_report = wide_chain.find_candidates(title="x", brand=None, keys=keys, wide=True)
+    assert any("japanelectronics" in url for url in wide_http.requested), (
+        "a row with nothing published must keep asking shops"
+    )
+    assert [urlsplit(c.url).netloc for c in wide[:6]] == [
+        "www.surmawala.pk",
+        "www.surmawala.pk",
+        "www.surmawala.pk",
+        "modernelectronics.pk",
+        "modernelectronics.pk",
+        "modernelectronics.pk",
+    ]
+    assert any("japanelectronics.com.pk" in candidate.url for candidate in wide[6:])
+    assert "japanelectronics.com.pk:shopify:3" in wide_report.tried
+
+
+def test_the_wide_hunt_off_switch_is_its_budget_equal_to_the_ordinary_one(
+    tmp_path: Path,
+) -> None:
+    """One threshold field: set it to ``fallback_max_pages_per_row`` and the wide hunt can
+    collect nothing the ordinary hunt could not - the same pages in the same order."""
+    chain, _ = _chain_fixture(tmp_path, fallback_max_pages_per_row_when_nothing_found=6)
+    keys = build_model_keys("Dawlance DW-7500 WHITE Twin Tub Washing Machine")
+    narrow, _ = chain.find_candidates(title="x", brand="dawlance", keys=keys)
+    wide, _ = chain.find_candidates(title="x", brand="dawlance", keys=keys, wide=True)
+    assert [candidate.url for candidate in wide] == [candidate.url for candidate in narrow]
+    assert len(narrow) == 5
 
 
 def test_candidate_ranking_prefers_the_sheets_own_variant(tmp_path: Path) -> None:

@@ -65,7 +65,7 @@ class SourceSearcher(Protocol):
     """
 
     def find_candidates(
-        self, *, title: str, brand: str | None, keys: ModelKeys
+        self, *, title: str, brand: str | None, keys: ModelKeys, wide: bool = False
     ) -> tuple[list[PageCandidate], SourceSearchReport]:
         ...
 

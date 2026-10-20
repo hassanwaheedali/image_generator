@@ -34,6 +34,7 @@ from variant_terms import (
     colour_phrase,
     colour_word_conflict,
     is_colour_word,
+    same_colour,
     shade_agreement,
     suffix_agreement,
 )
@@ -744,7 +745,50 @@ def series_differentiators() -> frozenset[str]:
     return _SERIES_DIFFERENTIATORS
 
 
-def _keep_name_segment(normalized: str, standalone: bool = True) -> bool:
+def _slot_colour_words(token: str, sold: frozenset[str]) -> set[str]:
+    """Colour words a token prints that are not the colourway the row itself sells.
+
+    The comparison is by family and spelling-alias, not by string equality: a row selling a
+    ``Gray`` machine has already used the grey slot, so its ``gray`` is never promoted.
+    """
+    words = {
+        segment.lower()
+        for segment in re.split(r"[^A-Za-z0-9]+", token)
+        if len(segment) >= 4 and segment.isalpha()
+    }
+    return {
+        word
+        for word in words
+        if is_colour_word(word) and not any(same_colour(word, own) for own in sold)
+    }
+
+
+def _line_slot_names(title: str) -> frozenset[str]:
+    """Colour words the title writes in the slot right behind the model code.
+
+    The sheet puts a product line where the line goes - live (owner 2026-10-20): the
+    ``9173WB`` is sold as the ``Chrome``, the ``Avante`` and the ``Digital Pro``, so the
+    ``Chrome`` of ``Dawlance 9173WB Chrome 12 Cu Ft … - Pearl Copper`` names a line, not a
+    colour, and the row needs it to veto a sibling's page.
+
+    Two conditions make the position count as evidence, and they are what keeps every
+    ordinary colourway a colour: the row must sell a *different* colourword (its own colour
+    is never promoted), and only the slot behind a code token qualifies - the word in front
+    of the code is a colourway, which is how the catalogue also writes ``Haier Chrome …
+    Pearl Blue``.
+    """
+    colour_word, colour_shade = colour_phrase(title, _COLOURWAY_WORDS)
+    sold = frozenset({colour_word, colour_shade} - {""})
+    names: set[str] = set()
+    after_code = False
+    for token in title.split():
+        if after_code:
+            names.update(_slot_colour_words(token, sold))
+        after_code = any(c.isdigit() for c in token) and any(c.isalpha() for c in token)
+    return frozenset(names)
+
+
+def _keep_name_segment(normalized: str, standalone: bool = True, line_name: bool = False) -> bool:
     """Whether a pure-alphabetic, already-lowercased segment names the product line.
 
     A learned differentiator is kept however short or "generic" it is, but only when
@@ -754,7 +798,9 @@ def _keep_name_segment(normalized: str, standalone: bool = True) -> bool:
     colour).
     """
     if is_colour_word(normalized):
-        return False
+        # The one exception the sheet writes itself: a colourword sitting in the line
+        # slot behind the model code while the row sells a different colourway.
+        return line_name
     if standalone and normalized in _SERIES_DIFFERENTIATORS:
         return True
     if len(normalized) < 4:
@@ -780,6 +826,7 @@ def _name_segments(
     base: list[str] = []
     candidates: list[str] = []
     anchors: dict[str, str] = {}
+    line_names = _line_slot_names(title)
     last_named = False
     last_name_word = ""
     for token in title.split():
@@ -792,7 +839,7 @@ def _name_segments(
             if not raw or not raw.isalpha():
                 continue
             normalized = raw.lower()
-            if _keep_name_segment(normalized, standalone):
+            if _keep_name_segment(normalized, standalone, line_name=normalized in line_names):
                 if normalized not in base:
                     base.append(normalized)
                 last_named = True
@@ -1069,13 +1116,16 @@ def _name_words(title: str) -> tuple[str, ...]:
     and stays a name word.
     """
     out: list[str] = []
+    line_names = _line_slot_names(title)
     for token in title.split():
         standalone = not any(c.isdigit() for c in token)
         for segment in re.split(r"[^A-Za-z0-9]+", token):
             if not segment.isalpha():
                 continue
             normalized = segment.lower()
-            if normalized in out or not _keep_name_segment(normalized, standalone):
+            if normalized in out or not _keep_name_segment(
+                normalized, standalone, line_name=normalized in line_names
+            ):
                 continue
             out.append(normalized)
         anchor = _glued_plus(token)
@@ -1858,6 +1908,23 @@ def url_names_other_family_code(
         code_names_other_family_code(code, filename, tail_min=tail_min)
         for code in keys.tokens
     )
+
+
+#: How many digits a file name must write before it is read as naming a model.  Four is
+#: the shortest real code number these shops write whole (`418` is a family, `22257` is a
+#: machine); below it a file name is a photo counter (`img-1-2.jpg`, `a1-19-5.webp`) and
+#: claiming one would refuse correct pictures by the thousand.
+_FILE_CODE_MIN_DIGITS = 4
+
+
+def url_claims_a_code(url: str) -> bool:
+    """True when the file name writes a number big enough to be a model code.
+
+    Only the file name speaks - a category folder, a size suffix or an upload date is no
+    statement about which machine this is.
+    """
+    filename = urlsplit(unquote(url)).path.rsplit("/", 1)[-1]
+    return any(len(run) >= _FILE_CODE_MIN_DIGITS for run in re.findall(r"\d+", filename))
 
 
 #: The shortest a word may be to name a product line: ``mega``, ``frost``, ``ifga``

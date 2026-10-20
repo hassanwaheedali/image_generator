@@ -467,8 +467,17 @@ class SourceChain:
         title: str,
         brand: str | None,
         keys: ModelKeys,
+        wide: bool = False,
     ) -> tuple[list[PageCandidate], SourceSearchReport]:
-        """Candidate pages for this row, official brand sources first."""
+        """Candidate pages for this row, official brand sources first.
+
+        ``wide`` is the "available but not found" hunt (owner 2026-10-20): the caller has
+        already spent the ordinary budget on this row and published nothing, so the row cap
+        becomes ``fallback_max_pages_per_row_when_nothing_found`` and the loop keeps walking
+        the catalogue instead of breaking after the first two shops that answered.  The
+        per-source share is deliberately *not* widened - it is the rule that makes a bigger
+        budget mean more shops asked rather than the same three shops ransacked.
+        """
         terms = search_terms(keys, brand=brand, title=title)
         if not terms:
             # Never silent: the row had neither a model code nor keywords to search with.
@@ -477,9 +486,10 @@ class SourceChain:
         found: list[PageCandidate] = []
         seen: set[str] = set()
         per_source = self._config.fallback_max_pages_per_source
+        per_row = self._row_budget(wide)
 
         for base in self._config.sources_for(brand):
-            if len(found) >= self._config.fallback_max_pages_per_row:
+            if len(found) >= per_row:
                 break
             host = urlsplit(base).netloc.lower() or base.lower()
             if is_excluded_host(host, self._config.excluded_hosts):
@@ -492,7 +502,7 @@ class SourceChain:
                 tried.append(f"{host} (robots)")
                 LOG.info("source skipped (robots): %s", host)
                 continue
-            candidates = self._search(base, host, platform, terms, keys)
+            candidates = self._search(base, host, platform, terms, keys, per_row)
             # The sheet's variant first, then this source's own relevance order.  Only
             # this source's share of the budget is taken, so one chatty source (a brand
             # sitemap listing the whole family) cannot hide the priority-2 retailers.
@@ -503,10 +513,16 @@ class SourceChain:
                     continue
                 seen.add(candidate.url)
                 found.append(candidate)
-                if len(found) >= self._config.fallback_max_pages_per_row:
+                if len(found) >= per_row:
                     break
 
         return found, _as_report(found, tried)
+
+    def _row_budget(self, wide: bool) -> int:
+        """How many pages this hunt may collect: the row cap, or the wide hunt's cap."""
+        if wide:
+            return self._config.fallback_max_pages_per_row_when_nothing_found
+        return self._config.fallback_max_pages_per_row
 
     # -- per-platform search ------------------------------------------------
     def _search(
@@ -516,17 +532,19 @@ class SourceChain:
         platform: str,
         terms: tuple[str, ...],
         keys: ModelKeys,
+        per_row: int,
     ) -> list[PageCandidate]:
         if platform == "shopify":
-            return self._shopify(base, host, terms)
+            return self._shopify(base, host, terms, per_row)
         if platform == "woo":
-            return self._woo(base, host, terms)
+            return self._woo(base, host, terms, per_row)
         if platform == "sitemap":
-            return self._from_sitemap(base, host, keys)
+            return self._from_sitemap(base, host, keys, per_row)
         return []
 
-    def _shopify(self, base: str, host: str, terms: tuple[str, ...]) -> list[PageCandidate]:
-        limit = self._config.fallback_max_pages_per_row
+    def _shopify(
+        self, base: str, host: str, terms: tuple[str, ...], limit: int
+    ) -> list[PageCandidate]:
         for term in terms:
             url = (
                 f"{base.rstrip('/')}/search/suggest.json?q={quote_plus(term)}"
@@ -540,8 +558,9 @@ class SourceChain:
                 return hits
         return []
 
-    def _woo(self, base: str, host: str, terms: tuple[str, ...]) -> list[PageCandidate]:
-        limit = self._config.fallback_max_pages_per_row
+    def _woo(
+        self, base: str, host: str, terms: tuple[str, ...], limit: int
+    ) -> list[PageCandidate]:
         for term in terms:
             url = (
                 f"{base.rstrip('/')}/wp-json/wc/store/products"
@@ -555,7 +574,7 @@ class SourceChain:
                 return hits
         return []
 
-    def _from_sitemap(self, base: str, host: str, keys: ModelKeys) -> list[PageCandidate]:
+    def _from_sitemap(self, base: str, host: str, keys: ModelKeys, per_row: int) -> list[PageCandidate]:
         urls = self._sitemap_urls(base, host)
         if not urls:
             return []
@@ -574,7 +593,7 @@ class SourceChain:
         ]
         # Rank before truncating: a sitemap lists the whole model family in arbitrary
         # order, so the sheet's own variant must not be cut off by the budget.
-        return rank_candidates(candidates, keys)[: self._config.fallback_max_pages_per_row]
+        return rank_candidates(candidates, keys)[:per_row]
 
     def _sitemap_urls(self, base: str, host: str) -> list[str]:
         cached = self._sitemaps.load(host, refresh=self._config.refresh_sitemaps)

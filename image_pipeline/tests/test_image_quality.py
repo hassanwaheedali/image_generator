@@ -36,6 +36,7 @@ from image_quality import (
     border_is_clean,
     diagram_sheet_reason,
     has_extreme_aspect,
+    hero_colour_conflict,
     is_large_enough,
     is_marketing_layout,
     is_monochrome_emblem,
@@ -2063,3 +2064,41 @@ def test_coherence_note_admits_one_graded_continuum_reads_as_two() -> None:
         [_body_at(0.42), _body_at(0.53), _body_at(0.73), _body_at(0.84)]
     )
     assert "two different-looking bodies" in note
+
+
+# --------------------------------------------------------------------------- #
+# S16.square - the hero must be the row's colour (owner 2026-10-20: a red patterned
+# door published on a Black row, a bronze fridge on three Kenwood colourways)
+# --------------------------------------------------------------------------- #
+def _door(colour: str, badge: str = "", badge_side: int = 0) -> Image.Image:
+    image = Image.new("RGB", (600, 600), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((150, 90, 450, 510), radius=18, fill=colour)
+    if badge:
+        draw.rectangle((160, 100, 160 + badge_side, 100 + badge_side), fill=badge)
+    return image
+
+
+def test_a_hero_reading_another_colour_is_refused() -> None:
+    reason = hero_colour_conflict(_door("#c0392b"), frozenset({"black"}))
+    assert "red" in reason
+    assert "black" in reason
+
+
+def test_a_hero_in_the_row_colour_says_nothing() -> None:
+    assert hero_colour_conflict(_door("#1b1b1b"), frozenset({"black"})) == ""
+
+
+def test_a_grey_studio_hero_says_nothing() -> None:
+    """Grey and white products stay publishable: the gate names a colour or keeps quiet."""
+    assert hero_colour_conflict(_door("#b9bcc0"), frozenset({"red"})) == ""
+
+
+def test_a_small_colour_print_says_nothing() -> None:
+    """An open fridge's cool-white shelves, a red badge - too little colour to accuse.  This is
+    why only image 01 is judged and only at S16's own naming bar."""
+    assert hero_colour_conflict(_door("#1b1b1b", "#c0392b", 40), frozenset({"black"})) == ""
+
+
+def test_a_row_that_states_no_colour_is_never_refused() -> None:
+    assert hero_colour_conflict(_door("#c0392b"), frozenset()) == ""
