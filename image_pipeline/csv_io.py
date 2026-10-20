@@ -21,7 +21,7 @@ import os
 import re
 import tempfile
 import uuid
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -246,6 +246,13 @@ def filename_prefix(keys: ModelKeys, title: str) -> str:
 #: Title words are split on anything a filename may not carry.
 _TITLE_WORD_RE = re.compile(r"[^A-Za-z0-9]+")
 
+#: Characters a file name may not carry, when reading a stem the owner wrote himself.
+_SEPARATOR_RUN_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+#: ``(task) -> the stem this run already knows for that row``, or ``""`` for "none".
+#: Option 3 passes ``main.local_image_stem``: the owner's own picture names win.
+StemOf = Callable[[ProductTask], str]
+
 
 def _digest_tail(title: str) -> str:
     return sha256_bytes(title.encode("utf-8"))[:6]
@@ -326,13 +333,41 @@ def _clashing_indices(tasks: Sequence[ProductTask], stems: Mapping[int, str]) ->
     return clash
 
 
-def assign_filename_prefixes(tasks: Sequence[ProductTask]) -> list[ProductTask]:
+def _owned_stem(seed: str) -> str:
+    """The stem an owner already wrote on his own pictures, made usable as a file name.
+
+    Characters a filename may not carry become ``_`` (his folders arrive as
+    ``['GR-ES8890G-CW1_BROWN']_1.png``), and a stem longer than the budget is cut on whole
+    pieces, never mid-word.  ``""`` means "this name tells us nothing", and the caller
+    falls back to the title.
+    """
+    cleaned = _SEPARATOR_RUN_RE.sub("_", seed.strip()).strip("_.-")
+    pieces = [piece for piece in cleaned.split("_") if piece]
+    if not pieces:
+        return ""
+    return guard_windows_name(_join_within_budget(pieces, MAX_PREFIX_CHARS))
+
+
+def _row_stem(task: ProductTask, keys: ModelKeys, stem_of: StemOf | None) -> str:
+    """The stem one row starts with: the name it already owns, else the worded title stem."""
+    owned = _owned_stem(stem_of(task)) if stem_of is not None else ""
+    return owned or worded_filename_prefix(keys, task.title)
+
+
+def assign_filename_prefixes(
+    tasks: Sequence[ProductTask], *, stem_of: StemOf | None = None
+) -> list[ProductTask]:
     """Give every row a stem that says which product it is: ``[code]_[SERIES]_[COLOUR]``.
 
     One naming rule for all three modes - sheet, ``--direct`` and ``--images-dir`` -
     because what makes a name ambiguous is the title, not where the picture came from.
     A row whose title states no series and no colour keeps the bare code stem (owner
     decision D7), so those names do not move.
+
+    ``stem_of`` is how a mode says "this row already has a better name than its title".
+    Option 3 passes ``main.local_image_stem``, because the owner writes his picture files
+    as ``9178LF_ICEMAX_GREEN_1.png`` and his own stem beats what a 90-character folder
+    title can produce.  A stem it returns is still subject to the collision test below.
 
     Rows whose stems still match another row's once case is folded take a hash of the
     exact title: Windows, WordPress and every CDN media library fold case, so
@@ -349,7 +384,7 @@ def assign_filename_prefixes(tasks: Sequence[ProductTask]) -> list[ProductTask]:
     keys_by_index = {task.index: build_model_keys(task.title) for task in tasks}
     titles = {task.index: task.title for task in tasks}
     bases = {task.index: filename_prefix(keys_by_index[task.index], task.title) for task in tasks}
-    stems = {task.index: worded_filename_prefix(keys_by_index[task.index], task.title) for task in tasks}
+    stems = {task.index: _row_stem(task, keys_by_index[task.index], stem_of) for task in tasks}
     for index in _clashing_indices(tasks, stems):
         digest = _digest_tail(titles[index])
         if stems[index].endswith(f"_{digest}"):

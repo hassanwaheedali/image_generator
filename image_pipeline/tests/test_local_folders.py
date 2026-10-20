@@ -16,13 +16,21 @@ from config import ConfigError, PipelineConfig
 from csv_io import (
     _TITLE_WORD_RE,
     MAX_PREFIX_CHARS,
+    StemOf,
     assign_filename_prefixes,
     filename_prefix,
     hash_source_urls,
     worded_filename_prefix,
 )
 from fetch import FetchError, LocalImageFetcher
-from main import _build_tasks, _product_path, build_config, build_parser, discover_product_folders
+from main import (
+    _build_tasks,
+    _product_path,
+    build_config,
+    build_parser,
+    discover_product_folders,
+    local_image_stem,
+)
 from model_matching import build_model_keys
 from models import ProductTask
 from platforms import resolve_platforms
@@ -603,9 +611,109 @@ def _tasks(*titles: str) -> list[ProductTask]:
     return [ProductTask(index=n, title=t, source_urls=(f"http://x/{n}.jpg",)) for n, t in enumerate(titles)]
 
 
-def _stems(tasks: list[ProductTask]) -> list[str]:
+def _stems(tasks: list[ProductTask], *, stem_of: StemOf | None = None) -> list[str]:
     """The stems the run-wide rule assigned; every row here is expected to be named."""
-    return [t.name_prefix_override for t in assign_filename_prefixes(tasks) if t.name_prefix_override]
+    return [t.name_prefix_override for t in assign_filename_prefixes(tasks, stem_of=stem_of) if t.name_prefix_override]
+
+
+def _owned_task(index: int, title: str, *file_names: str) -> ProductTask:
+    """A row whose pictures were named by the owner - what Option 3 discovers on disk."""
+    return ProductTask(
+        index=index,
+        title=title,
+        source_urls=tuple(f"D:/stock/49_images/{title}/{name}" for name in file_names),
+    )
+
+
+def _final_stem(task: ProductTask) -> str:
+    """The stem the row publishes under: its override, or the D7 stem ``pipeline.py`` falls back to."""
+    keys = build_model_keys(task.title)
+    return task.name_prefix_override or filename_prefix(keys, task.title)
+
+
+class TestFolderOwnedStem:
+    """Option 3: pictures that already carry the owner's own name keep it."""
+
+    def test_the_owners_own_stem_wins_over_the_title(self) -> None:
+        title = (
+            "Dawlance 14 Cu Ft Mist Green Glass Door Direct Cool Inverter Refrigerator "
+            "- 9178LF IceMax - 12 Years Compressor Warranty"
+        )
+        task = _owned_task(0, title, "9178LF_ICEMAX_GREEN_1.png", "9178LF_ICEMAX_GREEN_2.png")
+        assigned = assign_filename_prefixes([task], stem_of=local_image_stem)[0]
+        assert assigned.name_prefix_override == "9178LF_ICEMAX_GREEN"
+
+    def test_only_the_number_tail_is_dropped(self) -> None:
+        # A model code ENDS in digits, so the number must be read from the last separator,
+        # not the first: DW-1051_1.jpg is picture 1 of DW-1051, not picture 1051 of DW.
+        first = _owned_task(0, "Dawlance 9178 IceMax", "9178LF_ICEMAX_GREEN_1.png", "9178LF_ICEMAX_GREEN_10.png")
+        second = _owned_task(1, "Dawlance Washing Machine DW-1051 White", "DW-1051_1.jpg")
+        assigned = assign_filename_prefixes([first, second], stem_of=local_image_stem)
+        assert assigned[0].name_prefix_override == "9178LF_ICEMAX_GREEN"
+        # His own name here IS the code, so no override is needed: the pipeline's fallback
+        # prints the same stem.  What matters is what the row publishes under.
+        assert _final_stem(assigned[1]) == "DW-1051"
+
+    def test_names_that_disagree_fall_back_to_the_title(self) -> None:
+        title = "Haier HSU-9160LF Grey 1.5 Ton"
+        task = _owned_task(0, title, "01.png", "IMG_2024.jpg")
+        assigned = assign_filename_prefixes([task], stem_of=local_image_stem)[0]
+        assert assigned.name_prefix_override == worded_filename_prefix(build_model_keys(title), title)
+
+    def test_characters_a_filename_cannot_carry_are_dropped(self) -> None:
+        # Two of the owner's 49 folders wrap the name in brackets.
+        task = _owned_task(0, "Gree 16 Cu Ft Brown Refrigerator", "['GR-ES8890G-CW1_BROWN']_1.png")
+        assigned = assign_filename_prefixes([task], stem_of=local_image_stem)[0]
+        assert assigned.name_prefix_override == "GR-ES8890G-CW1_BROWN"
+
+    def test_a_space_inside_the_name_becomes_a_separator(self) -> None:
+        task = _owned_task(0, "Samsung 1-Door Larder", "Samsung 1-Door Larder_1.png")
+        assigned = assign_filename_prefixes([task], stem_of=local_image_stem)[0]
+        assert assigned.name_prefix_override == "Samsung_1-Door_Larder"
+
+    def test_two_folders_that_wrote_the_same_name_still_part(self) -> None:
+        first = _owned_task(0, "Haier 9160LF Grey 1.5 Ton", "SAME_STEM_1.jpg")
+        second = _owned_task(1, "Haier 9160LF White 1.5 Ton", "SAME_STEM_1.jpg")
+        pair = _stems([first, second], stem_of=local_image_stem)
+        assert len(pair) == 2 and pair[0] != pair[1]
+        assert all("__" not in stem and len(stem) <= MAX_PREFIX_CHARS for stem in pair), pair
+
+    def test_an_over_long_own_name_is_cut_on_a_word_not_mid_word(self) -> None:
+        long = "DAWLANCE_9178LF_ICEMAX_MIST_GREEN_WITH_A_VERY_LONG_TAIL_OF_WORDS_1"
+        task = _owned_task(0, "Dawlance 9178LF IceMax Mist Green", f"{long}.jpg", f"{long}_2.jpg")
+        assigned = assign_filename_prefixes([task], stem_of=local_image_stem)[0]
+        stem = assigned.name_prefix_override or ""
+        assert len(stem) <= MAX_PREFIX_CHARS
+        assert "__" not in stem
+        assert stem.split("_")[-1] != "WOR"  # not half of "WORDS"
+
+    def test_the_sheet_modes_never_read_a_name_off_the_url(self) -> None:
+        # Options 1 and 2 take their stem from the Title; the shop's own file names in the
+        # URL are the shop's business.  Only the local-folder mode passes stem_of.
+        title = "Haier HSU-9160LF Grey 1.5 Ton"
+        task = _owned_task(0, title, "9178LF_ICEMAX_GREEN_1.png")
+        assert assign_filename_prefixes([task])[0].name_prefix_override == "HSU-9160LF_HAIER_GREY"
+
+
+    def test_a_camera_serial_is_not_a_picture_number(self) -> None:
+        # IMG_0001.jpg / IMG_0002.jpg and DW-1051.png END in digits but are not "picture 1
+        # of DW-1051": adopting them would name the product "IMG" or "DW".  A picture index
+        # is short and carries no leading zero - anything else leaves the title to name it.
+        camera = _owned_task(0, "Haier HSU-9160LF Grey 1.5 Ton", "IMG_0001.jpg", "IMG_0002.jpg")
+        serial = _owned_task(1, "Dawlance Washing Machine DW-1051 White", "DW-1051.png")
+        assigned = assign_filename_prefixes([camera, serial], stem_of=local_image_stem)
+        for task in assigned:
+            title = task.title
+            assert _final_stem(task) == worded_filename_prefix(build_model_keys(title), title)
+
+    def test_a_duplicate_download_keeps_the_folder_name(self) -> None:
+        # A browser copy lands beside the original as "9178LF_ICEMAX_GREEN_1 (1).png"; that
+        # second file must not throw away the name the whole folder was written with.
+        task = _owned_task(
+            0, "Dawlance 9178LF IceMax", "9178LF_ICEMAX_GREEN_1.png", "9178LF_ICEMAX_GREEN_1 (1).png"
+        )
+        assigned = assign_filename_prefixes([task], stem_of=local_image_stem)[0]
+        assert assigned.name_prefix_override == "9178LF_ICEMAX_GREEN"
 
 
 class TestAssignFilenamePrefixes:

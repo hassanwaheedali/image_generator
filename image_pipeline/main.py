@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import logging
+import re
 import sys
 import threading
 from collections.abc import Callable
@@ -324,6 +325,45 @@ def _product_path(path: Path) -> str:
     return path.resolve().as_posix()
 
 
+#: The owner's own numbering convention: ``9178LF_ICEMAX_GREEN_1.png``, ``DW-1051_10.jpg``.
+#: Non-greedy on the stem, anchored on the digits, so a model code ending in numbers
+#: (``DW-1051``) keeps them and only the LAST ``_``/``-`` group is read as the picture number.
+_NUMBERED_PICTURE_RE = re.compile(r"^(?P<stem>.+?)[_-](?P<number>\d+)$")
+
+#: A browser or WordPress copy lands beside the original as ``name (1)``/``name~1``.
+_DUPLICATE_DOWNLOAD_RE = re.compile(r"(?: ~\d+| \(\d+\))$")
+
+
+def _is_picture_number(number: str) -> bool:
+    """True for an index (``_1`` … ``_99``, no leading zero) - not for ``DW-1051`` or ``IMG_0001``.
+
+    Those two end in digits too, but they are the model and the camera's serial, and adopting
+    them would publish a folder as ``DW`` or ``IMG`` and let every other such folder collide
+    with it.  Nothing the pipeline keeps is numbered past ``max_images_per_product``.
+    """
+    return len(number) <= 2 and not number.startswith("0")
+
+
+def local_image_stem(task: ProductTask) -> str:
+    """The name the owner already wrote on a product's pictures, when they all agree.
+
+    Option 3's folders arrive as ``9178LF_ICEMAX_GREEN_1.png`` … ``_7.png``: he has already
+    done the naming, and his stem beats what a 90-character folder title can produce.  A
+    folder whose files are not all numbered the same way (``01.png``, ``photo.jpg``,
+    ``IMG_0001.jpg``) offers no name, so the caller falls back to the title.
+    """
+    stems: set[str] = set()
+    for url in task.source_urls:
+        name = _DUPLICATE_DOWNLOAD_RE.sub("", Path(url).stem).strip()
+        match = _NUMBERED_PICTURE_RE.match(name)
+        if match is None or not _is_picture_number(match.group("number")):
+            return ""
+        stems.add(match.group("stem").strip())
+    if len(stems) != 1:
+        return ""
+    return next(iter(stems))
+
+
 def _folder_images(folder: Path) -> tuple[str, ...]:
     from url_filters import IMAGE_EXTENSIONS
 
@@ -401,12 +441,13 @@ def _build_tasks(config: PipelineConfig, input_path: Path) -> tuple[list[Product
     """The run's tasks: Option 3 reads folders, every other mode reads the sheet.
 
     ``assign_filename_prefixes`` then runs over the whole list, because a duplicated
-    file name is a property of the titles - whichever mode collected them.
+    file name is a property of the titles - whichever mode collected them.  Only Option 3
+    offers a name of its own (the owner's picture files), so only it passes ``stem_of``.
     """
     if config.local_images_mode:
         tasks, warnings = merge_duplicate_titles(discover_product_folders(input_path))
-    else:
-        tasks, warnings = merge_duplicate_titles(read_input(input_path, direct=config.direct_mode))
+        return assign_filename_prefixes(tasks, stem_of=local_image_stem), warnings
+    tasks, warnings = merge_duplicate_titles(read_input(input_path, direct=config.direct_mode))
     return assign_filename_prefixes(tasks), warnings
 
 
