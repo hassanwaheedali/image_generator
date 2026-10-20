@@ -22,6 +22,7 @@ import re
 import tempfile
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -259,60 +260,91 @@ def _title_rest_words(keys: ModelKeys, title: str) -> tuple[str, ...]:
     return tuple(word for word in words if word and word.casefold() not in code_pieces)
 
 
-def _stem_loses_punctuation(title: str, tokens: tuple[str, ...]) -> bool:
-    """True when the title carries a character the stem cannot carry back.
-
-    The fold keeps ASCII letters, digits and " "; a code token keeps its own
-    internal hyphens verbatim ("MSAG2B-12HRDN1-QC0").  Anything else - a "_",
-    a "/", a "(", a "ß" - is distinguishing information two different folder
-    names could hinge on, and the stem would print them identically.
-    """
-    bare = title
-    for token in tokens:
-        bare = bare.replace(token, " ", 1)
-    return any(not (ch.isascii() and ch.isalnum()) and ch != " " for ch in bare)
+def _digest_tail(title: str) -> str:
+    return sha256_bytes(title.encode("utf-8"))[:6]
 
 
-def _fold_is_lossy(keys: ModelKeys, title: str, stem: str, rest: tuple[str, ...]) -> bool:
-    """True when the stem cannot tell two different titles apart.
+def worded_filename_prefix(keys: ModelKeys, title: str) -> str:
+    """A stem that names one product among its siblings: the code plus the title's words.
 
-    Three ways that happens: ``filename_prefix`` cut code tokens, the REST words
-    did not fit the budget, or the title carries punctuation the stem drops -
-    "Black/White", "Black-White" and "Black White" fold to the same words but
-    are different folder names.
-    """
-    tokens = tuple(clean for clean in (_prefix_token(token) for token in keys.tokens) if clean)
-    if stem != "_".join(tokens):
-        return True  # filename_prefix dropped or hard-sliced code tokens
-    if "_".join((stem, *rest)) != _join_within_budget((stem, *rest), MAX_PREFIX_CHARS):
-        return True  # the REST words did not fit the budget
-    return _stem_loses_punctuation(title, tokens)
-
-
-def local_filename_prefix(keys: ModelKeys, title: str) -> str:
-    """Option 3 stem: the folder title's own words join the model code.
-
-    Colourways of one code live in separate folders (``…QC0 Black``, ``…QC0 White``)
-    but share the D7 code-only stem, and WordPress identifies media by filename -
-    one stem would replace the other colourway's pictures.  The rest of the title
-    uppercased keeps every folder's files distinct; whenever that fold could hide a
-    difference between two titles (budget cuts, dropped punctuation) the stem ends
-    in a hash of the exact title instead, so distinct titles never share a stem.
+    Colourways of one code share the D7 code-only stem, and WordPress identifies media
+    by filename - one stem would replace the other colourway's pictures.  The title's
+    own words, uppercased and reduced to characters a filename may carry, keep every
+    sibling distinct; a title too long for the budget carries a hash instead, because
+    a cut-off tail of words is where two long titles would meet again.
     """
     stem = filename_prefix(keys, title)
     if not keys.tokens:
         # The no-code fallback already hashes the whole title, so it is unique per
-        # folder; there is no shared code stem to disambiguate.
+        # row; there is no shared code stem to disambiguate.
         return stem
-    rest = _title_rest_words(keys, title)
-    if _fold_is_lossy(keys, title, stem, rest):
-        # The stem is cut to make room: one already at the budget would swallow the
-        # digest whole.  The REST words go - appending them could push it back out.
-        digest = sha256_bytes(title.encode("utf-8"))[:6]
-        return guard_windows_name(f"{stem[: MAX_PREFIX_CHARS - 7]}_{digest}")
-    if not rest:
+    words = _title_rest_words(keys, title)
+    if not words:
         return stem
-    return guard_windows_name(_join_within_budget((stem, *rest), MAX_PREFIX_CHARS))
+    full = "_".join((stem, *words))
+    if len(full) > MAX_PREFIX_CHARS:
+        full = f"{full[: MAX_PREFIX_CHARS - 7]}_{_digest_tail(title)}"
+    return guard_windows_name(full)
+
+
+def _row_identity(title: str) -> str:
+    """The spelling ``merge_duplicate_titles`` joins on - so anything it left as two
+    rows is by definition two products that must not share a name."""
+    return title.strip().lower()
+
+
+def _clashing_indices(tasks: Sequence[ProductTask], stems: Mapping[int, str]) -> set[int]:
+    """Rows whose file name would be the same on a case-insensitive filesystem.
+
+    Windows, WordPress and every CDN media library fold case, so ``HSU9160LF`` and
+    ``hsu9160lf`` are ONE name, not two: stems are compared casefolded.  Titles are
+    compared with ``_row_identity``, the exact normalization the merge used, so two
+    rows the merge kept apart are never treated as one product here.
+    """
+    by_stem: dict[str, list[ProductTask]] = {}
+    for task in tasks:
+        by_stem.setdefault(stems[task.index].casefold(), []).append(task)
+    clash: set[int] = set()
+    for group in by_stem.values():
+        if len({_row_identity(task.title) for task in group}) > 1:
+            clash.update(task.index for task in group)
+    return clash
+
+
+def assign_filename_prefixes(tasks: Sequence[ProductTask]) -> list[ProductTask]:
+    """Name every row uniquely - or leave it exactly as it has always been named.
+
+    Three cheapest steps, and every mode goes through them, because a duplicated file
+    name is a property of the titles and not of where the pictures came from (sheet
+    rows of one code in three colourways collide just like three folders do):
+
+    1. the code-only stem (D7).  Unique in this run -> nothing is set, so a catalogue
+       that does not collide keeps printing the file names it already published;
+    2. rows sharing that stem take the words of their own title: ``9160LF_GREY_1_5_TON``;
+    3. rows *still* sharing a name - same words, or differing only in case, which
+       Windows/WordPress fold, or cut to the same 48 characters - take a hash tail.
+
+    Uniqueness is decided over the whole list, so a name depends on which rows are in
+    the run: adding a coll sibling can rename a row that previously stood alone.  Rows
+    already in the checkpoint keep the name they published (``name_prefix`` is stored);
+    a ``--no-resume`` or ``--redo`` re-run renames them, and the old media in the shop
+    then belongs to nothing - re-import the row rather than trusting the old file.
+    """
+    from model_matching import build_model_keys
+
+    titles = {task.index: task.title for task in tasks}
+    keys_by_index = {index: build_model_keys(title) for index, title in titles.items()}
+    bases = {index: filename_prefix(keys_by_index[index], title) for index, title in titles.items()}
+    stems = dict(bases)
+    for index in _clashing_indices(tasks, stems):
+        stems[index] = worded_filename_prefix(keys_by_index[index], titles[index])
+    for index in _clashing_indices(tasks, stems):
+        stem = stems[index][: MAX_PREFIX_CHARS - 7]
+        stems[index] = guard_windows_name(f"{stem}_{_digest_tail(titles[index])}")
+    return [
+        replace(task, name_prefix_override=stems[task.index] if stems[task.index] != bases[task.index] else None)
+        for task in tasks
+    ]
 
 
 # --------------------------------------------------------------------------- #

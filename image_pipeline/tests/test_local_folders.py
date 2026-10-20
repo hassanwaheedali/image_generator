@@ -12,9 +12,15 @@ from conftest import clean_product_image, jpeg_bytes, png_bytes
 from PIL import Image, ImageFilter
 
 from config import ConfigError, PipelineConfig
-from csv_io import MAX_PREFIX_CHARS, filename_prefix, hash_source_urls, local_filename_prefix
+from csv_io import (
+    MAX_PREFIX_CHARS,
+    assign_filename_prefixes,
+    filename_prefix,
+    hash_source_urls,
+    worded_filename_prefix,
+)
 from fetch import FetchError, LocalImageFetcher
-from main import _product_path, build_config, build_parser, discover_product_folders
+from main import _build_tasks, _product_path, build_config, build_parser, discover_product_folders
 from model_matching import build_model_keys
 from models import ProductTask
 from platforms import resolve_platforms
@@ -85,65 +91,64 @@ class TestLocalImageFetcher:
         assert LocalImageFetcher(max_bytes=1024).probe_image("whatever", "", 10) is None
 
 
-class TestLocalFilenamePrefix:
+class TestWordedFilenamePrefix:
     """``[code]_[REST]_[N].jpg``: colourways of one code must not share a file name."""
 
     def test_colourways_get_distinct_stems(self) -> None:
         title = "MSAG2B-12HRDN1-QC0 White"
         keys = build_model_keys(title)
-        assert local_filename_prefix(keys, title) == "MSAG2B-12HRDN1-QC0_WHITE"
-        black = local_filename_prefix(build_model_keys("MSAG2B-12HRDN1-QC0 Black"), "MSAG2B-12HRDN1-QC0 Black")
+        assert worded_filename_prefix(keys, title) == "MSAG2B-12HRDN1-QC0_WHITE"
+        black = worded_filename_prefix(build_model_keys("MSAG2B-12HRDN1-QC0 Black"), "MSAG2B-12HRDN1-QC0 Black")
         assert black == "MSAG2B-12HRDN1-QC0_BLACK"
 
     def test_multi_word_rest_joins_with_underscores(self) -> None:
         title = "MSAG2B-12HRDN1-QC0 Ultra Black"
-        assert local_filename_prefix(build_model_keys(title), title) == "MSAG2B-12HRDN1-QC0_ULTRA_BLACK"
+        assert worded_filename_prefix(build_model_keys(title), title) == "MSAG2B-12HRDN1-QC0_ULTRA_BLACK"
 
     def test_code_only_title_is_unchanged(self) -> None:
         title = "MSAG2B-12HRDN1-QC0"
         keys = build_model_keys(title)
-        assert local_filename_prefix(keys, title) == filename_prefix(keys, title)
+        assert worded_filename_prefix(keys, title) == filename_prefix(keys, title)
 
-    def test_punctuation_in_the_title_escapes_to_a_digest_stem(self) -> None:
-        # "(OW)" carries characters a stem cannot keep, so an exact, unambiguous
-        # name is safer than a fold that two titles could share.
+    def test_punctuation_folds_to_readable_words_not_a_hash(self) -> None:
+        # The stem stays readable; uniqueness between two such titles is decided by
+        # assign_filename_prefixes, which sees the whole run.
         title = "MSAG2B-12HRDN1-QC0 White (OW)"
-        stem = local_filename_prefix(build_model_keys(title), title)
-        assert stem.startswith("MSAG2B-12HRDN1-QC0")
-        assert stem != "MSAG2B-12HRDN1-QC0_WHITE"  # must not masquerade as the plain White folder
+        stem = worded_filename_prefix(build_model_keys(title), title)
+        assert stem == "MSAG2B-12HRDN1-QC0_WHITE_OW"
 
     def test_over_budget_title_escapes_to_a_digest_stem(self) -> None:
         # A truncated stem would merge two long titles; the digest keeps them apart.
         title = "MSAG2B-12HRDN1-QC0 " + " ".join(f"word{n}" for n in range(20))
-        stem = local_filename_prefix(build_model_keys(title), title)
+        stem = worded_filename_prefix(build_model_keys(title), title)
         assert len(stem) <= MAX_PREFIX_CHARS
         assert stem.startswith("MSAG2B-12HRDN1-QC0")
 
-    def test_titles_differing_only_by_punctuation_stay_distinct(self) -> None:
-        # "Black/White", "Black-White" and "Black White" must not merge onto one
-        # stem: three folders, three products, three names - WordPress tells them
-        # apart by filename and nothing else.
-        titles = [
-            "MSAG2B-12HRDN1-QC0 Black/White",
-            "MSAG2B-12HRDN1-QC0 Black-White",
-            "MSAG2B-12HRDN1-QC0 Black White",
-        ]
-        stems = {local_filename_prefix(build_model_keys(t), t) for t in titles}
-        assert len(stems) == 3
+    def test_titles_differing_only_by_punctuation_are_named_apart(self) -> None:
+        # "Black/White", "Black-White" and "Black White" fold to the same words; the
+        # run-wide pass is what tells the three folders apart.
+        tasks = assign_filename_prefixes(
+            _tasks(
+                "MSAG2B-12HRDN1-QC0 Black/White",
+                "MSAG2B-12HRDN1-QC0 Black-White",
+                "MSAG2B-12HRDN1-QC0 Black White",
+            )
+        )
+        assert len({t.name_prefix_override for t in tasks}) == 3
 
     def test_truncated_titles_stay_distinct(self) -> None:
         # Two long titles agreeing on their first words must not collapse onto one
         # stem when the budget truncates - that is the collision the rule exists for.
         common = "MSAG2B-12HRDN1-QC0 " + " ".join(f"word{n}" for n in range(20))
         keys = build_model_keys(common)
-        first = local_filename_prefix(keys, common)
-        second = local_filename_prefix(keys, common + " extra")
+        first = worded_filename_prefix(keys, common)
+        second = worded_filename_prefix(keys, common + " extra")
         assert first != second
 
     def test_no_code_title_keeps_the_hash_fallback(self) -> None:
         title = "Split Inverter AC 1 Ton"
         keys = build_model_keys(title)
-        assert local_filename_prefix(keys, title) == filename_prefix(keys, title)
+        assert worded_filename_prefix(keys, title) == filename_prefix(keys, title)
 
     def test_product_task_defaults_to_no_override(self) -> None:
         task = ProductTask(index=0, title="anything", source_urls=("a",))
@@ -279,14 +284,19 @@ class TestImagesDirCli:
         with pytest.raises(ConfigError, match="images-dir"):
             resolve_run_input(self._args("--images-dir", str(tmp_path), "--direct"), config)
 
-    def test_build_tasks_sets_the_stem_override_after_the_merge(self, tmp_path: Path) -> None:
+    def test_build_tasks_names_only_what_would_collide(self, tmp_path: Path) -> None:
         from main import _build_tasks
 
         root = _parent(tmp_path)
         _folder(root, "MSAG2B-12HRDN1-QC0 Black")
         config = _config(tmp_path, direct_mode=True, local_images_mode=True)
         tasks, _ = _build_tasks(config, root)
-        assert tasks[0].name_prefix_override == "MSAG2B-12HRDN1-QC0_BLACK"
+        assert tasks[0].name_prefix_override is None  # one product: the D7 name stands
+
+        _folder(root, "MSAG2B-12HRDN1-QC0 White")
+        black, white = _build_tasks(config, root)[0]
+        assert black.name_prefix_override == "MSAG2B-12HRDN1-QC0_BLACK"
+        assert white.name_prefix_override == "MSAG2B-12HRDN1-QC0_WHITE"
 
     def test_local_tasks_carry_paths_and_hash_like_urls(self, tmp_path: Path) -> None:
         from main import _build_tasks
@@ -384,7 +394,7 @@ def _local_task(tmp_path: Path, images: list[Image.Image], title: str = "Cool Br
     keys = build_model_keys(title)
     return ProductTask(
         index=0, title=title, source_urls=tuple(paths),
-        name_prefix_override=local_filename_prefix(keys, title),
+        name_prefix_override=worded_filename_prefix(keys, title),
     )
 
 
@@ -530,3 +540,75 @@ class TestImagesDirEndToEnd:
         assert (out / "digi" / "digimall_product_images.csv").exists()
         log = (out / "pipeline_run.log").read_text(encoding="utf-8")
         assert "website" in log.lower()  # the skip was announced, not silent
+
+
+# --------------------------------------------------------------------------- #
+# Cross-mode uniqueness: sheet, --direct and --images-dir all share this rule
+# --------------------------------------------------------------------------- #
+def _tasks(*titles: str) -> list[ProductTask]:
+    return [ProductTask(index=n, title=t, source_urls=(f"http://x/{n}.jpg",)) for n, t in enumerate(titles)]
+
+
+def _stems(tasks: list[ProductTask]) -> list[str]:
+    """The stems the run-wide rule assigned; every row here is expected to be named."""
+    return [t.name_prefix_override for t in assign_filename_prefixes(tasks) if t.name_prefix_override]
+
+
+class TestAssignFilenamePrefixes:
+    def test_a_row_nobody_shares_keeps_the_d7_name(self) -> None:
+        # No collision = no churn: already-published listings keep their file names.
+        assigned = assign_filename_prefixes(_tasks("Midea 12HRFN1 QC6 1 Ton GO EASY T3 Inverter AC"))
+        assert assigned[0].name_prefix_override is None
+
+    def test_colourways_of_one_code_get_their_distinguishing_words(self) -> None:
+        first, second, third = _stems(
+            _tasks(
+                "Haier 9160LF Grey 1.5 Ton",
+                "Haier 9160LF White 1.5 Ton",
+                "Haier 9160LF Diamond Grey 1.5 Ton",
+            )
+        )
+        assert len({first, second, third}) == 3
+        assert all(p.startswith("9160LF") for p in (first, second, third))
+        assert "GREY" in first and "WHITE" in second and "DIAMOND" in third
+        assert not any(p and any(c in p for c in "/()") for p in (first, second, third))
+
+    def test_titles_that_fold_identically_get_a_hash_tail_not_a_name_clash(self) -> None:
+        first, second = _stems(_tasks("Haier 9160LF (Grey)", "Haier 9160LF Grey"))
+        assert first != second and None not in (first, second)
+        assert all(len(p) <= MAX_PREFIX_CHARS for p in (first, second))
+
+    def test_it_is_not_limited_to_local_folders(self) -> None:
+        # Sheet rows of one code collide the same way; the rule is mode-agnostic.
+        assert all(p is not None for p in _stems(_tasks("Haier 9160LF Grey", "Haier 9160LF White")))
+
+    def test_case_only_stems_are_one_name_on_windows_and_wordpress(self) -> None:
+        # "HSU9160LF" and "hsu9160lf" are the SAME file to a case-insensitive media
+        # library, so a case difference never counts as uniqueness.
+        first, second = _stems(_tasks("Haier HSU9160LF", "Haier hsu9160lf Grey"))
+        assert first.casefold() != second.casefold()
+
+    def test_titles_the_merge_left_apart_are_never_given_one_name(self) -> None:
+        # "Straße" and "Strasse" are one word folded, but two rows: the merge keyed on
+        # lower() kept them apart, so the naming must treat them as two products.
+        first, second = _stems(_tasks("Haier 9160LF Straße", "Haier 9160LF Strasse"))
+        assert first != second
+
+
+class TestWordedPrefixStaysReadable:
+    def test_punctuation_titles_keep_readable_words(self) -> None:
+        title = "Haier HSU-9160LF Grey 1.5 Ton"
+        stem = worded_filename_prefix(build_model_keys(title), title)
+        assert stem.startswith("HSU-9160LF") and "GREY" in stem and "1_5_TON" in stem
+        assert "_" in stem  # a name, not a bare hash
+
+
+def test_folder_mode_names_come_from_the_shared_rule(tmp_path: Path) -> None:
+    root = _parent(tmp_path)
+    _photo_folder(root, "Haier 9160LF Grey")
+    _photo_folder(root, "Haier 9160LF White")
+    config = _config(tmp_path, direct_mode=True, local_images_mode=True)
+    tasks, _ = _build_tasks(config, root)
+    prefixes = {t.name_prefix_override for t in tasks}
+    assert len(prefixes) == 2 and None not in prefixes
+

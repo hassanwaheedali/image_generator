@@ -27,11 +27,11 @@ from config import (
     load_env_file,
 )
 from csv_io import (
+    assign_filename_prefixes,
     atomic_write_csv,
     hash_source_urls,
     load_banner_cache,
     load_checkpoint,
-    local_filename_prefix,
     merge_duplicate_titles,
     read_input,
 )
@@ -398,21 +398,16 @@ def discover_product_folders(parent: Path) -> list[ProductTask]:
 
 
 def _build_tasks(config: PipelineConfig, input_path: Path) -> tuple[list[ProductTask], list[str]]:
-    """The run's tasks: Option 3 reads folders, every other mode reads the sheet."""
-    if config.local_images_mode:
-        from model_matching import build_model_keys
+    """The run's tasks: Option 3 reads folders, every other mode reads the sheet.
 
-        merged, warnings = merge_duplicate_titles(discover_product_folders(input_path))
-        # merge_duplicate_titles rebuilds the tasks, so the stem is applied after it.
-        # It keys on the lowercased title, so every spelling of one title shares it.
-        return [
-            replace(
-                task,
-                name_prefix_override=local_filename_prefix(build_model_keys(task.title), task.title),
-            )
-            for task in merged
-        ], warnings
-    return merge_duplicate_titles(read_input(input_path, direct=config.direct_mode))
+    ``assign_filename_prefixes`` then runs over the whole list, because a duplicated
+    file name is a property of the titles - whichever mode collected them.
+    """
+    if config.local_images_mode:
+        tasks, warnings = merge_duplicate_titles(discover_product_folders(input_path))
+    else:
+        tasks, warnings = merge_duplicate_titles(read_input(input_path, direct=config.direct_mode))
+    return assign_filename_prefixes(tasks), warnings
 
 
 def resolve_run_input(args: argparse.Namespace, config: PipelineConfig) -> Path:
