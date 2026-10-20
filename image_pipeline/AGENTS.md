@@ -61,7 +61,7 @@ variable always wins. **Never print, log, commit or echo the key value.**
   download/gates/compose/upload machinery via `direct_pipeline.process_direct_product`.
   Option 3 (`main.py --images-dir`) is the same Option 2 flow over local folders - one subfolder
   per product, folder name = Title - with `fetch.LocalImageFetcher` reading the files; no gate
-  is skipped and only the file-name stem differs (`csv_io.local_filename_prefix`).
+  is skipped; the only difference from Option 2 is where the bytes come from.
   A **report-only** rule - one that judges the row instead of refusing a picture - keeps its rule id in
   this list and appears in the row's `note` / the run report rather than `decisions.jsonl`, because a
   decision line needs a picture that was actually decided about (`S22.coherence`, `S20.unstated`,
