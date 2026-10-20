@@ -485,6 +485,203 @@ def test_fallback_is_not_used_when_sheet_urls_solve_the_row(tmp_path: Path) -> N
     assert "fallback" not in result.note
 
 
+def test_a_page_that_did_not_prove_the_model_vouches_for_no_picture(tmp_path: Path) -> None:
+    """Live bug the owner caught on the refrigerator run 2026-10-19: the `HRF-418IDGA` row
+    published `haier-276ipra.png` and `316-ipra.png` - two *other* fridges - because a
+    `S15.relaxed` page (brand + the number 418, no exact proof) was allowed to hand over
+    whatever its gallery held.  A page that never proved this model cannot vouch for its
+    files, so on such a page every picture must carry this row's own code.  Measured on his
+    run: 12 of 37 published pictures were unproven-page + unproven-file."""
+    config = live_config(tmp_path)
+    page = "https://www.surmawala.pk/products/haier-refrigerator-418-smart-inverter-double-door"
+    html = (
+        "<html><head><title>Haier Refrigerator 418 Smart Inverter Double Door</title></head>"
+        "<body><div class='product-gallery'>"
+        '<img src="https://www.surmawala.pk/cdn/shop/files/haier-276ipra.png">'
+        '<img src="https://www.surmawala.pk/cdn/shop/files/haier-418idga-1.png">'
+        "</div></body></html>"
+    )
+    other = "https://www.surmawala.pk/cdn/shop/files/haier-276ipra.png"
+    own = "https://www.surmawala.pk/cdn/shop/files/haier-418idga-1.png"
+    deps, _, _, _ = build_deps(
+        tmp_path,
+        {
+            "https://www.haier.com/pk/none.shtml": "<html><body>nothing</body></html>",
+            page: html,
+        },
+        {
+            other: png_bytes(clean_product_image(900, 500, "#c0392b")),
+            own: png_bytes(clean_product_image(700, 700, "#2e6b4f")),
+        },
+    )
+    deps.source_searcher = FakeSourceSearcher(
+        candidates=[
+            PageCandidate(url=page, origin="json-search:www.surmawala.pk", method="json-search")
+        ]
+    )
+    result, accepted = process_product(
+        task(
+            0,
+            "Haier HRF-418IDGA 11 Cu Ft Refrigerator",
+            ("https://www.haier.com/pk/none.shtml",),
+        ),
+        deps,
+        config,
+    )
+
+    assert [image.source_url for image in accepted] == [own]   # only the file that proves the row
+    decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
+    assert '"rule_id": "S15.image"' in decisions
+    assert "names no code of this row" in decisions
+    assert result.status is not Status.OK
+
+
+def test_the_unverified_marketplace_last_resort_publishes_when_switched_on(
+    tmp_path: Path,
+) -> None:
+    """Owner 2026-10-19, stage 3d, shipped OFF: a row that found nothing anywhere may still
+    take the shop's picture when the shop writes the code in a shape S1 cannot read - live,
+    `801217 WB` and `120826 JT` pages print `hwm-80-1217`, split by a hyphen.  Here the page's
+    title names no model at all, but its file does.  The row publishes, and it is capped and
+    named: `partial`, an UNVERIFIED note, and a `review_products.csv` line, because a human
+    must look at the picture before the shop uploads it."""
+    config = replace(live_config(tmp_path), last_resort_marketplace_fallback=True)
+    page = """<html><head><title>Haier Inverter Split Air Conditioner</title></head>
+    <body><div class="product-gallery">
+    <img src="https://cdn.surmawala.pk/items/hsu-12hfpaa-1.jpg"></div></body></html>"""
+    deps, _, _, host = build_deps(
+        tmp_path,
+        {"https://www.surmawala.pk/products/haier-inverter-split-ac": page},
+        {"https://cdn.surmawala.pk/items/hsu-12hfpaa-1.jpg": png_bytes(clean_product_image())},
+    )
+    deps.source_searcher = FakeSourceSearcher(
+        candidates=[
+            PageCandidate(
+                url="https://www.surmawala.pk/products/haier-inverter-split-ac",
+                origin="json-search:www.surmawala.pk",
+                method="json-search",
+            )
+        ]
+    )
+    result, accepted = process_product(
+        task(0, "Haier HSU-12HFPAA Inverter AC", ("https://www.haier.com/pk/none.shtml",)),
+        deps,
+        config,
+    )
+
+    assert len(accepted) == 1
+    assert result.status is Status.PARTIAL                # never ok: nobody proved the page
+    assert "UNVERIFIED" in result.note
+    assert host.uploads                                   # and it did publish
+    decisions = (tmp_path / "out" / "decisions.jsonl").read_text(encoding="utf-8")
+    assert '"rule_id": "S15.unverified"' in decisions
+
+
+def test_the_unverified_marketplace_last_resort_is_off_by_default(tmp_path: Path) -> None:
+    """Switched off - today's behaviour, unchanged: the same unprovable page yields nothing."""
+    config = live_config(tmp_path)
+    page = """<html><head><title>Haier Inverter Split Air Conditioner</title></head>
+    <body><div class="product-gallery">
+    <img src="https://cdn.surmawala.pk/items/hsu-12hfpaa-1.jpg"></div></body></html>"""
+    deps, _, image_fetcher, host = build_deps(
+        tmp_path,
+        {"https://www.surmawala.pk/products/haier-inverter-split-ac": page},
+        {"https://cdn.surmawala.pk/items/hsu-12hfpaa-1.jpg": png_bytes(clean_product_image())},
+    )
+    deps.source_searcher = FakeSourceSearcher(
+        candidates=[
+            PageCandidate(
+                url="https://www.surmawala.pk/products/haier-inverter-split-ac",
+                origin="json-search:www.surmawala.pk",
+                method="json-search",
+            )
+        ]
+    )
+    result, accepted = process_product(
+        task(0, "Haier HSU-12HFPAA Inverter AC", ("https://www.haier.com/pk/none.shtml",)),
+        deps,
+        config,
+    )
+
+    assert accepted == []
+    assert result.status is Status.FAILED
+    assert image_fetcher.requested == []
+    assert host.uploads == []
+
+
+def test_stage_3d_visits_only_a_named_shop_and_keeps_the_sheet_tier(tmp_path: Path) -> None:
+    """The page list *is* stage 3d's safety story: a shop the owner named, nothing else, and a
+    sheet URL stays a sheet URL - so relaxed matching (which is fallback-only) can never reach
+    it.  A dead host and a collection listing are dropped by the same two guards the canonical
+    path uses, silently: stage 2/3 already logged that refusal for this URL."""
+    from pipeline import _unverified_marketplace_pages
+
+    config = live_config(
+        tmp_path,
+        last_resort_marketplace_fallback=True,
+        last_resort_marketplace_hosts=("www.surmawala.pk",),
+        excluded_hosts=("telex.pk",),
+    )
+    row = task(
+        0,
+        "Haier HWM 80-1217 WB",
+        (
+            "https://www.surmawala.pk/products/haier-washing-machine-80-1217",
+            "https://telex.pk/products/haier-80-1217",
+            "https://friendshome.pk/products/haier-80-1217",
+        ),
+    )
+    searched = [
+        PageCandidate(
+            url="https://www.surmawala.pk/collections/washing-machines",
+            origin="json-search:www.surmawala.pk",
+            method="json-search",
+        ),
+        PageCandidate(
+            url="https://www.surmawala.pk/products/haier-hwm-80-1217-wb",
+            origin="json-search:www.surmawala.pk",
+            method="json-search",
+        ),
+    ]
+
+    assert _unverified_marketplace_pages(task=row, searched=searched, config=config) == [
+        ("https://www.surmawala.pk/products/haier-washing-machine-80-1217", False),
+        ("https://www.surmawala.pk/products/haier-hwm-80-1217-wb", True),
+    ]
+
+
+def test_the_unverified_rescue_lifts_only_a_page_that_is_silent(tmp_path: Path) -> None:
+    """S15.unverified rescues a page that says nothing about the model.  A page refused for
+    another colourway or another maker's product is a different product and stays refused -
+    the rescue is about a code we cannot read, never about a verdict we disagree with."""
+    from models import PageMatchResult
+    from pipeline import _unverified_rescue
+
+    deps, _, _, _ = build_deps(tmp_path, {}, {})
+    silent = PageMatchResult(
+        "https://www.surmawala.pk/products/haier-washing-machine",
+        0,
+        (),
+        "no model key found on the page",
+        "none",
+        (),
+    )
+    rescued = _unverified_rescue(
+        silent, deps=deps, title="Haier HWM 80-1217 WB", page_url=silent.url
+    )
+    assert rescued.match_rule == "unverified"
+    assert rescued.strength == 1
+
+    for rule in ("colour_conflict", "other_brand_product"):
+        refused = replace(silent, match_rule=rule, detail=f"page shows {rule}")
+        assert (
+            _unverified_rescue(
+                refused, deps=deps, title="Haier HWM 80-1217 WB", page_url=refused.url
+            ).match_rule
+            == rule
+        )
+
+
 def test_fallback_candidate_is_verified_before_any_image_is_used(tmp_path: Path) -> None:
     """S15: a found page that shows another model yields nothing."""
     config = live_config(tmp_path)

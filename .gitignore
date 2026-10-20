@@ -15,6 +15,7 @@ env.txt
 
 # Run Artifacts & Generated State
 output/
+input/
 state/
 **/state/
 state/checkpoint.jsonl

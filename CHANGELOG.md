@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`last_resort_marketplace_fallback` — when nothing proves the model, ask the named marketplace (off by
+  default).** The owner's instruction for the rows no shop proves: "if not found at end it picks surmawala
+  … if not found simple says not found". Stage 3d runs only when a row has published nothing after sheet
+  pages, fallback search, tolerated spelling and last-resort salvage. It visits the pages offered by
+  `last_resort_marketplace_hosts` (default `www.surmawala.pk` and `japanelectronics.com.pk`) and
+  publishes whatever clears every image
+  gate, flagged `UNVERIFIED marketplace source: <page>` in the review CSV and logged as `S15.unverified`.
+  An unproven page still vouches for no picture: `S15.image` requires each file to name a code of this row.
+  With the default `False` the stage does not run and the row reports "no page matched this model".
 - **S22.source_lock — one album is one shop's gallery (owner 2026-10-17).** "it must download image
   from one source not too many, because too many can cause different varieties ... we choose the best
   one from one, not one here and one from other source". The first page that both publishes a picture
@@ -76,7 +85,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stray never displaces a settled gallery; every other shop still fills a short row only with the
   canonical proof. Measured on that same run: 42 publishing rows, 4 of them mixed shops, and 3 of
   their pictures were second-shop files naming no code — that is the whole cost. `album_lock_min_curated`
-  now decides who may *take over* an album, not who may start one.
+  now decides who may *take over* an album, not who may start one (the entry above deletes that takeover).
 - **`config.py` is the only home for run settings (owner 2026-10-16).** The JSON overlay is
   gone: `--config` no longer exists, `load_config_file` is deleted, and `build_config` reads its
   numbers straight from `PipelineConfig`.  Precedence is now **CLI flag > code default** — no
@@ -88,6 +97,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `__post_init__`, which a loose JSON file never was.
 
 ### Fixed
+- **A page that never proved the model no longer vouches for its pictures (Safeguard S15.image,
+  owner 2026-10-20, `HAIER HRF-418IDGA`).** "look at the pictures it download fallback incorrect pictures
+  … I go manual there is only 1 picture not 3". Two Surmawala pages — `hrf-418-ipga-ipra` and
+  `hrf-418-ifga-ifra-ifpa` — were admitted by the brand+number rule (`S15.relaxed`, "418", no exact
+  proof), and each of those pages is a multi-colourway listing whose gallery also carries the 316, 276,
+  346 and hash-named files of the neighbouring models. The row published 4 pictures that name none of
+  its codes. A file from an unproven page is now judged like any other claim:
+  `pipeline._consume_candidates` refuses it unless its own name anchors to a code of this row
+  (`url_anchored_to_row`), logged as `S15.image`. Measured blast radius over the recorded runs — only a
+  `relaxed` (or the new `unverified`) page can reach the limb, and the washing-machine and AC baselines
+  used **0** such pages, so 0 pictures move there; the refrigerator baseline has exactly 4 relaxed
+  pages and the rule removes the 4 wrong pictures on the `HRF-418IDGA` row, which becomes a loud
+  `failed` ("no page matched this model") instead of another product's photos in the shop.
 - **The artwork no longer prints over the template's own footer text (owner 2026-10-17,
   `midea-mf200-w90-g`).** What looked like a watermark at the bottom of the published picture was
   `assets/website/template.png`'s own `kiachahiye` caption: the product box was fitted to the frame,

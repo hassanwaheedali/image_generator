@@ -218,6 +218,18 @@ class PipelineConfig:
     # them; fewer than `min_required_images` accepted -> status `partial`.
     target_images_per_product: int = 3
     min_required_images: int = 2
+    #: Owner 2026-10-19, **off by default**: when a row found nothing anywhere, publish from a
+    #: marketplace page whose *files* name the model even though its *page* never proved it
+    #: (live: `801217 WB`, `120826 JT` - the shop writes `hwm-80-1217`, split by a hyphen, and
+    #: S1/S15 refuse the page). Every image gate still runs, so a file naming another model is
+    #: still refused, and a row that uses it is capped at `partial` and listed in
+    #: `review_products.csv` as UNVERIFIED - a human checks the picture before the shop uploads
+    #: it. This is a temporary volume lever on rows that would otherwise publish nothing; it is
+    #: not a weakening of S1 for rows that found something.
+    last_resort_marketplace_fallback: bool = False
+    #: The hosts stage 3d may use unverified. Empty with the switch on is a config error:
+    #: "any shop at all" is not a rule, it is a guess.
+    last_resort_marketplace_hosts: tuple[str, ...] = ("www.surmawala.pk", "japanelectronics.com.pk")
     # Owner request 2026-10-06: a brand's own gallery routinely holds more than 5
     # usable product shots (live: the Dawlance DW 7500 TWIN TUB CLEAR LID (WHITE) page
     # publishes 10), and publishing only 5 of them silently threw the rest away.  The
@@ -378,23 +390,23 @@ class PipelineConfig:
             "www.kenwoodpakistan.com": "woo",
             "www.kenwoodpakistan.pk": "woo",
             "www.surmawala.pk": "shopify",
+            "japanelectronics.com.pk": "shopify",
             "friendshome.pk": "shopify",
             "www.alfatah.com.pk": "woo",
+            "pkelectronics.pk": "woo",
+            "pakref.com": "woo",
             "subhanelectronics.pk": "woo",
             "sohailelectronics.com": "woo",
-            "pkelectronics.pk": "woo",
             "jalalelectronics.com": "shopify",
             "modernelectronics.pk": "shopify",
             "shandaarbuy.pk": "shopify",
             "electrociti.pk": "shopify",
             "whitehouse.com.pk": "shopify",
-            "japanelectronics.com.pk": "shopify",
             "www.almumtaz.com.pk": "woo",
             "hadielectronics.com.pk": "woo",
             "cityelectronics.com.pk": "woo",
             "yasirelectronics.com": "woo",
             "umarelectronics.pk": "woo",
-            "pakref.com": "woo",
         }
     )
     #: brand -> its own sources, tried before any retail shop.
@@ -935,6 +947,11 @@ class PipelineConfig:
             raise ConfigError("gallery_publishes_all_min must be >= 1")
         if self.min_required_images < 1:
             raise ConfigError("min_required_images must be >= 1")
+        if self.last_resort_marketplace_fallback and not self.last_resort_marketplace_hosts:
+            raise ConfigError(
+                "last_resort_marketplace_fallback needs last_resort_marketplace_hosts - "
+                "an unverified page is only ever allowed from a shop you named"
+            )
         if self.album_coherence_min_group < 2:
             raise ConfigError(
                 "album_coherence_min_group must be >= 2 (with a group of one there is no "

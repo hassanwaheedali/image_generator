@@ -899,6 +899,51 @@ def process_product(
             album=album,
         )
 
+    # ---- stage 3d: the unverified marketplace page (owner 2026-10-19, ships OFF) -----
+    # "when no model found anywhere ... it picks surmawala" - a row that ended with nothing may
+    # take a named marketplace shop's picture even when that page never proved the model (live:
+    # `801217 WB` / `120826 JT` pages print `hwm-80-1217`, split by hyphens S1 cannot read).
+    # Only a page *silent* about the model is rescued, every image gate still runs, and the row
+    # is capped and listed for a human to check - see config.last_resort_marketplace_fallback.
+    if config.last_resort_marketplace_fallback and not accepted:
+        searched, _ = _ensure_fallback_searched()
+        pages = _unverified_marketplace_pages(task=task, searched=searched, config=config)
+        for page_url, is_fb in pages:
+            if accepted or (cancel_event is not None and cancel_event.is_set()):
+                break
+            pages_tried += 1
+            outcome = _visit_page(
+                task=task,
+                page_url=page_url,
+                source_label="last-resort-marketplace",
+                is_fallback=is_fb,
+                keys=keys,
+                brand=brand,
+                settings=settings,
+                config=config,
+                deps=deps,
+                dedup=dedup,
+                seen_keys=seen_keys,
+                accepted=accepted,
+                rejections=rejections,
+                notes=notes,
+                budget=budget,
+                album=album,
+                salvage=salvage,
+                gallery_colour=gallery_colour,
+                defer_tolerated=False,
+                unverified=True,
+            )
+            if not outcome.fetched or not outcome.matched:
+                pages_rejected += 1
+            if accepted:
+                flag = f"UNVERIFIED marketplace source: {outcome.page_url}"
+                relaxed_notes.append(flag)
+                notes.append(flag)
+                stages.append(f"3d unverified marketplace used: {outcome.page_url}")
+        if not accepted:
+            stages.append("3d unverified marketplace: nothing there either - not found")
+
     # ---- stage 4/5 summary -------------------------------------------------
     if config.album_coherence_note_enabled:
         coherence = _coherence_note(accepted, config)
@@ -1274,6 +1319,40 @@ def _source_host(url: str) -> str:
     return (urlsplit(url).hostname or "").lower().removeprefix("www.")
 
 
+def _host_is_named(url: str, hosts: tuple[str, ...]) -> bool:
+    """True when this page's shop is one the owner wrote into a host list (``surmawala.pk``
+    matches ``www.surmawala.pk`` and ``pk.surmawala.pk``, never ``notsurmawala.pk``)."""
+    host = _source_host(url)
+    return any(
+        host == named or host.endswith(f".{named}")
+        for named in (_source_host(f"https://{h}") for h in hosts)
+    )
+
+
+def _unverified_marketplace_pages(
+    *, task: ProductTask, searched: list[PageCandidate], config: PipelineConfig
+) -> list[tuple[str, bool]]:
+    """The pages stage 3d may visit: named shops only, sheet links first, each with its tier.
+
+    A sheet URL keeps the tier it already had (its rule ids stay ``S1``, and relaxed matching
+    never applies to it); a searched candidate stays a fallback page.  The two URL guards the
+    canonical path applies run here too - a dead host or a collection listing is not a product
+    page whatever tier it arrived on - and a refusal is *silent*: stage 2/3 already logged and
+    counted it for this URL, so a second decision line would be a duplicate, not evidence.
+    """
+    tier: dict[str, bool] = dict.fromkeys(task.source_urls, False)
+    tier.update((c.url, True) for c in searched if c.url not in tier)
+    return [
+        (url, is_fb)
+        for url, is_fb in tier.items()
+        if _host_is_named(url, config.last_resort_marketplace_hosts)
+        and not is_excluded_host(urlsplit(url).netloc.lower(), config.excluded_hosts)
+        and is_fetchable_product_url(
+            url, block_collections_without_products=config.block_collections_without_products
+        )
+    ]
+
+
 def _source_allowed(
     *,
     album: _AlbumSource,
@@ -1490,6 +1569,7 @@ def _visit_page(
     salvage: list[SalvageOffer],
     gallery_colour: list[tuple[str, str]],
     defer_tolerated: bool = False,
+    unverified: bool = False,
 ) -> _PageOutcome:
     """Fetch one page, verify it (S1, or S15 for a fallback candidate), extract, gate.
 
@@ -1512,10 +1592,13 @@ def _visit_page(
     soup = strip_unwanted_regions(_parse(response.text), resolved_url)
     match = verify_page(resolved_url, response.text, keys, brand=brand, settings=settings)
     relaxed = ""
-    if _relaxed_rescue_applies(match, is_fallback):
+    if unverified:
+        match = _unverified_rescue(match, deps=deps, title=task.title, page_url=resolved_url)
+    elif _relaxed_rescue_applies(match, is_fallback):
         # Owner decision 2026-10-06: a fallback page that names the brand and carries the
         # model's own number publishes its pictures and flags the row for manual review,
-        # instead of failing.  Sheet URLs never come here.
+        # instead of failing.  Sheet URLs never come here, and stage 3d never does either:
+        # its own rescue is the unverified limb, so one page is rescued by one rule only.
         relaxed = _relaxed_fallback_note(
             page_url=resolved_url, soup=soup, keys=keys, brand=brand, config=config
         )
@@ -1679,6 +1762,7 @@ def _visit_page(
         budget=budget,
         album=album,
         salvage=salvage,
+        page_proved_model=match.match_rule not in ("relaxed", "unverified"),
     )
     return _PageOutcome(True, True, resolved_url, relaxed, tolerated=tolerated_reason or tail_flag)
 
@@ -1805,6 +1889,34 @@ def _relaxed_rescue_applies(match: PageMatchResult, is_fallback: bool) -> bool:
     )
 
 
+def _unverified_rescue(
+    match: PageMatchResult, *, deps: PipelineDeps, title: str, page_url: str
+) -> PageMatchResult:
+    """Stage 3d (owner 2026-10-19, ships OFF): a named marketplace page that proved nothing.
+
+    The row found nothing anywhere and this shop is one the owner named in
+    ``last_resort_marketplace_hosts``, so the page is admitted **without** proof of the model
+    and flagged for a human - live case: the shop writes ``hwm-80-1217``, split by hyphens
+    that S1 cannot read, so the page is silent about ``801217``.  Only silence qualifies: a
+    page refused for another colourway or another brand is a different product and stays
+    refused.  Every image gate still runs, and the row ends flagged, never ``ok``.
+    """
+    if match.accepted or match.match_rule != "none":
+        return match
+    deps.decisions.keep(
+        title=title,
+        url=page_url,
+        rule_id="S15.unverified",
+        detail=(
+            f"page never proved this model ({match.detail}) - unverified marketplace "
+            "last resort, check the picture before upload"
+        ),
+    )
+    return replace(
+        match, strength=1, detail="unverified marketplace last resort", match_rule="unverified"
+    )
+
+
 def _variant_tails(identities: tuple[str, ...]) -> list[str]:
     """The letter tails the model codes carry, e.g. ``["ifga"]`` for ``HRF-538 IFGA``."""
     return [tail for _, tail in map(identity_alpha_tail, identities) if tail]
@@ -1898,6 +2010,7 @@ def _consume_candidates(
     album: _AlbumSource,
     salvage: list[SalvageOffer],
     official_page: bool = False,
+    page_proved_model: bool = True,
 ) -> None:
     """Cheap checks, a header probe, one download, the gates, then compose.
 
@@ -2002,6 +2115,24 @@ def _consume_candidates(
             verdict = (
                 "S4",
                 f"image URL names another maker ({foreign_maker})",
+            )
+        if (
+            verdict is None
+            and not page_proved_model
+            and not url_anchored_to_row(
+                candidate.url, keys, brand=brand, own_terms=task.own_terms
+            )
+        ):
+            # S15.image: the page reached this row only on a brand + number match, or on the
+            # unverified marketplace switch, so the page vouches for nothing and each file must
+            # vouch for itself (owner's refrigerator run 2026-10-19: an `HRF-418IDGA` row
+            # published `haier-276ipra.png` and `316-ipra.png`, two other fridges, from a page
+            # that matched on "418" alone).  A tolerated spelling and a complete code tail are
+            # not in this list: those pages print this model, just written differently, and the
+            # owner's settled contract is to publish them flagged.
+            verdict = (
+                "S15.image",
+                "the page never proved this model and the file names no code of this row",
             )
         if verdict is None and not _source_allowed(
             album=album,
