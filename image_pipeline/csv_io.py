@@ -222,12 +222,13 @@ def _join_within_budget(tokens: Sequence[str], limit: int) -> str:
 
 
 def filename_prefix(keys: ModelKeys, title: str) -> str:
-    """The filename stem every platform shares for one product's images.
+    """The code-only stem of owner decision D7: what ``[code]_[SERIES]_[COLOUR]`` falls
+    back to when the title states no series and no colour (or has no code at all).
 
-    All model tokens in title order (owner decision D7), so ``Midea 12HRFN1 QC6 1 Ton
-    GO EASY T3 Inverter AC`` -> ``12HRFN1_QC6`` and the finals read ``12HRFN1_QC6_1.jpg``.
-    Using the same stem on all platforms is deliberate: it makes the same photograph
-    comparable across ``digi/``, ``alfa/`` and ``website/`` by filename alone.
+    All model tokens in title order, so ``Midea 12HRFN1 QC6 1 Ton GO EASY T3 Inverter
+    AC`` -> ``12HRFN1_QC6``.  ``worded_filename_prefix`` puts the series and colour words
+    after it; the same stem on every platform is deliberate, because it makes one
+    photograph comparable across ``digi/``, ``alfa/`` and ``website/`` by filename alone.
 
     Rows with no model code fall back to their keywords plus a hash of the title, so two
     keyword-only rows can never collide on the same stem.
@@ -246,45 +247,59 @@ def filename_prefix(keys: ModelKeys, title: str) -> str:
 _TITLE_WORD_RE = re.compile(r"[^A-Za-z0-9]+")
 
 
-def _title_rest_words(keys: ModelKeys, title: str) -> tuple[str, ...]:
-    """The title's distinguishing words, uppercased: what is left after the code.
-
-    Every alphanumeric piece of every code token is the code, not a word - a code
-    like "MSAG2B-12HRDN1-QC0" is one token, but splitting the title on punctuation
-    shatters it into three.
-    """
-    code_pieces = {
-        piece.casefold() for token in keys.tokens for piece in _TITLE_WORD_RE.split(token) if piece
-    }
-    words = (_prefix_token(word.upper()) for word in _TITLE_WORD_RE.split(title) if word)
-    return tuple(word for word in words if word and word.casefold() not in code_pieces)
-
-
 def _digest_tail(title: str) -> str:
     return sha256_bytes(title.encode("utf-8"))[:6]
 
 
-def worded_filename_prefix(keys: ModelKeys, title: str) -> str:
-    """A stem that names one product among its siblings: the code plus the title's words.
+def _identity_words(keys: ModelKeys) -> tuple[str, ...]:
+    """The title's series and colour words, uppercased - its identity minus the code.
 
-    Colourways of one code share the D7 code-only stem, and WordPress identifies media
-    by filename - one stem would replace the other colourway's pictures.  The title's
-    own words, uppercased and reduced to characters a filename may carry, keep every
-    sibling distinct; a title too long for the budget carries a hash instead, because
-    a cut-off tail of words is where two long titles would meet again.
+    ``model_matching`` already splits a title into model tokens, series / colourway
+    words and the colour it sells; the size and tech words it drops ("14 Cu Ft",
+    "Inverter", "1.5 Ton") are not identity and would only push the stem past the
+    48-character budget.  Code pieces are excluded because a token can be spelled out
+    in the series list too.
+    """
+    code_pieces = {
+        piece.casefold() for token in keys.tokens for piece in _TITLE_WORD_RE.split(token) if piece
+    }
+    words: list[str] = []
+    for word in (*keys.name_words, keys.colour_word):
+        clean = _prefix_token(word.upper()) if word else ""
+        if clean and clean.casefold() not in code_pieces and clean not in words:
+            words.append(clean)
+    return tuple(words)
+
+
+def worded_filename_prefix(keys: ModelKeys, title: str) -> str:
+    """The file stem a product publishes under: ``[code]_[SERIES]_[COLOUR]``.
+
+    The owner asked for this on 2026-10-20 after the refrigerator run: every code was
+    unique, so the D7 code-only stem named 60 different fridges ``9178LF_1.jpg`` and
+    nothing in the media library said which series or colour a picture belonged to.
+
+    The budget is spent on whole words - ``_join_within_budget`` - and when it cannot
+    hold them all the COLOUR moves straight behind the code and the exact title's hash
+    takes the place of the words that did not fit.  A half word cut at character 48 is
+    not a name (``..._COOLING_FR_1bc112``), and a stem that lost its colour is not the
+    name the owner asked for.
     """
     stem = filename_prefix(keys, title)
     if not keys.tokens:
-        # The no-code fallback already hashes the whole title, so it is unique per
-        # row; there is no shared code stem to disambiguate.
+        # The no-code fallback already spells the title's own keywords into the stem and
+        # makes it unique with a hash; appending the series words again would repeat
+        # them ("orient-grand-205-c3351f_ORIENT_GRAND_GOLDEN").
         return stem
-    words = _title_rest_words(keys, title)
+    words = _identity_words(keys)
     if not words:
         return stem
-    full = "_".join((stem, *words))
-    if len(full) > MAX_PREFIX_CHARS:
-        full = f"{full[: MAX_PREFIX_CHARS - 7]}_{_digest_tail(title)}"
-    return guard_windows_name(full)
+    joined = "_".join((stem, *words))
+    if len(joined) <= MAX_PREFIX_CHARS:
+        return guard_windows_name(joined)
+    colour = words[-1] if keys.colour_word else ""
+    ordered = (stem, colour, *words[:-1]) if colour else (stem, *words)
+    kept = _join_within_budget([piece for piece in ordered if piece], MAX_PREFIX_CHARS - 7)
+    return guard_windows_name(f"{kept}_{_digest_tail(title)}")
 
 
 def _row_identity(title: str) -> str:
@@ -312,35 +327,35 @@ def _clashing_indices(tasks: Sequence[ProductTask], stems: Mapping[int, str]) ->
 
 
 def assign_filename_prefixes(tasks: Sequence[ProductTask]) -> list[ProductTask]:
-    """Name every row uniquely - or leave it exactly as it has always been named.
+    """Give every row a stem that says which product it is: ``[code]_[SERIES]_[COLOUR]``.
 
-    Three cheapest steps, and every mode goes through them, because a duplicated file
-    name is a property of the titles and not of where the pictures came from (sheet
-    rows of one code in three colourways collide just like three folders do):
+    One naming rule for all three modes - sheet, ``--direct`` and ``--images-dir`` -
+    because what makes a name ambiguous is the title, not where the picture came from.
+    A row whose title states no series and no colour keeps the bare code stem (owner
+    decision D7), so those names do not move.
 
-    1. the code-only stem (D7).  Unique in this run -> nothing is set, so a catalogue
-       that does not collide keeps printing the file names it already published;
-    2. rows sharing that stem take the words of their own title: ``9160LF_GREY_1_5_TON``;
-    3. rows *still* sharing a name - same words, or differing only in case, which
-       Windows/WordPress fold, or cut to the same 48 characters - take a hash tail.
+    Rows whose stems still match another row's once case is folded take a hash of the
+    exact title: Windows, WordPress and every CDN media library fold case, so
+    ``HSU9160LF`` and ``hsu9160lf`` are ONE name, not two.
 
-    Uniqueness is decided over the whole list, so a name depends on which rows are in
-    the run: adding a coll sibling can rename a row that previously stood alone.  Rows
+    Uniqueness is judged over the whole list, so a name depends on which rows are in the
+    run: adding a colliding sibling can rename a row that previously stood alone.  Rows
     already in the checkpoint keep the name they published (``name_prefix`` is stored);
     a ``--no-resume`` or ``--redo`` re-run renames them, and the old media in the shop
     then belongs to nothing - re-import the row rather than trusting the old file.
     """
     from model_matching import build_model_keys
 
+    keys_by_index = {task.index: build_model_keys(task.title) for task in tasks}
     titles = {task.index: task.title for task in tasks}
-    keys_by_index = {index: build_model_keys(title) for index, title in titles.items()}
-    bases = {index: filename_prefix(keys_by_index[index], title) for index, title in titles.items()}
-    stems = dict(bases)
+    bases = {task.index: filename_prefix(keys_by_index[task.index], task.title) for task in tasks}
+    stems = {task.index: worded_filename_prefix(keys_by_index[task.index], task.title) for task in tasks}
     for index in _clashing_indices(tasks, stems):
-        stems[index] = worded_filename_prefix(keys_by_index[index], titles[index])
-    for index in _clashing_indices(tasks, stems):
-        stem = stems[index][: MAX_PREFIX_CHARS - 7]
-        stems[index] = guard_windows_name(f"{stem}_{_digest_tail(titles[index])}")
+        digest = _digest_tail(titles[index])
+        if stems[index].endswith(f"_{digest}"):
+            continue  # `worded_filename_prefix` already made this row's stem its own
+        kept = _join_within_budget(stems[index].split("_"), MAX_PREFIX_CHARS - 7)
+        stems[index] = guard_windows_name(f"{kept}_{digest}")
     return [
         replace(task, name_prefix_override=stems[task.index] if stems[task.index] != bases[task.index] else None)
         for task in tasks

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import re
 import threading
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from PIL import Image, ImageFilter
 
 from config import ConfigError, PipelineConfig
 from csv_io import (
+    _TITLE_WORD_RE,
     MAX_PREFIX_CHARS,
     assign_filename_prefixes,
     filename_prefix,
@@ -26,6 +28,9 @@ from models import ProductTask
 from platforms import resolve_platforms
 from protocols import ImageFetcher
 from url_filters import IMAGE_EXTENSIONS
+
+#: The 6-hex-character hash tail `csv_io` adds when words alone cannot tell two rows apart.
+_DIGEST_RE = re.compile(r"[0-9a-f]{6}")
 
 
 def _config(tmp_path: Path, **overrides: object) -> PipelineConfig:
@@ -92,7 +97,7 @@ class TestLocalImageFetcher:
 
 
 class TestWordedFilenamePrefix:
-    """``[code]_[REST]_[N].jpg``: colourways of one code must not share a file name."""
+    """``[code]_[SERIES]_[COLOUR]_[N].jpg``: a name says which product it belongs to."""
 
     def test_colourways_get_distinct_stems(self) -> None:
         title = "MSAG2B-12HRDN1-QC0 White"
@@ -110,12 +115,14 @@ class TestWordedFilenamePrefix:
         keys = build_model_keys(title)
         assert worded_filename_prefix(keys, title) == filename_prefix(keys, title)
 
-    def test_punctuation_folds_to_readable_words_not_a_hash(self) -> None:
-        # The stem stays readable; uniqueness between two such titles is decided by
-        # assign_filename_prefixes, which sees the whole run.
+    def test_punctuation_that_is_not_an_identity_word_is_not_named(self) -> None:
+        # "(OW)" is warranty noise, not a series and not a colour, so it stays out of the
+        # name.  Two rows differing only by it are still named apart - by the run-wide pass.
         title = "MSAG2B-12HRDN1-QC0 White (OW)"
         stem = worded_filename_prefix(build_model_keys(title), title)
-        assert stem == "MSAG2B-12HRDN1-QC0_WHITE_OW"
+        assert stem == "MSAG2B-12HRDN1-QC0_WHITE"
+        pair = _stems(_tasks(title, "MSAG2B-12HRDN1-QC0 White"))
+        assert len(pair) == 2 and pair[0].casefold() != pair[1].casefold()
 
     def test_over_budget_title_escapes_to_a_digest_stem(self) -> None:
         # A truncated stem would merge two long titles; the digest keeps them apart.
@@ -123,6 +130,37 @@ class TestWordedFilenamePrefix:
         stem = worded_filename_prefix(build_model_keys(title), title)
         assert len(stem) <= MAX_PREFIX_CHARS
         assert stem.startswith("MSAG2B-12HRDN1-QC0")
+
+    def test_over_budget_stem_cuts_words_whole_and_keeps_the_colour(self) -> None:
+        # Owner 2026-10-20 on the refrigerator sheet: the long Samsung rows printed
+        # "RT53DG7B10B1FA_RT7300D_SAMSUNG_COOLING_FR_1bc112" - half a word cut by the
+        # 48-character budget, and the colour cut off with it.
+        title = (
+            "Samsung RT53DG7B10B1FA RT7300D Twin Cooling 19 Cu Ft Steel Door "
+            "No-Frost Inverter Refrigerator Black"
+        )
+        keys = build_model_keys(title)
+        stem = worded_filename_prefix(keys, title)
+        assert len(stem) <= MAX_PREFIX_CHARS
+        assert "__" not in stem
+        assert "BLACK" in stem  # the colour is identity: it survives the cut
+        whole = {word.upper() for word in _TITLE_WORD_RE.split(title) if word} | set(keys.tokens)
+        pieces = [p for p in stem.split("_") if not _DIGEST_RE.fullmatch(p)]
+        assert all(piece.upper() in whole for piece in pieces), stem
+
+    def test_the_run_wide_hash_also_cuts_words_whole(self) -> None:
+        # Two rows whose stems already fit the budget still collide, and the hash tail
+        # is added by cutting - which must not slice a word any more than the budget may.
+        title = "MSAG2B-12HRDN1-QC0 Dawlance IceMax Platinum White"
+        keys = build_model_keys(title)
+        pair = _stems(_tasks(title, title.replace("Platinum White", "Platinum-White")))
+        assert len(pair) == 2 and pair[0] != pair[1]
+        assert all("__" not in stem for stem in pair), pair
+        assert all(len(stem) <= MAX_PREFIX_CHARS for stem in pair), pair
+        whole = {word.upper() for word in _TITLE_WORD_RE.split(title) if word} | set(keys.tokens)
+        for stem in pair:
+            pieces = [p for p in stem.split("_") if not _DIGEST_RE.fullmatch(p)]
+            assert all(p in whole for p in pieces), stem
 
     def test_titles_differing_only_by_punctuation_are_named_apart(self) -> None:
         # "Black/White", "Black-White" and "Black White" fold to the same words; the
@@ -137,18 +175,31 @@ class TestWordedFilenamePrefix:
         assert len({t.name_prefix_override for t in tasks}) == 3
 
     def test_truncated_titles_stay_distinct(self) -> None:
-        # Two long titles agreeing on their first words must not collapse onto one
-        # stem when the budget truncates - that is the collision the rule exists for.
+        # Two long titles agreeing on their first words collapse onto one 48-character
+        # stem; the run-wide pass gives each the hash of its own exact title.
         common = "MSAG2B-12HRDN1-QC0 " + " ".join(f"word{n}" for n in range(20))
-        keys = build_model_keys(common)
-        first = worded_filename_prefix(keys, common)
-        second = worded_filename_prefix(keys, common + " extra")
+        longer = common + " word20"
+        assert worded_filename_prefix(build_model_keys(common), common) == (
+            worded_filename_prefix(build_model_keys(longer), longer)
+        )
+        first, second = _stems(_tasks(common, longer))
         assert first != second
+        assert all(len(stem) <= MAX_PREFIX_CHARS for stem in (first, second))
 
     def test_no_code_title_keeps_the_hash_fallback(self) -> None:
         title = "Split Inverter AC 1 Ton"
         keys = build_model_keys(title)
         assert worded_filename_prefix(keys, title) == filename_prefix(keys, title)
+
+    def test_a_no_code_stem_never_repeats_its_own_words(self) -> None:
+        # Owner 2026-10-20 on the refrigerator sheet: a code-less row came out as
+        # "orient-grand-205-c3351f_ORIENT_GRAND_GOLDEN" - the keywords+hash fallback
+        # already carries those words, and appending them again is garbage.
+        title = "Orient Grand 205 Freezer-on-Top Refrigerator 7 Cu Ft Golden"
+        stem = worded_filename_prefix(build_model_keys(title), title)
+        assert "__" not in stem
+        assert not any(w in stem for w in ("_ORIENT", "_GRAND", "_GOLDEN"))
+        assert stem == stem.lower()  # one stem shape, not a lowercase hash plus caps words
 
     def test_product_task_defaults_to_no_override(self) -> None:
         task = ProductTask(index=0, title="anything", source_urls=("a",))
@@ -284,14 +335,17 @@ class TestImagesDirCli:
         with pytest.raises(ConfigError, match="images-dir"):
             resolve_run_input(self._args("--images-dir", str(tmp_path), "--direct"), config)
 
-    def test_build_tasks_names_only_what_would_collide(self, tmp_path: Path) -> None:
+    def test_build_tasks_words_the_name_in_every_run(self, tmp_path: Path) -> None:
         from main import _build_tasks
 
         root = _parent(tmp_path)
         _folder(root, "MSAG2B-12HRDN1-QC0 Black")
         config = _config(tmp_path, direct_mode=True, local_images_mode=True)
         tasks, _ = _build_tasks(config, root)
-        assert tasks[0].name_prefix_override is None  # one product: the D7 name stands
+        # One product, nothing to collide with: the colour is still in the name, because
+        # a media library that shows only "MSAG2B-12HRDN1-QC0_1.jpg" cannot say which
+        # colourway the picture is (owner, 2026-10-20).
+        assert tasks[0].name_prefix_override == "MSAG2B-12HRDN1-QC0_BLACK"
 
         _folder(root, "MSAG2B-12HRDN1-QC0 White")
         black, white = _build_tasks(config, root)[0]
@@ -555,10 +609,17 @@ def _stems(tasks: list[ProductTask]) -> list[str]:
 
 
 class TestAssignFilenamePrefixes:
-    def test_a_row_nobody_shares_keeps_the_d7_name(self) -> None:
-        # No collision = no churn: already-published listings keep their file names.
-        assigned = assign_filename_prefixes(_tasks("Midea 12HRFN1 QC6 1 Ton GO EASY T3 Inverter AC"))
-        assert assigned[0].name_prefix_override is None
+    def test_series_and_colour_are_in_the_name_even_without_a_collision(self) -> None:
+        # Owner 2026-10-20, refrigerator sheet: every code was unique, so every file was
+        # named with the code alone - nothing told 9178LF IceMax Gold from any other.
+        assigned = assign_filename_prefixes(
+            _tasks("Dawlance 9178LF IceMax 14 Cu Ft Glass Door Water Dispenser Gold")
+        )
+        assert assigned[0].name_prefix_override == "9178LF_DAWLANCE_ICEMAX_GOLD"
+
+    def test_size_and_tech_noise_stays_out_of_the_name(self) -> None:
+        # Capacity, tonnage and "inverter" are not identity; the series and the colour are.
+        assert _stems(_tasks("Haier 9160LF Grey 1.5 Ton")) == ["9160LF_HAIER_GREY"]
 
     def test_colourways_of_one_code_get_their_distinguishing_words(self) -> None:
         first, second, third = _stems(
@@ -568,10 +629,9 @@ class TestAssignFilenamePrefixes:
                 "Haier 9160LF Diamond Grey 1.5 Ton",
             )
         )
-        assert len({first, second, third}) == 3
-        assert all(p.startswith("9160LF") for p in (first, second, third))
-        assert "GREY" in first and "WHITE" in second and "DIAMOND" in third
-        assert not any(p and any(c in p for c in "/()") for p in (first, second, third))
+        assert {first, second} == {"9160LF_HAIER_GREY", "9160LF_HAIER_WHITE"}
+        assert len({first.casefold(), second.casefold(), third.casefold()}) == 3
+        assert not any(any(c in p for c in "/()") for p in (first, second, third))
 
     def test_titles_that_fold_identically_get_a_hash_tail_not_a_name_clash(self) -> None:
         first, second = _stems(_tasks("Haier 9160LF (Grey)", "Haier 9160LF Grey"))
@@ -599,7 +659,7 @@ class TestWordedPrefixStaysReadable:
     def test_punctuation_titles_keep_readable_words(self) -> None:
         title = "Haier HSU-9160LF Grey 1.5 Ton"
         stem = worded_filename_prefix(build_model_keys(title), title)
-        assert stem.startswith("HSU-9160LF") and "GREY" in stem and "1_5_TON" in stem
+        assert stem == "HSU-9160LF_HAIER_GREY"  # code, series, colour - and nothing else
         assert "_" in stem  # a name, not a bare hash
 
 

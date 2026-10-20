@@ -63,10 +63,12 @@ class ProductTask:
     #: at exactly ``1``: ``0`` means never computed (tests, single passes) and ``> 1``
     #: is an ambiguous tail the sheet cannot resolve silently - both stay dead and loud.
     tail_owner_count: int = 0
-    #: The stem every platform's file names share, when this row's name would otherwise
-    #: duplicate another row's - see ``csv_io.assign_filename_prefixes``, which runs for
-    #: sheet, ``--direct`` and ``--images-dir`` alike.  ``None`` means "no collision in
-    #: this run", and the row keeps the model-code stem of owner decision D7.
+    #: The stem every platform's file names share, when it is not the plain model code
+    #: of owner decision D7 - see ``csv_io.assign_filename_prefixes``, which runs for
+    #: sheet, ``--direct`` and ``--images-dir`` alike and words the series and colour
+    #: into it (``[code]_[SERIES]_[COLOUR]``), or adds a hash tail to rows that would
+    #: still share a name.  ``None`` means "this row keeps the D7 stem": a title that
+    #: states no series and no colour, or a code-less title on the keyword+hash fallback.
     #: ``csv_io.merge_duplicate_titles`` rebuilds tasks without it, so the wiring sets
     #: it *after* the merge (``main._build_tasks``).
     name_prefix_override: str | None = None
