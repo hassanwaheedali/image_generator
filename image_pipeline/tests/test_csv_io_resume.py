@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -331,6 +332,27 @@ def test_save_image_atomic_leaves_no_temp_file_behind(tmp_path: Path) -> None:
     path = tmp_path / "one.png"
     save_image_atomic(clean_product_image(60, 60), path, jpeg_quality=90)
     assert sorted(item.name for item in tmp_path.iterdir()) == ["one.png"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows MAX_PATH is a 260-char ceiling")
+def test_save_image_atomic_survives_a_temp_path_over_windows_max_path(tmp_path: Path) -> None:
+    """The temp name is ``.<name>.<32-hex>.tmp.jpg`` - 42 chars longer than the final file.
+
+    A product folder sized to keep the *final* path under MAX_PATH still pushes the *temp*
+    over it, and ``open`` fails with ``[Errno 2] No such file or directory`` - the correct
+    picture is silently lost (live 2026-10-21: 6 Moiz folders created but written empty).
+    """
+    name = "picture_image_1.jpg"                       # short on purpose
+    pad = 234 - 1 - len(os.path.abspath(str(tmp_path)))
+    assert 1 < pad < 200, "tmp_path base is too deep to isolate the temp-overflow case"
+    parent = tmp_path / ("a" * pad)
+    path = parent / name
+    assert len(os.path.abspath(str(path))) < 260       # the final path fits under the ceiling
+    temp_len = len(os.path.abspath(str(parent))) + 1 + (1 + len(name) + 1 + 32 + len(".tmp.jpg"))
+    assert temp_len > 260                              # ...but its temp would not
+    save_image_atomic(clean_product_image(64, 64), path)
+    assert path.exists() and path.read_bytes()[:2] == b"\xff\xd8"   # a real JPEG, written
+    assert not list(parent.glob("*.tmp.jpg"))          # no debris left behind
 
 
 def test_decisions_log_is_jsonl(tmp_path: Path) -> None:

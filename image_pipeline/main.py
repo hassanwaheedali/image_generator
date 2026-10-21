@@ -1065,7 +1065,25 @@ def _write_failed_helper_csvs(
     """Generate ready-to-run CSVs for failed products so they can be re-run easily in Option 1 or Option 2."""
     task_by_index = {task.index: task for task in tasks}
     failed_results = [r for r in results if r.status is Status.FAILED]
-    if failed_results:
+    rejected_rows = _rejected_decision_rows(config)
+    if config.local_images_mode:
+        # An Option 3 failure means his OWN files were refused - re-running them as
+        # direct URLs would refuse them again.  The useful retry is the search: an
+        # empty Source URL makes Option 1 find pictures for the row (owner 2026-10-21).
+        # A row that published one picture but had another refused (the 9191 Golden
+        # Hairline's 204x204 1.jpg, S8) is on the list too: every title in
+        # rejected_images.csv is a picture he still has to replace, and a row missing
+        # here is a bad picture nobody redoes (owner 2026-10-21).  Statuses are untouched.
+        redo_titles = list(
+            dict.fromkeys([*(r.title for r in failed_results), *(row[0] for row in rejected_rows)])
+        )
+        if redo_titles:
+            atomic_write_csv(
+                config.output_dir / "failed_products_option1.csv",
+                ("Title", "Source URL"),
+                [(title, "") for title in redo_titles if title],
+            )
+    elif failed_results:
         rows = [
             (r.title, " | ".join(task_by_index[r.task_index].source_urls) if r.task_index in task_by_index else "")
             for r in failed_results
@@ -1086,29 +1104,39 @@ def _write_failed_helper_csvs(
             )
 
     # 3. Complete CSV audit of all rejected images (blurry, template, color mismatch, etc.)
-    if config.decisions_path.exists():
-        import json
-        rejected_rows = []
+    if rejected_rows:
         try:
-            for line in config.decisions_path.read_text(encoding="utf-8").splitlines():
-                if not line.strip():
-                    continue
-                entry = json.loads(line)
-                if entry.get("decision") == "reject":
-                    rejected_rows.append((
-                        entry.get("title", ""),
-                        entry.get("url", ""),
-                        entry.get("rule_id", ""),
-                        entry.get("detail", ""),
-                    ))
-            if rejected_rows:
-                atomic_write_csv(
-                    config.output_dir / "rejected_images.csv",
-                    ("Title", "URL", "Rule", "Detail"),
-                    rejected_rows,
-                )
+            atomic_write_csv(
+                config.output_dir / "rejected_images.csv",
+                ("Title", "URL", "Rule", "Detail"),
+                rejected_rows,
+            )
         except Exception as exc:
             LOG.warning("could not write rejected_images.csv: %s", exc)
+
+
+def _rejected_decision_rows(config: PipelineConfig) -> list[tuple[str, str, str, str]]:
+    """Every ``reject`` line of this run's ``decisions.jsonl`` as ``(title, url, rule, detail)``."""
+    if not config.decisions_path.exists():
+        return []
+    import json
+
+    rows: list[tuple[str, str, str, str]] = []
+    try:
+        for line in config.decisions_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            entry = json.loads(line)
+            if entry.get("decision") == "reject":
+                rows.append((
+                    entry.get("title", ""),
+                    entry.get("url", ""),
+                    entry.get("rule_id", ""),
+                    entry.get("detail", ""),
+                ))
+    except Exception as exc:
+        LOG.warning("could not read %s: %s", config.decisions_path, exc)
+    return rows
 
 
 

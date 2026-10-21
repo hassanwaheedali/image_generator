@@ -471,6 +471,23 @@ def append_jsonl(path: Path, payload: Mapping[str, Any]) -> None:
         os.fsync(handle.fileno())
 
 
+def _win_extended(path: Path) -> str:
+    """A path string that never trips Windows' 260-char MAX_PATH.
+
+    The atomic temp is named ``.<final>.<32-hex>.tmp.jpg`` - 42 chars longer than the file
+    it becomes.  A product folder sized to keep the *final* path under MAX_PATH therefore
+    still overflows it as a *temp*, and ``open`` dies with ``[Errno 2]`` - a correct picture
+    lost as if the gate had refused it (live 2026-10-21: six Moiz folders written empty).
+    ``\\\\?\\`` switches the Win32 file APIs to extended-length parsing, which removes the
+    ceiling.  Applied whenever the absolute path is a plain drive path (``C:\\...``), so it
+    never mangles a UNC or a relative path and is a no-op on Linux/macOS.
+    """
+    absolute = os.path.abspath(path)
+    if os.name == "nt" and len(absolute) >= 2 and absolute[1] == ":" and absolute[0].isalpha():
+        return "\\\\?\\" + absolute
+    return absolute
+
+
 def save_image_atomic(image: Image.Image, path: Path, *, jpeg_quality: int | None = None) -> None:
     """Save an image atomically (tmp file + ``os.replace``).
 
@@ -478,22 +495,30 @@ def save_image_atomic(image: Image.Image, path: Path, *, jpeg_quality: int | Non
     A quality argument that won over the suffix used to write JPEG bytes into a file named
     ``.png`` - which Pillow, Excel and every image viewer still open happily, so nothing
     downstream would ever report it.
+
+    The temp and the rename go through ``_win_extended`` so a deep run folder cannot lose a
+    correct picture to MAX_PATH while only the *temp* name is over the limit.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
+    final = _win_extended(path)
+    parent = os.path.dirname(final)
+    os.makedirs(parent, exist_ok=True)
     suffix = path.suffix.lower() or ".png"
-    tmp = path.parent / f".{path.name}.{uuid.uuid4().hex}.tmp{suffix}"
+    temp = os.path.join(parent, f".{path.name}.{uuid.uuid4().hex}.tmp{suffix}")
     try:
         if suffix in (".jpg", ".jpeg"):
             from compositing import to_jpeg_bytes
 
-            tmp.write_bytes(to_jpeg_bytes(image, quality=jpeg_quality or _FALLBACK_JPEG_QUALITY))
+            data = to_jpeg_bytes(image, quality=jpeg_quality or _FALLBACK_JPEG_QUALITY)
+            with open(temp, "wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
         else:
-            image.save(tmp)
-        os.replace(tmp, path)
+            image.save(temp)
+        os.replace(temp, final)
     finally:
-        if tmp.exists():
-            with contextlib.suppress(OSError):        # pragma: no cover - defensive
-                tmp.unlink()
+        with contextlib.suppress(OSError):            # pragma: no cover - defensive
+            os.unlink(temp)
 
 
 # --------------------------------------------------------------------------- #

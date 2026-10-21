@@ -814,6 +814,56 @@ def test_studio_shot_that_fills_the_frame_is_accepted_everywhere(config: Pipelin
     assert run_quality_gates(image, config, official_gallery=True)[0] == "ok"
 
 
+def _dark_studio_shot_that_fills_the_frame(size: tuple[int, int] = (600, 600)) -> Image.Image:
+    """The Dawlance 9169WB Cloud White of the Moiz run (owner 2026-10-21): a white fridge
+    on a pure black studio ground, its feet crossing the bottom band."""
+    image = Image.new("RGB", size, (0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((190, 30, 410, 580), radius=10, fill=(238, 238, 240))
+    draw.rectangle((190, 300, 410, 306), fill=(30, 30, 32))  # door seam
+    draw.rectangle((205, 575, 225, 592), fill=(40, 40, 42))  # feet into the bottom band
+    draw.rectangle((375, 575, 395, 592), fill=(40, 40, 42))
+    return image
+
+
+def test_a_curated_white_product_on_a_black_ground_is_accepted(
+    config: PipelineConfig,
+) -> None:
+    """A black studio ground is just as clean as a white one - the isolation keys off
+    whatever colour the corners show - but the rescue counted only BRIGHT neutral corners,
+    so the owner's folder picture died on "border ring is not a clean background".  His
+    curated folder gets the dark band; scraped pages do not (next test)."""
+    image = _dark_studio_shot_that_fills_the_frame()
+    curated = replace(config, direct_mode=True, local_images_mode=True)
+    assert run_quality_gates(image, curated)[0] == "ok"
+
+
+def test_a_black_ground_needs_the_curated_source(config: PipelineConfig) -> None:
+    """Scraped pages keep the white-ground requirement: a night lifestyle photo's flat
+    black corners must not rescue themselves into a gallery the owner never curated."""
+    image = _dark_studio_shot_that_fills_the_frame()
+    assert run_quality_gates(image, config)[0] == "S7"
+
+
+def test_a_curated_full_frame_photo_is_accepted_with_a_note(
+    config: PipelineConfig,
+) -> None:
+    """The DFD 900 Sapphire Black of the Moiz run: a tight crop of the doors that fills
+    the whole frame - there is no ground at all, so S7's ring has nothing to be clean.
+    Every other gate (size, aspect, poster S20, template S19, diagram S21) still runs;
+    in HIS folder the picture is his choice, so it passes with the would-have-been
+    reason kept on the record.  Scraped pages still get S7."""
+    image = Image.new("RGB", (600, 600), (70, 74, 80))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 290, 600, 300), fill=(30, 32, 36))  # door seam across the frame
+    draw.line((300, 0, 300, 600), fill=(20, 20, 24), width=6)
+    curated = replace(config, direct_mode=True, local_images_mode=True)
+    rule, detail = run_quality_gates(image, curated)
+    assert rule == "ok"
+    assert detail  # measured and recorded, not silent
+    assert run_quality_gates(image, config)[0] == "S7"
+
+
 def test_studio_rescue_can_be_switched_off(config: PipelineConfig) -> None:
     image = _studio_shot_that_fills_the_frame()
     strict = replace(config, studio_background_rescue=False)

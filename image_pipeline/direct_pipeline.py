@@ -206,6 +206,13 @@ def process_direct_product(
             if config.keep_rejected_images:
                 _dump_rejected(image, config, task.title, url, rule_id)
             continue
+        if detail:
+            # Accepted, not silent (the S16.curated pattern): the gate would have refused
+            # this picture on a scraped page; in his folder it is his choice, and the
+            # audit trail says so.
+            deps.decisions.keep(
+                title=task.title, url=url, rule_id="S7.curated", detail=detail
+            )
 
         if (
             config.variant_separation_enabled

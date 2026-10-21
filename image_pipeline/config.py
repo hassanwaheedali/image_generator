@@ -565,6 +565,22 @@ class PipelineConfig:
     #: the strict value.
     official_neutral_bright_min_value: float = 0.80
     neutral_bright_max_saturation: float = 0.14
+    #: A studio ground is calm at EITHER brightness end.  This is the dark end, used
+    #: only for the owner's curated ``--images-dir`` folders (owner 2026-10-21: his
+    #: Cloud White fridge sits on a pure black studio ground - perfectly keyable, since
+    #: the isolation keys off whatever colour the corners show - and S7 called it a
+    #: dirty border because the corner bar counted only bright neutral).  Measured:
+    #: black studio grounds sit at value 0.00-0.01; a night-scene or shadowed lifestyle
+    #: corner is above 0.2, so 0.15 separates them.  Scraped pages never get this band:
+    #: there the white requirement is the lifestyle guard.
+    neutral_dark_max_value: float = 0.15
+    #: A dark corner only counts as a black studio ground when the frame also holds a
+    #: product clearly brighter than it (share of a 128px thumbnail at least 0.25 above
+    #: ``neutral_dark_max_value``).  A uniformly dark ring is not proof by itself: a dark
+    #: product filling the frame or a night scene has dark corners too, and keying such
+    #: a frame on "black" would erase the product.  Measured: Cloud White 0.37, the
+    #: 9173WB open-door shot 0.27; an all-dark frame is ~0.
+    neutral_dark_min_product_fraction: float = 0.05
     min_neutral_corners: int = 2
     #: Official brand pages are curated: the images in their product gallery are the
     #: manufacturer's own studio shots, and many of them fill the frame (a top-down view,
@@ -751,6 +767,12 @@ class PipelineConfig:
 
     # ----- compositing -----------------------------------------------------
     canonical_side: int = 1200
+    #: Longest side of the working copy a direct/local picture is judged and composed
+    #: from (0 = never shrink).  The published canvas is ``canonical_side`` px, so pixels
+    #: beyond this are never seen - but the isolation's silhouette closing grows with the
+    #: square of the side: the Moiz run's 4000x5656 Crystal Golden PNG spent 8+ minutes
+    #: in it while holding the GIL, freezing every other worker (owner 2026-10-21).
+    max_working_side: int = 1600
     padding_px: int = 6
     isolation_bg_distance: float = 32.0
     isolation_min_foreground_fraction: float = 0.03
@@ -1120,6 +1142,8 @@ class PipelineConfig:
     def _validate_compositing(self) -> None:
         if self.canonical_side < 64:
             raise ConfigError("canonical_side must be >= 64")
+        if self.max_working_side and self.max_working_side < self.canonical_side:
+            raise ConfigError("max_working_side must be 0 or >= canonical_side")
         if self.padding_px < 0:
             raise ConfigError("padding_px must be >= 0")
         if self.isolation_bg_distance <= 0:

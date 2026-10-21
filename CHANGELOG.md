@@ -162,6 +162,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `test_black_row_still_refuses_a_visible_colour_body`, `test_curated_side_views_survive_the_colour_gates`,
   `test_curated_hero_that_disagrees_is_recorded_not_deleted`.
 ### Changed
+### Changed
+- **A black studio ground is a clean ground, and a curated folder's picture is his choice
+  (owner 2026-10-21, `run_quality_gates`/`studio_background_pass`/`neutral_corner_count`).**
+  His Moiz folder held a white Dawlance fridge on a pure black studio ground - perfectly
+  keyable, because the isolation already keys off whatever colour the corners show - and S7
+  refused it ("border ring is not a clean background"): the corner bar counted only
+  *bright* neutral corners.  Curated `--images-dir` folders now also count corners that are
+  near-neutral at the dark end (`neutral_dark_max_value`, 0.15; measured: black studio
+  grounds 0.00-0.01, shadowed lifestyle corners >0.2).  Scraped pages keep the bright-only
+  requirement - there the white rule is the lifestyle guard.  The second half: a picture
+  with NO ground at all (the DFD 900 doors crop filling its frame) can never have a clean
+  ring, so in a curated folder - after size, aspect, QR, emblem, poster S20, template S19
+  and diagram S21 have all run - S7 accepts it and records the would-have-been reason as
+  `S7.curated`, the same measured-not-silent pattern as `S16.curated`.  Proved on his two
+  real files: the Cloud White fridge keys out of black cleanly (382x917, not degraded),
+  the doors crop publishes as his full-frame product shot.
+  Tests: `test_a_curated_white_product_on_a_black_ground_is_accepted`,
+  `test_a_black_ground_needs_the_curated_source`,
+  `test_a_curated_full_frame_photo_is_accepted_with_a_note`.
+- **A failed Option 3 row now retries through the search, not through his own files
+  (`main._write_failed_helper_csvs`).** The helper CSV keyed off `direct_mode`, and Option 3
+  pairs with it - so a folder run's failures were written to
+  `failed_products_option2.csv` with the owner's local file paths as "Images": re-running
+  that sheet would refuse the same files again.  A curated run now writes
+  `failed_products_option1.csv` with an empty Source URL, which makes Option 1 find
+  pictures for those rows (owner 2026-10-21: "onki aik file baney gaye se... option 1 ke
+  liye baney taake direct run kar diya jaye").
 - **S19 stopped reading a black background as "saturated brand colour" (owner 2026-10-21,
   `image_quality.corner_patch_stats`).** The Moiz folder run accused three clean product
   photos of being themed shop frames - "4 of 4 corners are saturated brand colour" - and the
@@ -173,6 +200,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   protects sit at spread 0.31+ and stay accused.  This is the same class as the colour gates
   fixed the same day: a measurement that misreads a correct picture must not delete it.
   Test: `test_s19_a_black_background_is_not_read_as_brand_colour`.
+- **A deep run folder no longer loses correct pictures to Windows' MAX_PATH (owner 2026-10-21,
+  `csv_io.save_image_atomic`/`_win_extended`).** The Moiz folder re-run reported six rows as
+  `unexpected error: [Errno 2] No such file or directory` on a file like
+  `…\.dawlance-…-8eaa26_1.jpg.<32-hex>.tmp.jpg` and wrote their folders **empty** - not a gate
+  refusing a bad picture, but a good picture vanishing on the way to disk. The atomic writer
+  makes the temp in the final folder named `.<name>.<uuid>.tmp.jpg`, 42 chars longer than the
+  file it becomes; the slug budget (`_final_path_overhead`) sizes the folder for the *final*
+  path only, so a product whose final path fits (222 chars here) still overflows the 260 ceiling
+  as a *temp* (264 chars) and `open` fails. Now the temp, the `fsync`, and the `os.replace`
+  all run through `_win_extended`, which prefixes a plain drive path with `\\?\` so the Win32
+  APIs switch to extended-length parsing and the ceiling disappears; UNC and relative paths and
+  Linux/macOS are untouched. Proved against the real 264-char path that had failed: it writes a
+  valid JPEG now and leaves no `.tmp.jpg` debris.
+  Test: `test_save_image_atomic_survives_a_temp_path_over_windows_max_path`.
 - **Every product's file name now says which product it is (`csv_io.assign_filename_prefixes`,
   2026-10-20).** The D7 code-only stem printed 60 different refrigerators as `9178LF_1.jpg`, and
   three colourways of one code overwrote each other in WordPress, which identifies media by file

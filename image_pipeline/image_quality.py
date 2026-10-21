@@ -338,13 +338,22 @@ def corner_patch_stats(image: Image.Image, ratio: float) -> list[tuple[float, fl
 
 
 def neutral_corner_count(
-    image: Image.Image, ratio: float, min_value: float, max_saturation: float
+    image: Image.Image,
+    ratio: float,
+    min_value: float,
+    max_saturation: float,
+    dark_max: float = -1.0,
 ) -> int:
-    """Count corners that are bright and near-neutral (white-ish background)."""
+    """Count corners that are a calm studio ground - near-neutral at either brightness end.
+
+    ``dark_max`` opens the dark end (a black studio ground, value <= ``dark_max``); it
+    stays negative - off - for scraped pages, where the bright requirement is exactly
+    what keeps a night-scene lifestyle photo out of the gallery.
+    """
     return sum(
         1
         for value, saturation in corner_patch_stats(image, ratio)
-        if value >= min_value and saturation <= max_saturation
+        if saturation <= max_saturation and (value >= min_value or value <= dark_max)
     )
 
 
@@ -740,6 +749,7 @@ def studio_background_pass(image: Image.Image, config: PipelineConfig) -> bool:
         config.corner_patch_ratio,
         config.neutral_bright_min_value,
         config.neutral_bright_max_saturation,
+        config.neutral_dark_max_value if config.local_images_mode else -1.0,
     )
     return corners >= config.studio_rescue_min_neutral_corners
 
@@ -848,12 +858,21 @@ def run_quality_gates(
         studio_background_pass(image, config)
     )
     if not ring_clean and not relaxed_shot:
+        if config.local_images_mode:
+            # His folder, his picture (owner 2026-10-21, the DFD 900 doors crop): a tight
+            # product shot with NO ground around it has nothing for the ring to be clean
+            # against, and every other gate - size, aspect, poster S20, template S19,
+            # diagram S21 - has already run.  Accept it and let the caller keep the
+            # would-have-been reason on the record.  Scraped pages still get S7: there
+            # the ring is the lifestyle guard.
+            return "ok", "curated full-frame: border ring is not a clean background"
         return "S7", "border ring is not a clean background"
     corners = neutral_corner_count(
         image,
         config.corner_patch_ratio,
         config.neutral_bright_min_value,
         config.neutral_bright_max_saturation,
+        config.neutral_dark_max_value if config.local_images_mode else -1.0,
     )
     if corners < config.min_neutral_corners and official_gallery:
         # Official studios print light-grey grounds (~0.85) where retail shots are
@@ -866,6 +885,8 @@ def run_quality_gates(
             config.neutral_bright_max_saturation,
         )
     if corners < config.min_neutral_corners:
+        if config.local_images_mode:
+            return "ok", f"curated full-frame: only {corners} neutral corner(s)"
         return "S7", f"only {corners} neutral corner(s), need {config.min_neutral_corners}"
     return "ok", ""
 
