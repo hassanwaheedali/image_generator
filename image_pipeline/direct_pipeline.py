@@ -48,7 +48,7 @@ from pipeline import (
     _load_prepared_template,
     _row_is_done,
     finalize_and_upload,
-    gallery_colour_gate,
+    note_gallery_colour_conflict,
 )
 from url_filters import dedup_key, detect_brand, display_brand
 
@@ -212,6 +212,10 @@ def process_direct_product(
             and config.color_gate_enabled
             and keys.colour_word
             and not is_display_product(task.title)
+            # Strictly the first image (owner 2026-10-21): a detail shot's hue
+            # cannot say whether it is the right product from another angle or a
+            # wrong colourway, so only the hero is colour-judged.
+            and not accepted
         ):
             color_ok, color_detail = verify_image_color(
                 image,
@@ -222,23 +226,31 @@ def process_direct_product(
                 wash_max_value=config.color_chroma_max_value,
             )
             remaining_urls = [u for u in task.source_urls if dedup_key(u) not in seen_keys and u != url]
-            if not color_ok and (remaining_urls or accepted):
+            if not color_ok and config.local_images_mode:
+                # An owner-curated folder is the one source the run never doubts: it
+                # fetches nothing, his hand-named files ARE the row, and he picked the
+                # order.  No hue rule can tell a wrong colourway from a correct view of
+                # the right product - the Floral Brown CW1's side views frame only its
+                # blue-grey cabinet (100 % blue pixels, and correct; owner 2026-10-21) -
+                # so even the first picture's verdict is recorded, not enforced.
+                deps.decisions.keep(
+                    title=task.title, url=url, rule_id="S16.curated", detail=color_detail
+                )
+            elif not color_ok and remaining_urls:
                 rejections["S16"] += 1
                 deps.decisions.reject(title=task.title, url=url, rule_id="S16", detail=color_detail)
                 if config.keep_rejected_images:
                     _dump_rejected(image, config, task.title, url, "S16")
                 continue
 
-        if gallery_colour_gate(
+        note_gallery_colour_conflict(
             image,
             dedup,
             config=config,
             deps=deps,
             title=task.title,
             url=url,
-            rejections=rejections,
-        ):
-            continue  # S17: another colour family is another product's picture
+        )
         fingerprint = compute_fingerprint(image)
         duplicate = dedup.duplicate_reason(image, fingerprint=fingerprint)
         if duplicate:

@@ -1139,6 +1139,56 @@ def test_black_row_keeps_a_small_correct_black_unit() -> None:
     assert ok is True, reason
 
 
+def test_black_row_keeps_a_glossy_black_glass_door() -> None:
+    """The Floral Black CB1 of the 49-folder run (2026-10-21): black glass reflects the
+    cool studio as dark blue sheen - half the area reads chromatic at hue ~207°, but 97 %
+    of the body is dark and only 2 % of the colour is visible.  A colourway genuinely
+    sold on a black row is a coloured *body* - bright, visible chromatic - not sheen."""
+    from image_quality import verify_image_color
+
+    sheen = Image.new("RGB", (600, 600), (255, 255, 255))
+    ImageDraw.Draw(sheen).rounded_rectangle((150, 90, 450, 510), radius=18, fill=(30, 40, 50))
+    ok, reason = verify_image_color(sheen, "black")
+    assert ok is True, reason
+
+
+def test_grey_row_keeps_a_glossy_dark_glass_unit() -> None:
+    """The same physics on a grey row: grey glass doors photograph with the same dark
+    sheen, and a visible colour body is what the coverage bar must measure."""
+    from image_quality import verify_image_color
+
+    sheen = Image.new("RGB", (600, 600), (255, 255, 255))
+    ImageDraw.Draw(sheen).rounded_rectangle((150, 90, 450, 510), radius=18, fill=(30, 40, 50))
+    ok, reason = verify_image_color(sheen, "grey")
+    assert ok is True, reason
+
+
+def test_black_row_still_refuses_a_dark_dyed_body() -> None:
+    """The sheen concession must not swallow a real colourway: a navy body is dark too,
+    but it is *dyed* - saturation 0.67 against the CB1 glass door's measured 0.48 p90 -
+    and a navy unit on a black row is still a wrong colour."""
+    from image_quality import verify_image_color
+
+    navy = Image.new("RGB", (600, 600), (255, 255, 255))
+    ImageDraw.Draw(navy).rounded_rectangle((150, 90, 450, 510), radius=18, fill=(27, 42, 82))
+    ok, reason = verify_image_color(navy, "black")
+    assert ok is False
+    assert "saturated" in reason
+
+
+def test_black_row_still_refuses_a_visible_colour_body() -> None:
+    """The dark-sheen exclusion must not fail open: a visible blue body on a black row
+    (dark enough to dodge the brightness rule, bright enough to be a real colourway)
+    is still a wrong colour and still refuses."""
+    from image_quality import verify_image_color
+
+    blue = Image.new("RGB", (600, 600), (255, 255, 255))
+    ImageDraw.Draw(blue).rectangle((100, 60, 500, 540), fill=(100, 120, 160))
+    ok, reason = verify_image_color(blue, "black")
+    assert ok is False
+    assert "saturated" in reason
+
+
 def test_white_row_rejects_a_wide_dark_unit() -> None:
     """Audit 2026-10-09: a slim wide black AC on a white row - mean alone misses it."""
     from image_quality import verify_image_color
@@ -2102,3 +2152,33 @@ def test_a_small_colour_print_says_nothing() -> None:
 
 def test_a_row_that_states_no_colour_is_never_refused() -> None:
     assert hero_colour_conflict(_door("#c0392b"), frozenset()) == ""
+
+
+# --------------------------------------------------------------------------- #
+# S16.square vocabulary repair (2026-10-21): the 49-folder run refused five
+# correct heroes because the verdict compared the crude profile bins by exact
+# label equality.  The bins have no brown, and they bin a 335-degree purple as
+# "red", so those rows were refusable 100 % of the time no matter what picture
+# the owner supplied.  The verdict now delegates to S16's own arcs, conflicts
+# table and shade centroids - the same tolerance S16 already applies to the
+# raw download.
+# --------------------------------------------------------------------------- #
+def test_a_brown_hero_stays_on_a_brown_row() -> None:
+    """The two Gree glass-door fridges: walnut brown reads hue ~13 degrees,
+    which the profile bins label 'red'.  S16's conflicts table never bans red
+    for a brown target, so the hero must stay."""
+    assert hero_colour_conflict(_door("#96422b"), frozenset({"brown"})) == ""
+
+
+def test_a_purple_hero_stays_on_a_purple_row() -> None:
+    """The Marvel fridge: median hue 335 degrees bins as 'red' (the bins start
+    red at 335), but 335 degrees sits inside S16's own purple arc (255-25)."""
+    assert hero_colour_conflict(_door("#a00f46"), frozenset({"purple"})) == ""
+
+
+def test_a_wrong_colour_hero_is_still_refused_after_delegation() -> None:
+    """Delegating must not fail open: a green door on a brown row is a wrong
+    colourway - green is in brown's conflict set - and still refuses."""
+    reason = hero_colour_conflict(_door("#2e7d32"), frozenset({"brown"}))
+    assert "green" in reason
+    assert "brown" in reason

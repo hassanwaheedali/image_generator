@@ -129,6 +129,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refrigerator, washing machine, yellow sale template) and over a loopback-HTTP `--dry-run`.
 
 ### Changed
+- **Colour is judged strictly on the row's first picture, with S16's own verdict (owner
+  2026-10-21, `hero_colour_conflict` + `pipeline`/`direct_pipeline`).** The 49-folder run refused
+  five correct heroes and three correct detail shots, and the owner's rule is absolute: *no
+  correct picture may be rejected*.  Root cause, measured on his files: `S16.square` rendered its
+  verdict by exact label equality against `extract_foreground_color_profile`'s five crude bins -
+  which have **no brown at all** (his walnut fridges bin `red` at hue 17°) and bin a 335° purple
+  as `red` although 335° sits inside S16's own purple arc (255-25).  Brown rows were therefore
+  refusable whatever picture they carried.  Three fixes, in order of generality:
+  (1) `hero_colour_conflict` now **delegates** to `verify_image_color` once per family the row
+  names, inheriting the arcs, shade centroids, conflicts table and achromatic path the pipeline
+  has been tuned with for months - a row naming several colours accepts a hero matching any one;
+  (2) the achromatic branch stopped counting **dark sheen as a colourway**: glossy black/grey glass
+  reflects the cool studio at hue ~207° (the Floral Black CB1: 50 % chromatic pixels, 97 % of the
+  body dark, 2 % visible colour), so black and grey targets now weigh only bright chromatic
+  coverage - a visible blue body on a black row still refuses;
+  (3) the per-file `S16` and the gallery rule `S17` no longer judge images 2+ in **any** mode, and
+  `S16.square` steps aside entirely for `--images-dir`: hue cannot tell a side or interior view of
+  the right product from another colourway (the Floral Brown CW1's cabinet side measures 100 % blue
+  and is a correct picture), so the deletion moved to where the signal is trustworthy - the hero of
+  a scraped row.  `S17` keeps recording the album's families and the run report still asks the
+  owner when they mix ("write the colour in the row").  A curated folder's contradictions are
+  logged, never enforced: `S16.curated` / `S17.curated` keep-notes.  Cost of the rule, stated: a
+  wrong-colour *detail* shot on a scraped page now publishes (the two tests written against the
+  old behaviour carry the decision in their docstrings).  Proof on his own folders: the 7 failing
+  folders went 0/7 → 5/7 published, CW1 keeps all 5 pictures, zero colour rejections in the run;
+  the two that still fail are file defects, not gates (a 225×225 source at S8, poster artwork at
+  S20).  `color_gate_enabled` is back on - the off state in `7e93ae5` was a temporary unblock.
+  Tests: `test_a_brown_hero_stays_on_a_brown_row`, `test_a_purple_hero_stays_on_a_purple_row`,
+  `test_a_wrong_colour_hero_is_still_refused_after_delegation`,
+  `test_black_row_keeps_a_glossy_black_glass_door`, `test_grey_row_keeps_a_glossy_dark_glass_unit`,
+  `test_black_row_still_refuses_a_visible_colour_body`, `test_curated_side_views_survive_the_colour_gates`,
+  `test_curated_hero_that_disagrees_is_recorded_not_deleted`.
+### Changed
+- **S19 stopped reading a black background as "saturated brand colour" (owner 2026-10-21,
+  `image_quality.corner_patch_stats`).** The Moiz folder run accused three clean product
+  photos of being themed shop frames - "4 of 4 corners are saturated brand colour" - and the
+  corners were pure black: the patch mean of a JPEG-noisy black ground is something like
+  (0.001, 0.0004, 0), and the ratio `(max - min) / max` divides that noise by ~0.001 and
+  reports a saturation of 0.79.  A patch now carries a hue only when its channels differ in
+  absolute terms (spread >= 0.08, the pipeline's own neutral-patch bar that the studio mask
+  and the panel trim already use); the navy and crimson promo frames `test_s19_rejects_dark_brand_themes_too`
+  protects sit at spread 0.31+ and stay accused.  This is the same class as the colour gates
+  fixed the same day: a measurement that misreads a correct picture must not delete it.
+  Test: `test_s19_a_black_background_is_not_read_as_brand_colour`.
 - **Every product's file name now says which product it is (`csv_io.assign_filename_prefixes`,
   2026-10-20).** The D7 code-only stem printed 60 different refrigerators as `9178LF_1.jpg`, and
   three colourways of one code overwrote each other in WordPress, which identifies media by file

@@ -118,6 +118,19 @@ def test_s19_rejects_dark_brand_themes_too() -> None:
     assert branded_template_reason(_themed_template((190, 30, 45)), config) is not None
 
 
+def test_s19_a_black_background_is_not_read_as_brand_colour() -> None:
+    """The Moiz run 2026-10-21: a product photo on a black ground came back from S19 as
+    "4 of 4 corners are saturated brand colour".  Each corner's mean was
+    (0.001, 0.0004, 0) - JPEG noise on black, no hue at all - and ``(max - min) / max``
+    turns that noise into a saturation of 0.79.  A real theme frame is saturated in
+    ABSOLUTE terms (the navy template above sits at channel spread 0.31, and stays
+    accused); a black ground never is.  The bar is the pipeline's own neutral-patch
+    spread, the 0.08 the studio mask and the panel trim already use."""
+    image = Image.new("RGB", (600, 600), (3, 2, 1))
+    ImageDraw.Draw(image).rounded_rectangle([180, 160, 420, 480], radius=18, fill=(90, 94, 100))
+    assert branded_template_reason(image, PipelineConfig(dry_run=True)) is None
+
+
 def test_s19_needs_three_corners_one_coloured_corner_passes() -> None:
     """A cable/shadow/price tag in one corner must never fire the guard."""
     image = _white_product_photo()

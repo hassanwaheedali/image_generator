@@ -295,8 +295,32 @@ def worded_filename_prefix(keys: ModelKeys, title: str) -> str:
     if not keys.tokens:
         # The no-code fallback already spells the title's own keywords into the stem and
         # makes it unique with a hash; appending the series words again would repeat
-        # them ("orient-grand-205-c3351f_ORIENT_GRAND_GOLDEN").
-        return stem
+        # them ("orient-grand-205-c3351f_ORIENT_GRAND_GOLDEN").  The COLOUR is the one
+        # word the keywords list never carried and the media library needs most (owner
+        # 2026-10-21: "in non model variants why color is not") - so it slides in
+        # before the hash in the slug's own shape, once, lowercase; when the budget is
+        # short a trailing keyword is cut whole, never the colour.
+        colour_pieces = [
+            piece
+            for word in keys.colour_word.casefold().split()
+            if (piece := _prefix_token(word))
+        ]
+        if not colour_pieces:
+            return stem
+        slug, _, digest = stem.rpartition("-")
+        pieces = [p for p in slug.split("-") if p]
+        if not digest or len(digest) != 6 or any(not c.isalnum() for c in digest):
+            return stem  # not the keyword+hash shape (a "product-XXXXXXXX" row): leave it
+        for piece in colour_pieces:
+            if piece not in pieces:
+                pieces.append(piece)
+        while len(pieces) > 1 and len("-".join(pieces)) + 1 + len(digest) > MAX_PREFIX_CHARS:
+            cut = next((p for p in reversed(pieces[:-1]) if p not in colour_pieces), "")
+            if not cut:
+                break
+            pieces.remove(cut)
+        final = f"{'-'.join(pieces)}-{digest}"
+        return guard_windows_name(final) if len(final) <= MAX_PREFIX_CHARS else stem
     words = _identity_words(keys)
     if not words:
         return stem

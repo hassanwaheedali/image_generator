@@ -659,7 +659,10 @@ class PipelineConfig:
     #: own page only the two identity-strength signals run (see
     #: ``color_gate_official_chroma_exempt``), and the "is it a colour or is it a wash"
     #: test is saturation-based instead of raw channel spread.
-    color_gate_enabled: bool = False
+    #: 2026-10-21: back on after S16.square stopped trusting the crude label bins
+    #: (they have no brown) - see ``hero_colour_conflict``; the off state was a
+    #: temporary unblock for the owner's 49-folder run, not a verdict.
+    color_gate_enabled: bool = True
     #: S16.square (owner 2026-10-20): judge the colour on the picture that actually ships.
     #: S16 sees the file the shop served; the run's refrigerator batch then published a red
     #: patterned door on a `Black` row and a bronze "New Classic Plus" fridge on three Kenwood

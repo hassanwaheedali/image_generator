@@ -1221,7 +1221,10 @@ def _salvage_row(
             continue
         if dedup.is_duplicate(offer.image):
             continue
-        if keys.colour_word and not is_display_product(task.title):
+        if keys.colour_word and not is_display_product(task.title) and not accepted:
+            # Strictly the first picture (owner 2026-10-21): a last-resort offer that
+            # would become the row's hero is colour-judged; one filling a detail slot
+            # is not - hue cannot tell a wrong sibling from a correct side view.
             color_ok, color_detail = verify_image_color(offer.image, keys.colour_word)
             if not color_ok:
                 rejections["S16.salvage"] += 1
@@ -1232,16 +1235,14 @@ def _salvage_row(
                     detail=f"wrong colour for the last-resort slot too - {color_detail}",
                 )
                 continue
-        if gallery_colour_gate(
+        note_gallery_colour_conflict(
             offer.image,
             dedup,
             config=config,
             deps=deps,
             title=task.title,
             url=offer.used_url,
-            rejections=rejections,
-        ):
-            continue  # S17: a last resort is still another product's colour
+        )
         deps.decisions.keep(
             title=task.title,
             url=offer.used_url,
@@ -1575,7 +1576,7 @@ def _shade_gallery_lock(
     return ""
 
 
-def gallery_colour_gate(
+def note_gallery_colour_conflict(
     image: Image.Image,
     dedup: ProductDedup,
     *,
@@ -1583,27 +1584,21 @@ def gallery_colour_gate(
     deps: PipelineDeps,
     title: str,
     url: str,
-    rejections: Counter[str],
-) -> bool:
-    """Safeguard S17: True when this candidate must not join the gallery.
-
-    One gallery is one product's album, so it never mixes two colour families.  S16 cannot
-    cover this: it compares a picture against the *row's* colour word and says nothing when
-    the row states none - which is how a red and a blue refrigerator photo sat in one row
-    (owner 2026-10-16, after finding the rule written, tested and never called).  The first
-    chromatic family the gallery accepted is the witness; a neutral shot is no opinion and
-    never sets or breaks it.
+) -> None:
+    """S17's deletion retired (owner 2026-10-21): hue cannot tell a side, back or
+    interior view of the right product from another colourway - the Floral Brown CW1's
+    cabinet side measures 100 % blue and is a correct picture - so colour is judged
+    strictly on the row's first picture (S16 there, S16.square on the composed hero).
+    What remains of S17 is the curated folder's audit note: when his own album mixes
+    families, the contradiction is recorded and the picture kept.  The gallery's
+    families and sightings are written where pictures are accepted (``dedup.add``),
+    and the run report still asks the owner when an album mixes colours.
     """
-    if not config.color_gate_enabled:
-        return False
+    if not (config.color_gate_enabled and config.local_images_mode):
+        return
     accepted, reason = dedup.check_color_consistency(image)
-    if accepted:
-        return False
-    rejections["S17"] += 1
-    deps.decisions.reject(title=title, url=url, rule_id="S17", detail=reason)
-    if config.keep_rejected_images:
-        _dump_rejected(image, config, title, url, "S17")
-    return True
+    if not accepted:
+        deps.decisions.keep(title=title, url=url, rule_id="S17.curated", detail=reason)
 
 
 def _visit_page(
@@ -2433,6 +2428,12 @@ def _consume_candidates(
             and config.color_gate_enabled
             and keys.colour_word
             and not is_display_product(task.title)
+            # Strictly the first image (owner 2026-10-21): hue cannot tell a side,
+            # back or interior view of the right product from another colourway -
+            # the Floral Brown CW1's cabinet side measures 100 % blue and is a
+            # correct picture - so no detail shot may be deleted for colour.
+            # The hero is the one picture that must carry the row's colour.
+            and not accepted
         ):
             # The brand-page exemption yields when the brand's *own file name* names a
             # different colourway.  Orient-style assets are per variant
@@ -2463,16 +2464,14 @@ def _consume_candidates(
                 deps.decisions.keep(
                     title=task.title, url=used_url, rule_id="S16.official", detail=color_detail
                 )
-        if gallery_colour_gate(
+        note_gallery_colour_conflict(
             image,
             dedup,
             config=config,
             deps=deps,
             title=task.title,
             url=used_url,
-            rejections=rejections,
-        ):
-            continue  # another colour family is another product's picture
+        )
         # One fingerprint per candidate, reused by the gate and by the bookkeeping after
         # compose - the same 32x32 resample of the same 1200px image, once instead of twice.
         fingerprint = compute_fingerprint(image)
@@ -2567,13 +2566,24 @@ def _hero_colour_gate(
         and not is_display_product(task.title)
     ):
         return ""
+    if config.local_images_mode:
+        # His folder is the authority (owner 2026-10-21): he picked the pictures and
+        # their order, and the S16.curated / S17.curated notes already carry every
+        # would-have-been verdict.  Deleting even the hero of a curated folder can
+        # only cost a correct picture.
+        return ""
     if (
         config.color_gate_official_chroma_exempt
         and official_page
         and not colour_word_conflict(keys.colour_word, used_url.rsplit("/", 1)[-1])
     ):
         return ""
-    return hero_colour_conflict(square, extract_colour_families(keys.colour_word))
+    return hero_colour_conflict(
+        square,
+        extract_colour_families(keys.colour_word),
+        min_saturation=config.color_chroma_min_saturation,
+        wash_max_value=config.color_chroma_max_value,
+    )
 
 
 def _compose_and_save(

@@ -325,7 +325,14 @@ def corner_patch_stats(image: Image.Image, ratio: float) -> list[tuple[float, fl
         mean = patch.reshape(-1, 3).mean(axis=0)
         maximum = float(np.max(mean)) / 255.0
         minimum = float(np.min(mean)) / 255.0
-        saturation = 0.0 if maximum <= 0 else (maximum - minimum) / maximum
+        # The ratio (max-min)/max is undefined for a black patch and explodes for a
+        # near-black one: the Moiz run of 2026-10-21 measured a black ground's JPEG
+        # noise (mean 0.001, 0.0004, 0) as saturation 0.79 and S19 accused a clean
+        # product photo of being a themed shop frame.  A patch carries a hue only when
+        # its channels differ in ABSOLUTE terms - the same 0.08 spread the studio
+        # background mask and the panel trim already treat as neutral.
+        spread = maximum - minimum
+        saturation = 0.0 if spread < 0.08 else spread / max(maximum, 1e-6)
         stats.append((maximum, saturation))
     return stats
 
@@ -959,7 +966,13 @@ def extract_foreground_color_profile(image: Image.Image) -> ForegroundColorProfi
     )
 
 
-def hero_colour_conflict(image: Image.Image, row_colour_families: frozenset[str]) -> str:
+def hero_colour_conflict(
+    image: Image.Image,
+    row_colour_families: frozenset[str],
+    *,
+    min_saturation: float = 0.22,
+    wash_max_value: float = 0.95,
+) -> str:
     """Safeguard S16.square: the picture we ship as the row's hero must be the row's colour.
 
     S16 judges the file the shop served; by the time the product is isolated, cropped and
@@ -972,18 +985,37 @@ def hero_colour_conflict(image: Image.Image, row_colour_families: frozenset[str]
     asked to keep, and a fridge's open shelves photograph cool-white, which is no opinion
     about its colour.  A picture with no chromatic foreground at all is no opinion either -
     exactly the fail-open that keeps grey and white studios publishing today.
+
+    The verdict itself is S16's own (``verify_image_color``), asked once per family the row
+    names, because the crude label bins this rule was first written on cannot carry it:
+    the bins have no brown and they bin a 335-degree purple as "red", so the 49-folder run
+    of 2026-10-21 refused five correct heroes - brown rows were refusable whatever the
+    picture.  S16's arcs, shade centroids, conflicts table and achromatic brightness path
+    are the tolerance the pipeline has been tuned with for months; a row that names several
+    colours accepts a hero that matches any one of them.
     """
     if not row_colour_families:
         return ""
+    reasons: list[str] = []
+    for family in sorted(row_colour_families):
+        ok, detail = verify_image_color(
+            image, family, min_saturation=min_saturation, wash_max_value=wash_max_value
+        )
+        if ok:
+            return ""
+        if detail:
+            reasons.append(detail)
+    if not reasons:
+        return ""
     profile = extract_foreground_color_profile(image)
-    if not profile.is_chromatic or profile.dominant_family == "chromatic":
-        return ""
-    if profile.dominant_family in row_colour_families:
-        return ""
+    reads = (
+        f", the picture reads {profile.dominant_family} (hue {profile.median_hue:.0f}°)"
+        if profile.is_chromatic
+        else ""
+    )
     return (
-        f"the published hero picture reads {profile.dominant_family} "
-        f"({profile.chromatic_ratio:.0%} of the product area), this row sells "
-        f"{'/'.join(sorted(row_colour_families))}"
+        f"the published hero is not {'/'.join(sorted(row_colour_families))}{reads}: "
+        + " ".join(reasons)
     )
 
 
@@ -1252,6 +1284,17 @@ def verify_image_color(
         saturation = np.divide(c_delta, np.maximum(c_max, 1e-6))
         chromatic = (saturation > min_saturation) & (c_max < wash_max_value)
         chromatic_coverage = float(np.mean(chromatic & product))
+        # Glossy black/grey glass reflects the cool studio as *dark* colour sheen (the
+        # Floral Black CB1 of 2026-10-21: 50 % of the area chromatic at hue ~207°, yet
+        # 97 % of the body is dark and only 2 % of the colour is visible).  A colourway
+        # genuinely sold on a black/grey row is a coloured *body* - bright, or dark and
+        # strongly dyed.  Measured on his own files, the two populations separate
+        # cleanly: CB1's sheen tops out at saturation 0.48 (p90), while navy (0.67),
+        # maroon (0.90) and dark green (0.71) bodies all sit above 0.55.  White keeps
+        # the plain bar because the wrong-colour bodies it guards against are bright.
+        if target_family in ("black", "grey"):
+            body = (c_max >= 0.45) | (saturation >= 0.55)
+            chromatic_coverage = float(np.mean(chromatic & product & body))
         if target_family == "black" and central_mean > 0.75 and dark_frac < 0.08:
             # No dark body anywhere in the product area - a white/bright unit on a
             # black row.  The dark_frac guard keeps a *correct* small black unit

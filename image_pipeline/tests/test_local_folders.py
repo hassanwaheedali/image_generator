@@ -200,14 +200,28 @@ class TestWordedFilenamePrefix:
         assert worded_filename_prefix(keys, title) == filename_prefix(keys, title)
 
     def test_a_no_code_stem_never_repeats_its_own_words(self) -> None:
-        # Owner 2026-10-20 on the refrigerator sheet: a code-less row came out as
-        # "orient-grand-205-c3351f_ORIENT_GRAND_GOLDEN" - the keywords+hash fallback
-        # already carries those words, and appending them again is garbage.
+        # Owner 2026-10-20: a code-less row came out as
+        # "orient-grand-205-c3351f_ORIENT_GRAND_GOLDEN" - appending the words the
+        # keywords+hash fallback already carries is garbage.  Owner 2026-10-21 followed
+        # up: the COLOUR is the one word that must be in the name ("in non model
+        # variants why color is not") - so it joins the slug once, in its shape, and
+        # every other word still appears exactly as it did.
         title = "Orient Grand 205 Freezer-on-Top Refrigerator 7 Cu Ft Golden"
         stem = worded_filename_prefix(build_model_keys(title), title)
         assert "__" not in stem
         assert not any(w in stem for w in ("_ORIENT", "_GRAND", "_GOLDEN"))
+        assert stem.count("golden") == 1
+        assert "orient-grand-205" in stem
         assert stem == stem.lower()  # one stem shape, not a lowercase hash plus caps words
+
+    def test_a_code_less_stem_fits_its_colour_before_the_hash(self) -> None:
+        """The colour slides in ahead of the 6-char hash; when the 48-char budget is
+        short, a trailing keyword is cut whole - never the colour (owner 2026-10-21)."""
+        title = "PEL Digitron Ultra Inverter Curved Glassdoor Purple"
+        stem = worded_filename_prefix(build_model_keys(title), title)
+        assert "purple" in stem.split("-")
+        assert len(stem) <= MAX_PREFIX_CHARS
+        assert re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*-[0-9a-f]{6}", stem)
 
     def test_product_task_defaults_to_no_override(self) -> None:
         task = ProductTask(index=0, title="anything", source_urls=("a",))
@@ -482,15 +496,61 @@ class TestLocalProcessor:
         assert task.source_urls[0] in text
 
     def test_colourway_stem_names_the_finals_across_platforms(self, tmp_path: Path) -> None:
+        # A Black title on purpose: the shared studio fixtures have dark product
+        # bodies, so the colour notes stay quiet and this test is about the stem.
         task = _local_task(tmp_path, [_white_product_photo(), _white_product_photo_alt()],
-                           title="MSAG2B-12HRDN1-QC0 White")
-        assert task.name_prefix_override == "MSAG2B-12HRDN1-QC0_WHITE"
+                           title="MSAG2B-12HRDN1-QC0 Black")
+        assert task.name_prefix_override == "MSAG2B-12HRDN1-QC0_BLACK"
         result, accepted = process_direct_product(task, _local_deps(tmp_path), _local_config(tmp_path))
         assert result.status is Status.OK
         for platform in ("digi", "alfa"):
             folder = next((tmp_path / "out" / "images" / platform).iterdir())
             names = sorted(p.name for p in folder.iterdir())
-            assert names[:2] == ["MSAG2B-12HRDN1-QC0_WHITE_1.jpg", "MSAG2B-12HRDN1-QC0_WHITE_2.jpg"]
+            assert names[:2] == ["MSAG2B-12HRDN1-QC0_BLACK_1.jpg", "MSAG2B-12HRDN1-QC0_BLACK_2.jpg"]
+
+    def test_curated_side_views_survive_the_colour_gates(self, tmp_path: Path) -> None:
+        """The Floral Brown CW1 folder (owner 2026-10-21): among his hand-named files are
+        a 3/4 angle and side views whose whole frame is the blue-grey cabinet side - the
+        brown doors are simply out of view.  No hue rule can tell that from a wrong
+        colourway (the side view measures 100 % blue), so colour is judged strictly on
+        the row's first picture and detail shots are never deleted for it."""
+        from PIL import ImageDraw
+
+        brown = Image.new("RGB", (600, 600), (255, 255, 255))
+        ImageDraw.Draw(brown).rounded_rectangle([150, 90, 450, 510], radius=18, fill=(120, 66, 43))
+        brown_alt = Image.new("RGB", (600, 600), (255, 255, 255))
+        ImageDraw.Draw(brown_alt).rounded_rectangle([110, 140, 490, 460], radius=18, fill=(124, 70, 46))
+        side = Image.new("RGB", (600, 600), (255, 255, 255))
+        ImageDraw.Draw(side).rectangle([230, 60, 370, 540], fill=(70, 90, 115))
+        task = _local_task(
+            tmp_path, [brown, brown_alt, side],
+            title="Gree 14 Cu Ft Floral Brown Refrigerator CW1",
+        )
+        result, accepted = process_direct_product(
+            task, _local_deps(tmp_path), _local_config(tmp_path, color_gate_enabled=True)
+        )
+        assert len(accepted) == 3, _decisions_text(tmp_path)
+        assert "S16" not in _decisions_text(tmp_path).replace("S16.square", "")
+
+    def test_curated_hero_that_disagrees_is_recorded_not_deleted(self, tmp_path: Path) -> None:
+        """A folder whose FIRST file is the blue-grey side view: his curation still owns
+        the order, so the contradiction is measured and logged (S16.curated) and the
+        picture publishes - a curated folder loses nothing to colour."""
+        from PIL import ImageDraw
+
+        brown = Image.new("RGB", (600, 600), (255, 255, 255))
+        ImageDraw.Draw(brown).rounded_rectangle([150, 90, 450, 510], radius=18, fill=(120, 66, 43))
+        side = Image.new("RGB", (600, 600), (255, 255, 255))
+        ImageDraw.Draw(side).rectangle([230, 60, 370, 540], fill=(70, 90, 115))
+        task = _local_task(
+            tmp_path, [side, brown],
+            title="Gree 14 Cu Ft Floral Brown Refrigerator CW1",
+        )
+        result, accepted = process_direct_product(
+            task, _local_deps(tmp_path), _local_config(tmp_path, color_gate_enabled=True)
+        )
+        assert len(accepted) == 2, _decisions_text(tmp_path)
+        assert "S16.curated" in _decisions_text(tmp_path)
 
     def test_blurry_picture_dies_at_s13_blur(self, tmp_path: Path) -> None:
         crisp = _white_product_photo()

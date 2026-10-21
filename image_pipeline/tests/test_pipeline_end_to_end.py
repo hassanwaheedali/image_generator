@@ -3355,11 +3355,17 @@ def test_below_floor_sharp_image_is_accepted_directly(tmp_path: Path) -> None:
     assert not any(entry["rule_id"] == "S13.salvage" for entry in log)
 
 
-def test_a_gallery_never_mixes_two_colour_families_when_the_row_states_none(tmp_path: Path) -> None:
+def test_a_mixed_gallery_is_reported_not_pruned_when_the_row_states_none(tmp_path: Path) -> None:
     """S17 wired for real (owner 2026-10-16). The rule was written, tested and advertised - and
     never called, so a row stating no colour word had nothing comparing its pictures: S16 needs
     `keys.colour_word` and says nothing without one.  Two blue shots settle the album's colour,
-    and the red picture after them is another product's photo."""
+    and the red picture after them is another product's photo.
+
+    RETIRED 2026-10-21 (owner): the same hue signal that catches that red photo also kills a
+    side or interior view of the RIGHT product (the Floral Brown CW1's blue-grey cabinet side
+    measures 100 % blue and is correct), and "I don't want them to reject correct images at
+    all".  Colour is now judged strictly on the row's first picture; S17 keeps recording the
+    album's families for the run report but deletes nothing."""
     blue_a = "https://www.hadielectronics.com.pk/wp-content/blue-1.jpg"
     blue_b = "https://www.hadielectronics.com.pk/wp-content/blue-2.jpg"
     red_url = "https://www.hadielectronics.com.pk/wp-content/red.jpg"
@@ -3389,11 +3395,11 @@ def test_a_gallery_never_mixes_two_colour_families_when_the_row_states_none(tmp_
         json.loads(line)
         for line in (tmp_path / "out" / "decisions.jsonl").read_text().splitlines()
     ]
-    assert [i.source_url for i in images] == [blue_a, blue_b], "the album keeps its colour"
-    assert any(
-        e["rule_id"] == "S17" and e["decision"] == "reject" and e["url"] == red_url for e in log
+    assert [i.source_url for i in images] == [blue_a, blue_b, red_url], "detail shots are not colour-judged"
+    assert not any(
+        e["rule_id"] == "S17" and e["decision"] == "reject" for e in log
     ), log
-    assert "colour not stated" not in result.note, "a settled gallery asks nothing"
+    assert "colour not stated" in result.note, "a mixed album is reported to the owner, not guessed at"
 
 
 def test_an_unresolved_colour_mix_is_asked_not_guessed(tmp_path: Path) -> None:
@@ -3552,9 +3558,12 @@ def test_the_gallery_colour_gate_can_be_switched_off(tmp_path: Path) -> None:
     assert len(images) == 3, "with the guard off the locked album keeps its red sibling too"
 
 
-def test_salvage_takes_the_correct_colour_not_the_wrong_sibling(tmp_path: Path) -> None:
-    """The same site serves maroon and golden below the floor: salvage must skip
-    the wrong colour (S16.salvage) and publish only the golden one."""
+def test_a_wrong_colour_sibling_after_the_hero_publishes_as_a_detail_shot(tmp_path: Path) -> None:
+    """The same site serves maroon and golden for a Golden row.  Until 2026-10-20 the main
+    colour gate refused the maroon one; the owner retired that (with the first-image rule):
+    the hue signal cannot tell a wrong sibling from a correct side or interior view, and a
+    safeguard that costs correct pictures is worse than none.  The golden hero is judged
+    and kept; the maroon picture follows it as an unjudged detail shot."""
     maroon_url = "https://www.hadielectronics.com.pk/wp-content/maroon.jpg"
     gold_url = "https://www.hadielectronics.com.pk/wp-content/golden.jpg"
     maroon = _jpeg_bytes(clean_product_image(700, 700, "#800000"))
@@ -3590,11 +3599,11 @@ def test_salvage_takes_the_correct_colour_not_the_wrong_sibling(tmp_path: Path) 
     # colour gate (S16) - not the salvage colour check - keeps the wrong sibling out.
     rejected = [entry for entry in log if entry["rule_id"] == "S16" and entry["decision"] == "reject"]
     kept = [entry["url"] for entry in log if entry["decision"] == "keep"]
-    assert any(entry["url"] == maroon_url for entry in rejected)  # wrong colour skipped
-    assert gold_url in kept                                       # correct one published
-    assert maroon_url not in kept
-    assert len(images) == 1
-    assert result.status is Status.PARTIAL
+    assert rejected == []                    # colour deletes nothing after the hero now
+    assert gold_url in kept                  # the hero carries the row's colour
+    assert maroon_url in kept                # the sibling joins as an unjudged detail shot
+    assert len(images) == 2
+    assert result.status is Status.OK
 
 
 def test_salvage_can_be_disabled(tmp_path: Path) -> None:
