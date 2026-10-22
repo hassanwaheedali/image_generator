@@ -80,8 +80,18 @@ def _product_silhouette(mask: np.ndarray, config: PipelineConfig) -> np.ndarray:
     except Exception:                                       # pragma: no cover - optional dep
         return mask
     radius = max(1, round(min(mask.shape) * config.isolation_merge_radius_ratio))
-    structure = np.ones((2 * radius + 1, 2 * radius + 1), dtype=bool)
-    return np.asarray(ndimage.binary_fill_holes(ndimage.binary_closing(mask, structure=structure)), dtype=bool)
+    try:
+        import cv2
+
+        ksize = 2 * radius + 1
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (ksize, ksize))
+        mask_u8 = mask.astype(np.uint8) * 255
+        closed = cv2.morphologyEx(mask_u8, cv2.MORPH_CLOSE, kernel) > 0
+    except Exception:
+        structure = np.ones((2 * radius + 1, 2 * radius + 1), dtype=bool)
+        closed = ndimage.binary_closing(mask, structure=structure)
+
+    return np.asarray(ndimage.binary_fill_holes(closed), dtype=bool)
 
 
 def _solid_bodies(mask: np.ndarray, config: PipelineConfig) -> tuple[list[tuple[int, int, int, int]], list[float]]:
