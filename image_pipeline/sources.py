@@ -344,6 +344,22 @@ def parse_sitemap(text: str) -> tuple[list[str], list[str]]:
     return urls, []
 
 
+def _short_named_slug_match(slug: str, keys: ModelKeys) -> bool:
+    """A brand page named ``<series>-<code>-<type>`` (``muffin-30d-grill-black``).
+
+    A 3-character code such as ``30D`` is shared by every maker, so it never counts alone.
+    It counts here only with a second word of the row's own name in the same slug; a
+    code-less row needs every keyword but the brand.  ``pasta-23d-solo`` therefore never
+    answers the ``Pasta 23D Grill`` row: ``grill`` is missing.
+    """
+    if keys.tokens:
+        code_hit = any(normalize_key(token) in slug for token in keys.tokens if len(token) >= 2)
+        words = [normalize_key(word) for word in keys.name_words[1:] if len(word) >= 3]
+        return code_hit and sum(word in slug for word in words) >= 2
+    words = [normalize_key(word) for word in keys.keywords[1:] if word]
+    return len(words) >= 2 and all(word in slug for word in words)
+
+
 def model_tokens_in_url(url: str, keys: ModelKeys) -> bool:
     """Does the URL slug carry this product's model (separators ignored)?
 
@@ -386,7 +402,8 @@ def model_tokens_in_url(url: str, keys: ModelKeys) -> bool:
         if not token:
             continue
         for variant in (token, *truncation_variants(token)):
-            if len(variant) >= 4 and variant in slug:
+            glued = normalize_key(variant)
+            if len(glued) >= 4 and glued in slug:
                 return True
     for identity in keys.identities:
         if not identity:
@@ -395,6 +412,8 @@ def model_tokens_in_url(url: str, keys: ModelKeys) -> bool:
         for variant in (identity, *truncation_variants(identity)):
             if len(variant) >= 4 and variant in slug and (not guarded or names_the_line()):
                 return True
+    if _short_named_slug_match(slug, keys):
+        return True
     if not has_series_name(keys):
         ours = capacity_codes(" ".join(keys.tokens)) or capacity_codes(keys.cleaned_title)
         if ours and ours & capacity_codes(urlsplit(url).path):

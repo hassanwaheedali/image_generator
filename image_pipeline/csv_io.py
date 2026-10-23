@@ -125,15 +125,20 @@ def read_input(path: Path, *, direct: bool = False) -> list[ProductTask]:
     url_field = find_column(fieldnames, IMAGE_URL_ALIASES) if direct else None
     if url_field is None:
         url_field = find_column(fieldnames, URL_ALIASES)
-    if title_field is None or url_field is None:
+    if title_field is None:
+        raise ValueError(f"input must have a Title column; found: {fieldnames}")
+    if url_field is None and direct:
+        # Option 2 downloads the URLs themselves, so without them there is nothing to read.
         raise ValueError(
-            "input must have a Title column and a source-URL column "
-            f"(accepted URL headers: {', '.join(URL_ALIASES)}); found: {fieldnames}"
+            "direct mode needs an image-URL column "
+            f"(accepted headers: {', '.join(IMAGE_URL_ALIASES)}); found: {fieldnames}"
         )
+    # Scrape mode without a URL column: every row is title-only and the brand-then-retailer
+    # search finds its pages (see ``main.split_sheet_rows``).
     tasks: list[ProductTask] = []
     for index, row in enumerate(rows):
         title = str(row.get(title_field) or "").strip()
-        raw_urls = str(row.get(url_field) or "")
+        raw_urls = str(row.get(url_field) or "") if url_field is not None else ""
         urls = tuple(part.strip() for part in raw_urls.split("|") if part.strip())
         tasks.append(ProductTask(index=index, title=title, source_urls=urls))
     return tasks
