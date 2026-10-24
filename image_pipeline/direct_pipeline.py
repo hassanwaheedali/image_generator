@@ -55,7 +55,7 @@ from url_filters import dedup_key, detect_brand, display_brand
 LOG = logging.getLogger("pipeline.direct")
 
 
-def _blur_reference_template(config: PipelineConfig, deps: PipelineDeps) -> Path:
+def _blur_reference_template(config: PipelineConfig, deps: PipelineDeps) -> Path | None:
     """The artwork S13.blur composites its preview on (``config.canvas_blur_reference``).
 
     The guard's two thresholds were measured against one template's bands, and a template
@@ -65,9 +65,9 @@ def _blur_reference_template(config: PipelineConfig, deps: PipelineDeps) -> Path
     gate because a shop was not selected would be the wrong way to fail open.
     """
     platform = deps.platforms.by_key(config.canvas_blur_reference)
-    if platform is None:
+    if platform is None and deps.platforms.platforms:
         platform = deps.platforms.platforms[0]
-    return platform.template_path
+    return platform.template_path if platform else None
 
 
 def process_direct_product(
@@ -271,10 +271,8 @@ def process_direct_product(
             deps.decisions.keep(title=task.title, url=url, rule_id="S10.review", detail=review_note)
 
         # Blur guard (Option 2): reject images that lack high-frequency details when composited on canvas.
-        if config.canvas_blur_guard_enabled:
-            reference_prepared = _load_prepared_template(
-                config, _blur_reference_template(config, deps)
-            )
+        # Calibrated against platform template frames in download mode; local curated images and --no-template skip it.
+        if config.canvas_blur_guard_enabled and not (config.local_images_mode or config.no_template):
             isolated, _ = isolate_main_product(image, config)
             square = to_square_canvas(
                 isolated,
@@ -288,25 +286,28 @@ def process_direct_product(
                 percent=config.unsharp_percent,
                 threshold=config.unsharp_threshold,
             )
-            preview = apply_template(
-                square, reference_prepared.base, config, prepared=reference_prepared
-            )
-            blurry, hf_val, edge_val = is_canvas_blurry(preview, config)
-            if blurry:
-                rejections["S13.blur"] += 1
-                deps.decisions.reject(
-                    title=task.title,
-                    url=url,
-                    rule_id="S13.blur",
-                    detail=(
-                        f"image lacks high-frequency detail after canvas scaling "
-                        f"(hf={hf_val:.4f} < {config.canvas_blur_hf_threshold}, "
-                        f"edge={edge_val:.1f} < {config.canvas_blur_edge_threshold})"
-                    ),
+            ref_path = _blur_reference_template(config, deps)
+            if ref_path is not None:
+                reference_prepared = _load_prepared_template(config, ref_path)
+                preview = apply_template(
+                    square, reference_prepared.base, config, prepared=reference_prepared
                 )
-                if config.keep_rejected_images:
-                    _dump_rejected(image, config, task.title, url, "S13.blur")
-                continue
+                blurry, hf_val, edge_val = is_canvas_blurry(preview, config)
+                if blurry:
+                    rejections["S13.blur"] += 1
+                    deps.decisions.reject(
+                        title=task.title,
+                        url=url,
+                        rule_id="S13.blur",
+                        detail=(
+                            f"image lacks high-frequency detail after canvas scaling "
+                            f"(hf={hf_val:.4f} < {config.canvas_blur_hf_threshold}, "
+                            f"edge={edge_val:.1f} < {config.canvas_blur_edge_threshold})"
+                        ),
+                    )
+                    if config.keep_rejected_images:
+                        _dump_rejected(image, config, task.title, url, "S13.blur")
+                    continue
 
         # Same as Option 1's ``_consume_candidates``: register the URL key on
         # accept so a repeated link is caught by the S10-key check before download.

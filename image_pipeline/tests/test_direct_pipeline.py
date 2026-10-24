@@ -7,11 +7,13 @@ All tests are offline: fakes from ``conftest.py`` and synthetic images only.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from config import ConfigError, PipelineConfig
+from platforms import resolve_platforms
 
 
 # --------------------------------------------------------------------------- #
@@ -293,6 +295,36 @@ def test_direct_publishes_white_product_photos_with_links(tmp_path: Path) -> Non
     assert all(url.startswith(("https://", "http://", "file://")) for url in result.urls_for("digi"))
     assert fetcher.requested == list(urls)  # downloaded, no page fetches
     assert '"rule_id": "accept"' in _decisions(tmp_path)
+
+
+def test_direct_with_no_template_and_no_banner(tmp_path: Path) -> None:
+    """When no_template and no_banner are active, outputs are raw squares and no banners."""
+    urls = ("http://cdn.test/ac-1.png", "http://cdn.test/ac-2.png")
+    images = {
+        urls[0]: _png_bytes(_white_product_photo()),
+        urls[1]: _png_bytes(_white_product_photo_alt()),
+    }
+    # Resolve platforms with no_template and no_banner
+    config = _direct_config(tmp_path, no_template=True, no_banner=True)
+    plan = resolve_platforms(config)
+    deps, _ = _direct_deps(tmp_path, images)
+    deps = replace(deps, platforms=plan)
+
+    task = ProductTask(index=0, title="Cool Breeze 12X Inverter AC", source_urls=urls)
+    result, accepted = process_direct_product(task, deps, config)
+    assert result.status is Status.OK
+    assert len(accepted) == 2
+    # Exactly 2 URLs for digi and alfa, NO banner appended
+    assert len(result.urls_for("digi")) == 2
+    assert len(result.urls_for("alfa")) == 2
+
+    # Check the saved final files: they should be saved even without template_path
+    for acc in accepted:
+        for platform_key, final_path in acc.final_paths:
+            assert final_path.is_file()
+            with Image.open(final_path) as im:
+                # Should match canonical_side square (1000x1000)
+                assert im.size == (config.canonical_side, config.canonical_side)
 
 
 def test_direct_rejects_the_yellow_theme_template_with_s19(tmp_path: Path) -> None:

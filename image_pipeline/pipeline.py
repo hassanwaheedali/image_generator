@@ -2675,10 +2675,13 @@ def _compose_and_save(
     name = f"{task.name_prefix_override or filename_prefix(keys, task.title)}_{index}.jpg"
     final_paths: list[tuple[str, Path]] = []
     for platform in deps.platforms.platforms:
-        prepared = _load_prepared_template(config, platform.template_path)
-        composite = apply_template(square, prepared.base, config, bbox=bbox, prepared=prepared)
+        if config.no_template or platform.template_path is None:
+            final_image = square
+        else:
+            prepared = _load_prepared_template(config, platform.template_path)
+            final_image = apply_template(square, prepared.base, config, bbox=bbox, prepared=prepared)
         final_paths.append(
-            (platform.key, _save_final(composite, config, task.title, platform.key, name))
+            (platform.key, _save_final(final_image, config, task.title, platform.key, name))
         )
     accepted.append(
         AcceptedImage(

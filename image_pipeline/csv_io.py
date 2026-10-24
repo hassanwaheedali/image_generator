@@ -241,6 +241,9 @@ def filename_prefix(keys: ModelKeys, title: str) -> str:
     tokens = tuple(clean for clean in (_prefix_token(token) for token in keys.tokens) if clean)
     if tokens:
         return guard_windows_name(_join_within_budget(tokens, MAX_PREFIX_CHARS))
+    clean_title = title.strip()
+    if re.match(r"^[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)+$", clean_title):
+        return guard_windows_name(clean_title[:MAX_PREFIX_CHARS])
     digest = sha256_bytes(title.encode("utf-8"))
     if keys.keywords:
         words = safe_slug("-".join(keys.keywords), max_length=40)

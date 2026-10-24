@@ -92,6 +92,8 @@ def build_platform_specs(config: PipelineConfig) -> tuple[PlatformSpec, ...]:
     Website dropping the banner is a rule of the platform, but the owner asked for it
     to stay switchable (2026-10-13), so it is the one policy that config can move.
     """
+    if config.no_banner:
+        return tuple(replace(spec, banner_policy=BannerPolicy.DROP) for spec in DEFAULT_SPECS)
     if not config.website_keep_banner:
         return DEFAULT_SPECS
     return tuple(
@@ -141,7 +143,7 @@ class ResolvedPlatform:
     """A spec paired with the assets that exist on disk for this run."""
 
     spec: PlatformSpec
-    template_path: Path
+    template_path: Path | None
     banner_path: Path | None
     banner_mode: BannerMode
 
@@ -208,8 +210,8 @@ def resolve_platforms(
         if spec.key not in wanted:
             notices.append(_notice(spec.display_name, "not selected for this run"))
             continue
-        template = resolve_asset(asset_dir, TEMPLATE_STEM)
-        if template is None:
+        template = None if config.no_template else resolve_asset(asset_dir, TEMPLATE_STEM)
+        if template is None and not config.no_template:
             notices.append(
                 _notice(
                     spec.display_name,
@@ -217,13 +219,14 @@ def resolve_platforms(
                 )
             )
             continue
+        banner_msg_prefix = "enabled, template disabled by --no-template" if config.no_template else "enabled"
         if spec.banner_policy is BannerPolicy.DROP:
             # Not even looked for: ``banner_path`` is set exactly when the banner will be
             # written and uploaded, so no caller can pick it up by accident.
             platforms.append(
                 ResolvedPlatform(spec, template, None, BannerMode.SKIP_BY_POLICY)
             )
-            notices.append(_notice(spec.display_name, "enabled, closing banner dropped by rule"))
+            notices.append(_notice(spec.display_name, f"{banner_msg_prefix}, closing banner dropped by rule"))
             continue
         banner = resolve_asset(asset_dir, BANNER_STEM)
         if banner is None:
@@ -233,7 +236,7 @@ def resolve_platforms(
             notices.append(
                 _notice(
                     spec.display_name,
-                    "enabled, closing banner SKIPPED for this run "
+                    f"{banner_msg_prefix}, closing banner SKIPPED for this run "
                     f"(not found: {_missing(asset_dir, BANNER_STEM)})",
                 )
             )
@@ -241,7 +244,7 @@ def resolve_platforms(
         platforms.append(ResolvedPlatform(spec, template, banner, BannerMode.APPEND))
         notices.append(
             _notice(
-                spec.display_name, f"enabled, closing banner appended ({_shown(banner)})"
+                spec.display_name, f"{banner_msg_prefix}, closing banner appended ({_shown(banner)})"
             )
         )
     return PlatformPlan(tuple(platforms), tuple(notices))

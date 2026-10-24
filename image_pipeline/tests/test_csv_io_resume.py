@@ -294,6 +294,11 @@ def test_filename_prefix_falls_back_to_a_hash_when_there_is_nothing_to_use() -> 
     assert len(prefix) == len("product-") + 8
 
 
+def test_filename_prefix_uses_clean_hyphenated_code_title() -> None:
+    # Titles like "130-1217" that are direct model codes should be preserved as prefix
+    assert filename_prefix(_keys(), "130-1217") == "130-1217"
+
+
 def test_filename_prefix_ignores_tokens_that_sanitise_to_nothing() -> None:
     assert filename_prefix(_keys("::", "12X", "//"), "12X") == "12X"
 

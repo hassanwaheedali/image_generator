@@ -80,6 +80,11 @@ def test_website_keep_banner_is_the_one_switchable_policy(tmp_path: Path) -> Non
     assert [spec.key for spec in specs] == list(PLATFORM_KEYS)
 
 
+def test_no_banner_drops_all_banners(tmp_path: Path) -> None:
+    specs = build_platform_specs(_config(tmp_path, no_banner=True, website_keep_banner=True))
+    assert all(spec.banner_policy is BannerPolicy.DROP for spec in specs)
+
+
 def test_image_counts_are_inherited_globally_for_now(tmp_path: Path) -> None:
     """Owner decision 2026-10-13: no per-platform quotas yet, so every spec says None."""
     assert all(spec.max_final_images is None for spec in build_platform_specs(_config(tmp_path)))
@@ -250,6 +255,15 @@ def test_nothing_available_resolves_to_an_empty_plan(tmp_path: Path) -> None:
     plan = resolve_platforms(_config(tmp_path))
     assert plan.platforms == ()
     assert len(plan.notices) == 3
+
+
+def test_no_template_resolves_platforms_without_template_file(tmp_path: Path) -> None:
+    config = _config(tmp_path, no_template=True)
+    # no template files written to assets_dir
+    plan = resolve_platforms(config)
+    assert len(plan.platforms) == 3
+    assert all(p.template_path is None for p in plan.platforms)
+    assert any("template disabled by --no-template" in n for n in plan.notices)
 
 
 def test_notices_are_one_line_per_platform_never_per_product(tmp_path: Path) -> None:

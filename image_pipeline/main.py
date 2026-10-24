@@ -135,6 +135,16 @@ def build_parser() -> argparse.ArgumentParser:
         "and publish them; no pages are fetched and nothing is scraped",
     )
     parser.add_argument(
+        "--no-template",
+        action="store_true",
+        help="publish clean isolated square product images without applying platform template frames",
+    )
+    parser.add_argument(
+        "--no-banner",
+        action="store_true",
+        help="suppress appending the closing banner (last.png) across all platforms",
+    )
+    parser.add_argument(
         "--images-dir",
         default=None,
         metavar="PARENT",
@@ -232,6 +242,8 @@ def build_config(args: argparse.Namespace) -> PipelineConfig:
         dry_run=bool(args.dry_run),
         direct_mode=bool(args.direct or args.images_dir),
         local_images_mode=bool(args.images_dir),
+        no_template=bool(args.no_template),
+        no_banner=bool(args.no_banner),
         workers=int(args.workers),
         limit=args.limit,
         redo_titles=tuple(args.redo or ()),

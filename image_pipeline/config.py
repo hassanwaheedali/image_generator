@@ -205,6 +205,10 @@ class PipelineConfig:
     #: Website drops the closing banner by rule (the site has its own closing slot).
     #: Owner asked for the rule to stay switchable rather than be baked into the table.
     website_keep_banner: bool = False
+    #: When true, suppress appending the closing banner (last.png) across all platforms.
+    no_banner: bool = False
+    #: When true, publish clean, isolated product images without applying template frames.
+    no_template: bool = False
 
     # ----- run control -----------------------------------------------------
     dry_run: bool = False
