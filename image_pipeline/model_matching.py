@@ -66,7 +66,7 @@ _NOISE_TOKEN_RES: tuple[re.Pattern[str], ...] = (
     re.compile(r"^(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:[0-3]\d)?$"),
 )
 
-_PREFIX_RE = re.compile(r"^\d*[a-z]+")
+_PREFIX_RE = re.compile(r"^[a-z]+")
 
 #: Words that end a model tail (they describe the product, not the model).
 TAIL_STOPWORDS: frozenset[str] = frozenset(
@@ -205,10 +205,14 @@ def _leading_letters(core: str) -> str:
 
 #: A model written with a space: the prefix is 2-4 letters (``DW``, ``PEL``, ``HSU``) ...
 _GLUE_PREFIX_RE = re.compile(r"^[a-z]{2,4}$")
-#: ... and the number is 3-5 digits, optionally with its own suffix (``7500``, ``7500C``).
+#: ... and the number is 3-5 digits optionally hyphenated (``7500``, ``7500C``, ``80-1217``).
 #: Two-digit numbers are deliberately excluded: "TCL 85" (a size, not a model) must never
 #: become a key that accepts any 85-inch page.
-_GLUE_NUMBER_RE = re.compile(r"^\d{3,5}[a-z]{0,2}$")
+_GLUE_NUMBER_RE = re.compile(r"^\d{2,5}(?:[-/]\d{2,5})?[a-z]{0,3}$")
+#: Digit-first model codes written with a space before the suffix: "801217 WB", "120826 JT".
+_GLUE_DIGIT_HEAD_RE = re.compile(r"^\d{5,8}$")
+#: The short letter suffix that follows a digit-headed code: "WB", "JT", "E", "LF".
+_GLUE_SUFFIX_RE = re.compile(r"^[a-z]{1,3}$")
 #: Words that are never a model prefix, so "TV 55" / "IN 20" never become a key.
 GLUE_STOPWORDS: frozenset[str] = frozenset(
     {
@@ -225,30 +229,55 @@ def glued_model_token(
 ) -> tuple[str, str] | None:
     """A model spelled with spaces: ``DW 7500 C`` -> ``("DW 7500 C", "dw7500c")``.
 
-    The sheet writes what the shop prints, and Dawlance prints ``DW 7500 TWIN TUB CLEAR
-    LID (WHITE)`` - two words that are one model (live case: that title produced **no**
-    model key, so the row was skipped before a single page was fetched).  ``DW 7500C``
-    also produced only ``7500c`` (the prefix was lost), which made the key weaker than
-    the model really is.
+    Two cases are handled:
+
+    **Case B** (checked first): a digit-headed code followed by a short letter suffix.
+    ``801217 WB`` -> ``("801217 WB", "801217wb")``, ``1301217 E`` -> ``("1301217 E", "1301217e")``.
+    These codes have 5-8 bare digits followed by 1-3 letters.  Without this case the
+    sheet rows for ``Haier 801217 WB`` produced **zero** model tokens (live bug 2026-10-25).
+
+    **Case A**: the classic letter-prefix + number form.
+    ``DW 7500 C`` -> ``("DW 7500 C", "dw7500c")``, ``HWM 80-1217`` -> ``("HWM 80-1217", "hwm801217")``.
+    Now also accepts hyphenated numbers (``80-1217``) via the updated ``_GLUE_NUMBER_RE``.
 
     Guards: the prefix is 2-4 letters and not a generic word (``TV 55`` never glues), the
-    number is 3-5 digits (``TCL 85`` - a size - never glues), and a trailing single letter
-    is only glued when the number carries no suffix of its own (``DW 7500 C`` -> ``dw7500c``,
-    but ``DW 7500C X`` stays ``dw7500c``).
+    number is 3-5 digits (``TCL 85`` - a size - never glues unless hyphenated), and a
+    trailing single letter is only glued when the number carries no suffix of its own
+    (``DW 7500 C`` -> ``dw7500c``, but ``DW 7500C X`` stays ``dw7500c``).
     """
-    prefix = words[index].strip(_PUNCTUATION)
-    if not _GLUE_PREFIX_RE.match(prefix.lower()) or prefix.lower() in GLUE_STOPWORDS:
-        return None
+    first = words[index].strip(_PUNCTUATION)
     if index + 1 >= len(words):
         return None
-    number = words[index + 1].strip(_PUNCTUATION)
+    second = words[index + 1].strip(_PUNCTUATION)
+
+    # ── Case B: Digit-headed code + short letter suffix ────────────────────────────────
+    # "801217 WB" -> token="801217 WB", identity="801217wb"
+    # "1301217 E" -> token="1301217 E", identity="1301217e"
+    if (
+        _GLUE_DIGIT_HEAD_RE.match(first.lower())
+        and _GLUE_SUFFIX_RE.match(second.lower())
+        and second.lower() not in GLUE_STOPWORDS
+        and not UNIT_QUANTITY_RE.match(f"{first}{second}".lower())
+    ):
+        token = f"{first} {second}"
+        return token, normalize_key(token)
+
+    # ── Case A: Letter prefix + number ────────────────────────────────────────────────
+    # "DW 7500 C" -> "dw7500c", "HWM 80-1217" -> "hwm801217"
+    prefix = first
+    if not _GLUE_PREFIX_RE.match(prefix.lower()) or prefix.lower() in GLUE_STOPWORDS:
+        return None
+    number = second
     if not _GLUE_NUMBER_RE.match(number.lower()):
+        return None
+    # Plain 2-digit number without a hyphenated second part = a size ("TCL 85"), never a model.
+    if "-" not in number and "/" not in number and len(re.sub(r"\D", "", number)) < 3:
         return None
     token = f"{prefix} {number}"
     suffix_is_glued = bool(re.search(r"[a-z]$", number.lower()))
     if not suffix_is_glued and index + 2 < len(words):
         suffix = words[index + 2].strip(_PUNCTUATION)
-        if len(suffix) == 1 and suffix.isalpha():
+        if len(suffix) == 1 and suffix.isalpha() and suffix.lower() not in GLUE_STOPWORDS:
             token = f"{token} {suffix}"
     identity = normalize_key(token)
     if len(identity) < 5 or not re.search(r"[a-z]", identity) or not re.search(r"\d", identity):
@@ -1273,6 +1302,12 @@ def truncation_variants(core: str) -> tuple[str, ...]:
     ``DW-7500``).  Only trailing letters may be dropped, so ``hsu12`` has no variant
     and the ``HSU-12`` vs ``HSU-12HFPAA`` protection is untouched (that rule also
     never *extends* a key with characters the title did not contain).
+
+    **Digit-stem case** (2026-10-25): a digit-headed code like ``1301217e`` or
+    ``801217wb`` produces ``"1301217"`` / ``"801217"`` as a variant.  These stems
+    have no letters, which is how callers detect them - they are rescue-only and
+    always flagged for manual review (see ``_tolerated_spelling_reason`` in
+    ``pipeline.py``).
     """
     variants: list[str] = []
     for cut in (1, 2):
@@ -1282,7 +1317,11 @@ def truncation_variants(core: str) -> tuple[str, ...]:
         if not suffix.isalpha() or not suffix.isascii():
             continue
         candidate = core[:-cut]
-        if re.search(r"[a-z]", candidate) and re.search(r"[0-9]", candidate):
+        # Allow: mixed letter+digit (normal truncation, e.g. "dw7500") OR
+        # 5+ bare digits (digit-headed drum codes: "1301217", "801217").
+        if re.search(r"[0-9]", candidate) and (
+            re.search(r"[a-z]", candidate) or len(candidate) >= 5
+        ):
             variants.append(candidate)
     return tuple(variants)
 
@@ -1597,15 +1636,21 @@ def code_like_tokens(text: str) -> tuple[str, ...]:
             found.append(pair)
 
     # 3. Glued triplets: prefix + numbers + suffix letters (e.g. HRF+47552+GD, DW+7500+C)
+    #    OR prefix + first-number-group + second-number-group (e.g. HWM+80+1217).
     for i in range(len(segments) - 2):
         s1, s2, s3 = segments[i], segments[i + 1], segments[i + 2]
         triplet = normalize_key(s1 + s2 + s3)
         if (
             len(triplet) >= 5
-            and re.match(r"^[a-z]{2,5}\d{2,6}[a-z]{1,4}$", triplet)
+            and re.match(r"^[a-z]{2,5}\d{2,6}(?:[a-z]{1,4}|\d{3,5}[a-z]{0,3})$", triplet)
             and not any(pattern.match(triplet) for pattern in _NOISE_TOKEN_RES)
         ):
             found.append(triplet)
+            # Remove the half-baked pair (e.g. "hwm80") that step 2 added, so S4
+            # judges the complete code ("hwm801217"), not the fragment.
+            half_pair = normalize_key(s1 + s2)
+            if half_pair in found:
+                found.remove(half_pair)
 
     return tuple(dict.fromkeys(found))
 
@@ -2367,6 +2412,12 @@ def _prefix_is_allowed(observed: str, identity: str, brand: str) -> bool:
     ``""`` (nothing), the brand initial (``H`` of ``H55S80EUX``), or the sheet's own
     family letters (``RF`` of ``HRF-538``) are fine.  Anything else is a conflict:
     ``Haier HSF-538 IFGA`` must not satisfy ``Haier HRF-538 IFGA``.
+
+    **Digit-headed codes** (2026-10-25): when the sheet writes a bare digit code
+    (``801217wb``, ``1301217e``) without the appliance prefix, the page may still
+    print one (``HWM-80-1217``, ``HRF-...``).  Any observed prefix of <= 3 letters
+    is accepted for these rows, because the family cannot be inferred from the code
+    itself and rejecting ``"wm"`` from ``"hwm"`` would discard every valid page.
     """
     remainder = observed
     brand_initial = normalize_key(brand)[:1] if brand else ""
@@ -2375,6 +2426,9 @@ def _prefix_is_allowed(observed: str, identity: str, brand: str) -> bool:
     if not remainder:
         return True
     family = _family_letters(identity, brand)
+    # Digit-headed sheet code: accept any short appliance prefix the page adds.
+    if not family and identity and identity[0].isdigit():
+        return len(remainder) <= 3
     return bool(family) and family.startswith(remainder)
 
 

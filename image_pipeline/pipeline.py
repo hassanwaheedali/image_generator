@@ -11,6 +11,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import re
 import shutil
 import threading
 from collections import Counter
@@ -78,9 +79,11 @@ from model_matching import (
     colourway_words,
     extract_colour_families,
     is_display_product,
+    key_pattern,
     near_miss_codes,
     relaxed_page_match,
     tail_chunk_match,
+    truncation_variants,
     url_anchored_to_row,
     url_belongs_to_other_model,
     url_claims_a_code,
@@ -1996,14 +1999,28 @@ def _variant_tail_difference(page_name: str, keys: ModelKeys) -> str:
 def _tolerated_spelling_reason(page_name: str, keys: ModelKeys) -> str:
     """One sentence for the report and the review CSV: what the page shows vs the sheet.
 
-    Two shapes only, and both are spelled out for the reviewer:
+    Three shapes, all spelled out for the reviewer:
     * another variant tail - the page shows ``IFPA`` for an ``IFGA`` row (2026-10-07);
     * a dropped trailing letter - the page shows ``DW-7500`` for a ``DW-7500C`` row
-      (live case, 2026-10-06).
+      (live case, 2026-10-06);
+    * a digit-stem truncation - the page shows bare ``1301217`` for a ``1301217E`` row
+      (live bug 2026-10-25: suffix completely absent, manual review required).
     """
     tail_difference = _variant_tail_difference(page_name, keys)
     if tail_difference:
         return tail_difference
+    # Digit-stem truncation: a digit-headed code whose suffix was stripped entirely.
+    # e.g. identity="1301217e", variant="1301217" (no letters) matched the page.
+    for identity in keys.identities:
+        for variant in truncation_variants(identity):
+            if not re.search(r"[a-z]", variant) and key_pattern(variant).search(page_name):
+                suffix = identity[len(variant):].upper()
+                sheet_token = keys.tokens[0] if keys.tokens else identity.upper()
+                return (
+                    f"flagged: digit-stem truncation \u2014 suffix {suffix!r} not found on "
+                    f"page, matched via bare stem {variant!r} for sheet model {sheet_token}; "
+                    "verify manually"
+                )
     shows = near_miss_codes(page_name, keys)
     page_code = shows[0].upper() if shows else "the model without its trailing letter"
     #: A row with neither a model token nor a glued identity (a pure keyword row such as

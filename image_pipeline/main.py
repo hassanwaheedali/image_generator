@@ -1175,6 +1175,19 @@ def summarize(results: list[ProductResult], config: PipelineConfig) -> None:
                 (p for p in result.note.split("; ") if "tail-chunk match" in p), result.note
             )
             print(f"  - {csv_escape(result.title)}\n      {note}")
+    stem_rows = [r for r in results if "digit-stem truncation" in r.note]
+    if stem_rows:
+        print(
+            f"\nDIGIT-STEM TRUNCATION ({len(stem_rows)}) - suffix was missing on the shop page;\n"
+            "the bare model number matched but the colour/variant suffix could not be confirmed.\n"
+            "Check each URL in review_products.csv and confirm it shows the correct variant:"
+        )
+        for result in stem_rows:
+            note = next(
+                (p for p in result.note.split("; ") if "digit-stem truncation" in p),
+                result.note,
+            )
+            print(f"  - {csv_escape(result.title)}\n      {note}")
     print(f"report  : {config.report_csv}")
     print(f"decisions: {config.decisions_path}")
 

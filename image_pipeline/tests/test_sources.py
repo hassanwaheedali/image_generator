@@ -94,6 +94,9 @@ def test_search_terms_carry_the_brand_when_it_is_known() -> None:
         "Dawlance DW-7500C",
         "DW-7500C",
         "Dawlance DW7500C",
+        "DW7500C",
+        "Dawlance DW 7500C",
+        "DW 7500C",
     )
 
 
