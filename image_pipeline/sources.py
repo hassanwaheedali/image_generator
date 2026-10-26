@@ -173,6 +173,13 @@ class RobotsCache:
 # parsing (pure functions - each one unit-tested)
 # --------------------------------------------------------------------------- #
 _SEPARATOR_RUN_RE = re.compile(r"[\s\-_/.]+")
+#: Drum / twin-tub capacity codes: capacity digits glued to family digits.
+#: "801217WB" -> cap="80", fam="1217", suf="WB" -> also try "80-1217", "80-1217WB".
+#: Capacities covered: 60-150 kg, matching Haier/Dawlance/Super Asia naming.
+_DRUM_SPLIT_RE = re.compile(
+    r"^([a-z]{0,4}?)(60|70|75|80|85|90|95|100|110|120|130|140|150)(\d{3,4})([a-z]{0,3})$",
+    re.IGNORECASE,
+)
 
 
 def shop_spellings(token: str) -> list[str]:
@@ -182,6 +189,10 @@ def shop_spellings(token: str) -> list[str]:
     works the same day.  Live reason (2026-10-06): Surmawala's Shopify suggest endpoint
     answered ``DW-7500`` for the sheet's ``DW 7500``, so the sheet's own spacing must not be
     the only spelling tried.
+
+    **Drum codes** (2026-10-25): if the sheet glued a capacity+family code (``801217 WB``
+    or ``1301217E``), also generate the hyphenated form shops index (``80-1217``,
+    ``130-1217``).  Shopify's search returns 0 results for the glued form.
     """
     hyphen = _SEPARATOR_RUN_RE.sub("-", token)
     glued = _SEPARATOR_RUN_RE.sub("", token)
@@ -190,10 +201,18 @@ def shop_spellings(token: str) -> list[str]:
     for spelling in (token, hyphen, glued, spaced):
         if spelling and spelling not in spellings:
             spellings.append(spelling)
+    # If the glued form looks like a drum code, also generate the split hyphenated form.
+    m = _DRUM_SPLIT_RE.match(glued)
+    if m:
+        pref, cap, fam, suf = m.groups()
+        base_split = f"{pref + '-' if pref else ''}{cap}-{fam}"
+        for extra in (f"{base_split}{suf}", base_split, f"{cap} {fam}"):
+            if extra and extra not in spellings:
+                spellings.append(extra)
     return spellings
 
 
-def search_terms(keys: ModelKeys, *, brand: str | None = None, limit: int = 3, title: str = "") -> tuple[str, ...]:
+def search_terms(keys: ModelKeys, *, brand: str | None = None, limit: int = 6, title: str = "") -> tuple[str, ...]:
     """The terms a shop is searched for: always the **sheet's own** model keys.
 
     All spellings of the first key are tried before the next key - the *term* is still the

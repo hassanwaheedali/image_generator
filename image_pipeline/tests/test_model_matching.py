@@ -1906,3 +1906,27 @@ def test_a_page_printing_our_stem_under_another_short_tail_is_not_our_model() ->
     assert match_product(
         keys=keys, brand="Dawlance", strong_text="Dawlance 9140WB Red refrigerator"
     ).matched
+
+
+def test_digit_headed_model_recognition_and_drum_gluing() -> None:
+    """Digit-headed codes (801217 WB, 1301217E) and hyphenated drum numbers (HWM 80-1217)."""
+    # Bug #1B: glued digit-headed code + letter suffix
+    keys = build_model_keys("Haier Automatic Washing Machine 8kg (801217 WB)")
+    assert "801217 WB" in keys.tokens
+    assert "801217wb" in keys.identities
+
+    # Bug #1A: glued letter prefix + hyphenated drum number
+    from model_matching import glued_model_token, _prefix_is_allowed
+    assert glued_model_token(["HWM", "80-1217"], 0) == ("HWM 80-1217", "hwm801217")
+
+    # Bug #1C: digit-only stem allowed in truncation_variants
+    assert "1301217" in truncation_variants("1301217e")
+
+    # Bug #2: prefix allowed on digit-headed code
+    assert _prefix_is_allowed("hwm", "801217wb", "Haier")
+    assert _prefix_is_allowed("wm", "1301217e", "Haier")
+
+    # Bug #3: code_like_tokens triplet pattern + half-pair cleanup
+    tokens = code_like_tokens("Haier_Single_Washing_Machine_HWM_80-1217-1.jpg")
+    assert "hwm801217" in tokens
+    assert "hwm80" not in tokens

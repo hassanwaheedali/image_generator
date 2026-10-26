@@ -495,7 +495,7 @@ class PipelineConfig:
     #: stops early is his call, a run that refuses to start is a bug.
     #: Only the *row* cap moves here: ``fallback_max_pages_per_source`` stays, because it is
     #: the fairness rule that makes a bigger budget mean more shops, not one shop ransacked.
-    fallback_max_pages_per_row_when_nothing_found: int = 3
+    fallback_max_pages_per_row_when_nothing_found: int = 6
     fallback_max_search_per_source: int = 1
     source_search_timeout_s: float = 12.0
     sitemap_ttl_days: int = 7
