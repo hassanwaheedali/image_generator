@@ -289,9 +289,7 @@ def process_direct_product(
             ref_path = _blur_reference_template(config, deps)
             if ref_path is not None:
                 reference_prepared = _load_prepared_template(config, ref_path)
-                preview = apply_template(
-                    square, reference_prepared.base, config, prepared=reference_prepared
-                )
+                preview = apply_template(square, reference_prepared, config)
                 blurry, hf_val, edge_val = is_canvas_blurry(preview, config)
                 if blurry:
                     rejections["S13.blur"] += 1

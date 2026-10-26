@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from config import ConfigError, PipelineConfig
@@ -319,12 +320,20 @@ def test_direct_with_no_template_and_no_banner(tmp_path: Path) -> None:
     assert len(result.urls_for("alfa")) == 2
 
     # Check the saved final files: they should be saved even without template_path
+    # and scaled up to fill product_fill_ratio (95%) cleanly on the canvas
     for acc in accepted:
-        for platform_key, final_path in acc.final_paths:
+        for _platform_key, final_path in acc.final_paths:
             assert final_path.is_file()
             with Image.open(final_path) as im:
                 # Should match canonical_side square (1000x1000)
                 assert im.size == (config.canonical_side, config.canonical_side)
+                arr = np.asarray(im.convert("RGB"))
+                non_white = np.where((arr < 250).any(axis=2))
+                content_w = int(non_white[1].max()) - int(non_white[1].min()) + 1
+                content_h = int(non_white[0].max()) - int(non_white[0].min()) + 1
+                max_dim = max(content_w, content_h)
+                expected_dim = round(config.canonical_side * config.product_fill_ratio)
+                assert abs(max_dim - expected_dim) <= 2
 
 
 def test_direct_rejects_the_yellow_theme_template_with_s19(tmp_path: Path) -> None:

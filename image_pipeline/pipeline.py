@@ -26,6 +26,7 @@ from PIL import Image
 from compositing import (
     PreparedTemplate,
     apply_template,
+    fit_product_to_canvas,
     isolate_main_product,
     prepare_template,
     product_content_bbox,
@@ -2676,10 +2677,10 @@ def _compose_and_save(
     final_paths: list[tuple[str, Path]] = []
     for platform in deps.platforms.platforms:
         if config.no_template or platform.template_path is None:
-            final_image = square
+            final_image = fit_product_to_canvas(square, config.canonical_side, config, bbox=bbox)
         else:
             prepared = _load_prepared_template(config, platform.template_path)
-            final_image = apply_template(square, prepared.base, config, bbox=bbox, prepared=prepared)
+            final_image = apply_template(square, prepared, config, bbox=bbox)
         final_paths.append(
             (platform.key, _save_final(final_image, config, task.title, platform.key, name))
         )

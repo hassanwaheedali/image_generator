@@ -649,7 +649,7 @@ def product_content_bbox(
     cols = np.where(content.any(axis=0))[0]
     box_w = int(cols[-1]) - int(cols[0]) + 1
     box_h = int(rows[-1]) - int(rows[0]) + 1
-    if box_w < min_ratio * width or box_h < min_ratio * height:
+    if max(box_w, box_h) < min_ratio * max(width, height):
         return (0, 0, width, height)
     return (int(cols[0]), int(rows[0]), int(cols[-1]) + 1, int(rows[-1]) + 1)
 
@@ -724,34 +724,26 @@ def prepare_template(template: Image.Image, config: PipelineConfig) -> PreparedT
     return PreparedTemplate(content_box=box, base=base)
 
 
-def apply_template(
+@dataclass(frozen=True)
+class TargetArea:
+    """Destination canvas and its inner box where the product is placed."""
+
+    canvas: Image.Image
+    box: tuple[int, int, int, int]
+
+
+def fit_product_to_box(
     product_square: Image.Image,
-    template: Image.Image,
+    target: TargetArea,
     config: PipelineConfig,
     *,
     bbox: tuple[int, int, int, int] | None = None,
-    prepared: PreparedTemplate | None = None,
 ) -> Image.Image:
-    """Composite the product into the template and put the overlay back on top."""
-    if prepared is not None:
-        left, top, right, bottom = prepared.content_box
-        base = prepared.base
-    else:
-        left, top, right, bottom = template_content_box(template, config)
-        base = template.convert("RGBA")
-        if config.template_make_white_transparent and not template_has_transparency(
-            template, min_alpha=config.template_transparency_min_alpha
-        ):
-            # Knock white out of the product area only - never out of the logo band or footer.
-            base = make_white_transparent(
-                template, config.template_white_cutoff, box=(left, top, right, bottom)
-            )
-
+    """Scale and centre the product so its content fills ``fill_ratio`` of ``target.box``."""
+    left, top, right, bottom = target.box
     box_w, box_h = right - left, bottom - top
-
-    # Size from the product's own content box, so a wide shot fills the width and a tall
-    # shot fills the height - the padded square is only a carrier.
     canvas_w, canvas_h = product_square.size
+
     if bbox is None:
         bbox = product_content_bbox(
             product_square,
@@ -762,27 +754,64 @@ def apply_template(
     scale = fit_product_size(
         content_w, content_h, box_w, box_h, fill_ratio=config.product_fill_ratio
     )
-    target = (max(1, round(canvas_w * scale)), max(1, round(canvas_h * scale)))
-    product = to_rgb(product_square).resize(target, Image.Resampling.LANCZOS)
+    target_dim = (max(1, round(canvas_w * scale)), max(1, round(canvas_h * scale)))
+    product = to_rgb(product_square).resize(target_dim, Image.Resampling.LANCZOS)
 
-    canvas = Image.new("RGBA", template.size, (255, 255, 255, 0))
-    # Align the *content*, not the carrier: the padded square is bigger than the product,
-    # so centring the carrier could push its padding outside the content box and over the
-    # logo band.  PIL clips negative origins, which trims that padding safely.
     content_target_w = max(1, round(content_w * scale))
     content_target_h = max(1, round(content_h * scale))
     bias = int(box_h * config.optical_center_bias)
     content_x = left + (box_w - content_target_w) // 2
     content_y = top + (box_h - content_target_h) // 2 + bias
-    # Paste the product itself (its content box), never the white padding around it -
-    # that padding is what used to creep over the logo band.
     crop_left = round(bbox[0] * scale)
     crop_top = round(bbox[1] * scale)
     content = product.crop(
         (crop_left, crop_top, crop_left + content_target_w, crop_top + content_target_h)
     )
-    canvas.paste(content, (content_x, content_y))
-    return Image.alpha_composite(canvas, base)
+    target.canvas.paste(content, (content_x, content_y))
+    return target.canvas
+
+
+def fit_product_to_canvas(
+    product_square: Image.Image,
+    canvas_side: int,
+    config: PipelineConfig,
+    *,
+    bbox: tuple[int, int, int, int] | None = None,
+) -> Image.Image:
+    """Scale and centre the product to fill ``config.product_fill_ratio`` of a blank canvas.
+
+    Used when templates are omitted (--no-template): crops to the tight product content
+    box and scales it so the longest edge fills ``fill_ratio`` (e.g. 95%) of the canvas,
+    matching the sizing behaviour of ``apply_template``.
+    """
+    target = TargetArea(
+        canvas=Image.new("RGB", (canvas_side, canvas_side), (255, 255, 255)),
+        box=(0, 0, canvas_side, canvas_side),
+    )
+    return fit_product_to_box(product_square, target, config, bbox=bbox)
+
+
+def apply_template(
+    product_square: Image.Image,
+    template: Image.Image | PreparedTemplate,
+    config: PipelineConfig,
+    *,
+    bbox: tuple[int, int, int, int] | None = None,
+) -> Image.Image:
+    """Composite the product into the template and put the overlay back on top."""
+    prep = (
+        template
+        if isinstance(template, PreparedTemplate)
+        else prepare_template(template, config)
+    )
+    target = TargetArea(
+        canvas=Image.new("RGBA", prep.base.size, (255, 255, 255, 0)),
+        box=prep.content_box,
+    )
+    canvas = fit_product_to_box(product_square, target, config, bbox=bbox)
+    return Image.alpha_composite(canvas, prep.base)
+
+
 
 
 # --------------------------------------------------------------------------- #

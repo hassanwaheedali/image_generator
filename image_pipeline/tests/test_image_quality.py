@@ -22,6 +22,7 @@ from PIL import Image, ImageDraw
 
 from compositing import (
     apply_template,
+    fit_product_to_canvas,
     footer_safe_margin,
     header_safe_margin,
     isolate_main_product,
@@ -575,6 +576,21 @@ def test_apply_template_keeps_template_size(config: PipelineConfig) -> None:
     template = Image.open(_asset(config, "digi")).convert("RGBA")
     result = apply_template(clean_product_image(), template, config)
     assert result.size == template.size
+
+
+def test_fit_product_to_canvas_fills_configured_ratio(config: PipelineConfig) -> None:
+    """When templates are disabled, the product must be scaled up to fill product_fill_ratio (95%)."""
+    wide = Image.new("RGB", (1000, 1000), (255, 255, 255))
+    ImageDraw.Draw(wide).rectangle((300, 440, 700, 560), fill=(40, 50, 60))
+    result = fit_product_to_canvas(wide, config.canonical_side, config)
+    assert result.size == (config.canonical_side, config.canonical_side)
+
+    arr = np.asarray(result)
+    non_white = np.where((arr < 250).any(axis=2))
+    content_w = int(non_white[1].max()) - int(non_white[1].min()) + 1
+    expected_w = round(config.canonical_side * config.product_fill_ratio)
+    assert abs(content_w - expected_w) <= 2, f"expected width ~{expected_w}, got {content_w}"
+
 
 
 # --------------------------------------------------------------------------- #
