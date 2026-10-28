@@ -698,6 +698,7 @@ _GENERIC_NAME_WORDS = frozenset((
     "split", "window", "portable", "cabinet", "chest", "upright", "pro", "plus",
     "max", "special", "edition", "smart", "digital", "direct",
     "twin", "tub", "semi", "automatic", "manual", "standing", "floor",
+    "double", "single",
     "vertical", "horizontal", "compact", "mini", "large", "small", "luxury",
     "premium", "original", "model", "series", "type", "style", "with", "without",
     "and", "the", "for", "hd", "led", "lcd",
@@ -720,10 +721,20 @@ _GENERIC_NAME_WORDS = frozenset((
 #: Dynamically registered generic words from config
 _DYNAMIC_GENERIC_NAME_WORDS: set[str] = set()
 
+#: Dynamically registered retailer/marketplace names from config
+_DYNAMIC_RETAILER_NAMES: set[str] = set()
+
 
 def register_generic_name_words(words: Iterable[str]) -> None:
     """Register additional generic category/marketing words dynamically from config."""
     _DYNAMIC_GENERIC_NAME_WORDS.update(w.strip().lower() for w in words if w.strip())
+
+
+def register_retailer_names(names: Iterable[str]) -> None:
+    """Register retailer names from config so they are never treated as product series lines."""
+    cleaned = {n.strip().lower() for n in names if n.strip()}
+    _DYNAMIC_RETAILER_NAMES.update(cleaned)
+    _DYNAMIC_GENERIC_NAME_WORDS.update(cleaned)
 
 
 #: Tier words proven by sibling rows to separate *different products of one series*
@@ -1371,7 +1382,7 @@ def near_miss_codes(text: str, keys: ModelKeys) -> tuple[str, ...]:
     for code in code_like_tokens(text):
         if len(re.findall(r"\d", code)) < 3:
             continue
-        if _alpha_prefix(code) in prefixes:
+        if _alpha_prefix(code) in prefixes and normalize_key(code) not in keys.identities:
             hints.append(code)
     return tuple(dict.fromkeys(hints))[:3]
 
@@ -2256,7 +2267,10 @@ def url_names_other_product_line(url: str, keys: ModelKeys) -> bool:
             own_word in word for own_word in own if len(own_word) >= 4 and own_word not in KNOWN_BRANDS
         )
         and word not in KNOWN_BRANDS
+        and word not in _ALL_BRAND_ALIASES
         and word not in _GENERIC_NAME_WORDS
+        and word not in _DYNAMIC_GENERIC_NAME_WORDS
+        and word not in _DYNAMIC_RETAILER_NAMES
         and word not in _KEYWORD_EXTRA_NOISE
         and word not in _URL_COMMERCE_NOISE
         and not is_colour_word(word)
@@ -2460,10 +2474,11 @@ def _code_search(text: str, core: str, identity: str, brand: str) -> bool:
 
 def _usable_core(core: str, *, min_length: int, min_digits: int) -> bool:
     """A code is only used for the brand+code rule when it is distinctive enough."""
+    digits = len(re.findall(r"\d", core))
     return (
-        len(core) >= min_length
-        and len(re.findall(r"\d", core)) >= min_digits
-        and re.search(r"[a-z]", core) is not None
+        len(core) >= min(min_length, 4 if digits >= 4 else min_length)
+        and digits >= min_digits
+        and (re.search(r"[a-z]", core) is not None or digits >= 4)
     )
 
 
@@ -2595,12 +2610,25 @@ def url_matches_this_product(
     return False
 
 
+_BRAND_ALIASES: dict[str, tuple[str, ...]] = {
+    "dawlance": ("dawlance", "dawlanc", "dawlence"),
+}
+_ALL_BRAND_ALIASES: frozenset[str] = frozenset(
+    alias for aliases in _BRAND_ALIASES.values() for alias in aliases
+)
+
+
 def brand_token_present(text: str, brand: str) -> bool:
     """True when the brand name appears as a whole word in ``text``."""
     if not brand:
         return False
-    pattern = rf"(?<![a-z0-9]){re.escape(brand.lower())}(?![a-z0-9])"
-    return re.search(pattern, normalize_text(text)) is not None
+    variants = _BRAND_ALIASES.get(brand.lower(), (brand.lower(),))
+    normalized = normalize_text(text)
+    for variant in variants:
+        pattern = rf"(?<![a-z0-9]){re.escape(variant)}(?![a-z0-9])"
+        if re.search(pattern, normalized) is not None:
+            return True
+    return False
 
 
 # --------------------------------------------------------------------------- #

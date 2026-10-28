@@ -325,6 +325,23 @@ class PipelineConfig:
     #: Extra generic / category words that must not trigger a series substitution veto.
     extra_generic_name_words: tuple[str, ...] = ()
 
+    #: Retailers and marketplace store names whose branding in titles or URLs must never be
+    #: mistaken for product series names or external product lines.
+    retailer_names: tuple[str, ...] = (
+        "surmawala",
+        "daraz",
+        "modernelectronics",
+        "friendshome",
+        "telemart",
+        "ishopping",
+        "priceoye",
+        "alfamall",
+        "alfatah",
+        "paklap",
+        "czone",
+        "myshop",
+    )
+
     #: Catalogue CSV (columns ``Brand`` and ``Original_Title``) whose sibling rows teach
     #: the matcher which tier words separate different products (``Avante`` vs
     #: ``Avante+``).  Relative paths resolve against the pipeline directory; "" disables
@@ -965,6 +982,21 @@ class PipelineConfig:
             from model_matching import register_generic_name_words
 
             register_generic_name_words(self.extra_generic_name_words)
+
+        all_retailers = set(self.retailer_names)
+        from urllib.parse import urlsplit
+
+        for src in (*self.retail_shopify_sources, *self.retail_woo_sources, *self.last_resort_marketplace_hosts):
+            host = urlsplit(src if "://" in src else f"https://{src}").netloc.lower().split(":")[0]
+            if host.startswith("www."):
+                host = host[4:]
+            domain_name = host.split(".")[0]
+            if domain_name:
+                all_retailers.add(domain_name)
+
+        from model_matching import register_retailer_names
+
+        register_retailer_names(all_retailers)
 
 
     def sources_for(self, brand: str | None) -> tuple[str, ...]:
