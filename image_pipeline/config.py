@@ -209,6 +209,8 @@ class PipelineConfig:
     no_banner: bool = False
     #: When true, publish clean, isolated product images without applying template frames.
     no_template: bool = False
+    #: When true, bypass all image quality gates (S6/S7/S8/S9/S13/S19) and accept images as-is.
+    skip_quality_gates: bool = False
 
     # ----- run control -----------------------------------------------------
     dry_run: bool = False

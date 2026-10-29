@@ -44,7 +44,9 @@ from model_matching import (
     fuzzy_series_anchor,
     has_series_name,
     identity_is_capacity_glued,
+    row_variant_code,
     truncation_variants,
+    url_variant_verdict,
 )
 from models import ModelKeys, PageCandidate, SourceSearchReport
 from textnorm import normalize_key
@@ -234,6 +236,14 @@ def search_terms(keys: ModelKeys, *, brand: str | None = None, limit: int = 6, t
             terms.append(term)
         return len(terms) >= cap
 
+    own = row_variant_code(keys)
+    if own is not None and keys.tokens:
+        tail = " ".join(own[2]).replace(" plus", "+").upper()
+        for spelling in shop_spellings(keys.tokens[0]):
+            if brand and add(f"{brand.title()} {spelling} {tail}"):
+                return tuple(terms)
+            if add(f"{spelling} {tail}"):
+                return tuple(terms)
     for token in keys.tokens:
         for spelling in shop_spellings(token):
             if brand and add(f"{brand.title()} {spelling}"):
@@ -407,6 +417,14 @@ def model_tokens_in_url(url: str, keys: ModelKeys) -> bool:
     when the URL also names the row's own line (``pulse``); a real part number stays
     trusted wherever it appears.
     """
+    verdict = url_variant_verdict(url, keys)
+    if verdict == "conflict":
+        # ``dwt-255-clear-lid`` is another product than the ``DWT 255 ES`` row, however
+        # well the bare code matches: a wrong variant is never offered.
+        return False
+    if verdict == "agree":
+        # The brand's own spelling of the same variant (``dw-255-es`` for ``DWT 255 ES``).
+        return True
     path = urlsplit(url).path or url
     slug = normalize_key(path)
     anchor = fuzzy_series_anchor(keys)
@@ -442,6 +460,28 @@ def model_tokens_in_url(url: str, keys: ModelKeys) -> bool:
     return not anchor or names_the_line()
 
 
+def _healed_first(urls: list[str]) -> list[str]:
+    """Each URL whose path has a doubled hyphen is offered single-hyphen first, then as listed.
+
+    A maker slugs ``DWT 1166 X ADS+`` to ``...-ads--automatic...`` (the ``+`` leaves a hole)
+    and later repairs the page to ``...-ads-automatic...``; a sitemap cached before the
+    repair keeps listing the dead spelling (live: HTTP 500 after four retries, then a
+    retailer's photo was used).  Trying the repaired spelling first costs nothing when the
+    listed one was right, because the listed one stays right behind it.
+    """
+    out: list[str] = []
+    for url in urls:
+        parts = urlsplit(url)
+        repaired = re.sub(r"-{2,}", "-", parts.path)
+        if repaired != parts.path:
+            twin = parts._replace(path=repaired).geturl()
+            if twin not in out:
+                out.append(twin)
+        if url not in out:
+            out.append(url)
+    return out
+
+
 def rank_candidates(
     candidates: list[PageCandidate],
     keys: ModelKeys,
@@ -463,8 +503,9 @@ def rank_candidates(
     """
     colours = {colour.lower() for colour in keys.colours}
 
-    def score(index_and_candidate: tuple[int, PageCandidate]) -> tuple[int, int, int]:
+    def score(index_and_candidate: tuple[int, PageCandidate]) -> tuple[int, int, int, int]:
         index, candidate = index_and_candidate
+        variant_hit = 0 if url_variant_verdict(candidate.url, keys) == "agree" else 1
         haystack = f"{candidate.url} {candidate.title_hint}".lower()
         colour_hit = 0 if colours and any(colour in haystack for colour in colours) else 1
         title_hint_lower = candidate.title_hint.lower()
@@ -472,7 +513,7 @@ def rank_candidates(
             bool(keys.tokens) and any(t.lower() in title_hint_lower for t in keys.tokens if t)
         )
         model_hit = 0 if has_model else 1
-        return (colour_hit, model_hit, index)
+        return (variant_hit, colour_hit, model_hit, index)
 
     return [candidate for _, candidate in sorted(enumerate(candidates), key=score)]
 
@@ -616,7 +657,7 @@ class SourceChain:
         urls = self._sitemap_urls(base, host)
         if not urls:
             return []
-        matched = [url for url in urls if model_tokens_in_url(url, keys)]
+        matched = _healed_first([url for url in urls if model_tokens_in_url(url, keys)])
         LOG.info(
             "[search] %s: sitemap %d url(s), %d match the model", host, len(urls), len(matched)
         )

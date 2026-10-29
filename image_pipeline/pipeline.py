@@ -2635,19 +2635,27 @@ def _compose_and_save(
     # Owner decision 2026-10-15: the studio background is keyed out of the primary image
     # only.  Later images of a row show parts and details, where the flood-fill erased pale
     # product bodies without buying anything back.
-    isolated, degraded = isolate_main_product(image, config, clean_background=(index == 1))
-    square = to_square_canvas(
-        isolated,
-        config.canonical_side,
-        fill_ratio=config.product_fill_ratio,
-        max_upscale=config.max_upscale,
-    )
-    square = sharpen(
-        square,
-        radius=config.unsharp_radius,
-        percent=config.unsharp_percent,
-        threshold=config.unsharp_threshold,
-    )
+    # As-is mode (--no-template + --skip-quality-gates): the picture ships exactly as it
+    # was given - no isolation, no crop, no re-fit into a padded square, no sharpening.
+    as_is = config.no_template and config.skip_quality_gates
+    degraded = False
+    if as_is:
+        source_pixels = downloaded if downloaded is not None else image
+        square = source_pixels.convert("RGB")
+    else:
+        isolated, degraded = isolate_main_product(image, config, clean_background=(index == 1))
+        square = to_square_canvas(
+            isolated,
+            config.canonical_side,
+            fill_ratio=config.product_fill_ratio,
+            max_upscale=config.max_upscale,
+        )
+        square = sharpen(
+            square,
+            radius=config.unsharp_radius,
+            percent=config.unsharp_percent,
+            threshold=config.unsharp_threshold,
+        )
     published_repeat = dedup.record_published(square)
     if published_repeat:
         # The padding and compression that made two shops' copies of one artwork look
@@ -2657,7 +2665,7 @@ def _compose_and_save(
             title=task.title, url=used_url, rule_id="S10", detail=published_repeat
         )
         return
-    conflict = "" if index > 1 else _hero_colour_gate(
+    conflict = "" if (index > 1 or as_is) else _hero_colour_gate(
         task=task,
         keys=keys,
         square=square,
@@ -2693,7 +2701,9 @@ def _compose_and_save(
     name = f"{task.name_prefix_override or filename_prefix(keys, task.title)}_{index}.jpg"
     final_paths: list[tuple[str, Path]] = []
     for platform in deps.platforms.platforms:
-        if config.no_template or platform.template_path is None:
+        if as_is:
+            final_image = square
+        elif config.no_template or platform.template_path is None:
             final_image = fit_product_to_canvas(square, config.canonical_side, config, bbox=bbox)
         else:
             prepared = _load_prepared_template(config, platform.template_path)

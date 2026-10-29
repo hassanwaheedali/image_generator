@@ -34,9 +34,14 @@ from variant_terms import (
     colour_phrase,
     colour_word_conflict,
     is_colour_word,
+    code_heads_compatible,
+    identity_alpha_tail,
     same_colour,
     shade_agreement,
     suffix_agreement,
+    variant_tail_agrees,
+    variant_tails,
+    variant_tails_conflict,
 )
 
 # --------------------------------------------------------------------------- #
@@ -3002,6 +3007,76 @@ def score_match(
         confidence=confidence,
     )
 
+def _tail_stop_words() -> frozenset[str]:
+    """Words that end a variant tail: category and marketing words (colours end it by themselves)."""
+    return TAIL_STOPWORDS | _GENERIC_NAME_WORDS | frozenset(_DYNAMIC_GENERIC_NAME_WORDS)
+
+
+def row_variant_code(keys: ModelKeys) -> tuple[str, str, tuple[str, ...]] | None:
+    """``(letters, number, tail)`` of the row's own spaced variant (``DWT``, ``255``, ``('es',)``).
+
+    Read from the sheet title with the same tokenizer a page goes through, and only for a
+    code the row's identities carry, so a tail is never taken from an unrelated number.
+    ``None`` when the row names no tail (``DWT 255`` alone has no variant to protect).
+    """
+    for head, number, tail in variant_tails(keys.cleaned_title, _tail_stop_words()):
+        if tail and any(number in identity for identity in keys.identities):
+            core = [word for word in tail if word != "plus"]
+            if len(core) == 1 and len(core[0]) >= 3 and any(
+                identity_alpha_tail(identity)[1] for identity in keys.identities
+            ):
+                # A glued part-number suffix (``HRF-538 IFGA``): the suffix rule owns it,
+                # and it demotes to a flagged last resort (owner decision 2026-10-07).
+                return None
+            return head, number, tail
+    return None
+
+
+def page_variant_conflict(keys: ModelKeys, text: str) -> bool:
+    """True when the text prints this row's code with a **different** variant tail only.
+
+    ``DWT 255 ES`` row vs a ``DWT 255 Clear Lid`` page: same code, tails substitute each
+    other, so the page is another product and must never publish - not even as a flagged
+    last resort.  Fail open: no tail on the row, no occurrence of the code, or *any*
+    occurrence whose tail agrees or is omitted, is no conflict.
+    """
+    own = row_variant_code(keys)
+    if own is None:
+        return False
+    head, number, row_tail = own
+    seen = False
+    for page_head, page_number, page_tail in variant_tails(text, _tail_stop_words()):
+        if page_number != number or not code_heads_compatible(page_head, head):
+            continue
+        if not page_tail or not variant_tails_conflict(row_tail, page_tail):
+            return False
+        seen = True
+    return seen
+
+
+def url_variant_verdict(url: str, keys: ModelKeys) -> str:
+    """How a brand URL's own slug relates to the row's variant: ``agree`` / ``conflict`` / ``none``.
+
+    The head letters are matched with abbreviation tolerance (``dw-255-es`` is the brand's
+    spelling of ``DWT 255 ES``); ``agree`` therefore needs the *tail* to be positively
+    present, so the tolerance can never admit a bare-number match.
+    """
+    own = row_variant_code(keys)
+    if own is None:
+        return "none"
+    head, number, row_tail = own
+    slug_text = unquote(urlsplit(url).path).rsplit("/", 1)[-1]
+    verdict = "none"
+    for page_head, page_number, page_tail in variant_tails(slug_text, _tail_stop_words()):
+        if page_number != number or not code_heads_compatible(page_head, head):
+            continue
+        if variant_tail_agrees(row_tail, page_tail):
+            return "agree"
+        if variant_tails_conflict(row_tail, page_tail):
+            verdict = "conflict"
+    return verdict
+
+
 def match_product(
     *,
     keys: ModelKeys,
@@ -3051,6 +3126,10 @@ def match_product(
         return ProductMatch(False, "colour_conflict", ())
     if match.matched and _page_names_different_model(keys, strong_text):
         return ProductMatch(False, "different_model", ())
+    if page_variant_conflict(keys, strong_text):
+        # ``DWT 255 ES`` vs ``DWT 255 Clear Lid``: one code, two sold products.  A wrong
+        # variant is a wrong picture, so it is refused outright, never tolerated.
+        return ProductMatch(False, "variant_conflict", ())
     if not match.tolerated and _page_names_another_variant(keys, strong_text):
         return replace(match, tolerated=True)
     if not match.tolerated and score.series_veto:

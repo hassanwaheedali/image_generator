@@ -154,7 +154,7 @@ def process_direct_product(
         # Blur guard (Option 2): reject genuinely blurry / smeared images.
         # Clean product shots (sharpness >= 0.02) pass; smeared/blurry images are rejected.
         blur_score = sharpness_score(image)
-        if blur_score < config.salvage_min_sharpness:
+        if not config.skip_quality_gates and blur_score < config.salvage_min_sharpness:
             rejections["S13.blur"] += 1
             deps.decisions.reject(
                 title=task.title,
@@ -189,29 +189,32 @@ def process_direct_product(
             )
 
         # S19: a store's own themed template (brand colours, logo) never composes.
-        template_reason = branded_template_reason(image, config)
-        if template_reason is not None:
-            rejections["S19"] += 1
-            deps.decisions.reject(title=task.title, url=url, rule_id="S19", detail=template_reason)
-            if config.keep_rejected_images:
-                _dump_rejected(image, config, task.title, url, "S19")
-            continue
+        if not config.skip_quality_gates:
+            template_reason = branded_template_reason(image, config)
+            if template_reason is not None:
+                rejections["S19"] += 1
+                deps.decisions.reject(title=task.title, url=url, rule_id="S19", detail=template_reason)
+                if config.keep_rejected_images:
+                    _dump_rejected(image, config, task.title, url, "S19")
+                continue
 
         # The white-background gates (S8/S6/S9/S14/S7 + studio rescue): "we need
         # only clear pictures".  Same order and thresholds as Option 1.
-        rule_id, detail = run_quality_gates(image, config, official_gallery=True)
-        if rule_id != "ok":
-            rejections[rule_id] += 1
-            deps.decisions.reject(title=task.title, url=url, rule_id=rule_id, detail=detail)
-            if config.keep_rejected_images:
-                _dump_rejected(image, config, task.title, url, rule_id)
-            continue
-        if detail:
-            # Accepted, not silent (the S16.curated pattern): the gate would have refused
-            # this picture on a scraped page; in his folder it is his choice, and the
-            # audit trail says so.
+        if not config.skip_quality_gates:
+            rule_id, detail = run_quality_gates(image, config, official_gallery=True)
+            if rule_id != "ok":
+                rejections[rule_id] += 1
+                deps.decisions.reject(title=task.title, url=url, rule_id=rule_id, detail=detail)
+                if config.keep_rejected_images:
+                    _dump_rejected(image, config, task.title, url, rule_id)
+                continue
+            if detail:
+                deps.decisions.keep(
+                    title=task.title, url=url, rule_id="S7.curated", detail=detail
+                )
+        else:
             deps.decisions.keep(
-                title=task.title, url=url, rule_id="S7.curated", detail=detail
+                title=task.title, url=url, rule_id="skip_quality_gates", detail="image accepted as-is without quality gate enforcement"
             )
 
         if (

@@ -329,3 +329,95 @@ def suffix_agreement(
             if best is None or _RANK[verdict] < _RANK[best]:
                 best = verdict
     return best
+
+
+# --------------------------------------------------------------------------- #
+# spaced variant tail  (``DWT 255 ES``, ``DWT 255 Clear Lid``, ``DWT 1166 ADS+``)
+# --------------------------------------------------------------------------- #
+# Some makers separate sibling products only by the *words after the model number*
+# (Dawlance: ``DWT 255 ES`` and ``DWT 255 Clear Lid`` share the code ``DWT 255``;
+# ``DWT 1166 X ADS`` is sold as ``ADS+``).  The tail is read from the text itself -
+# the words that follow the number up to the first category / colour / marketing word -
+# so there is no per-brand table: the same function reads a sheet title, a page title,
+# an h1 or a URL slug.  A trailing ``+`` is kept as the word ``plus`` so it is never
+# silently stripped (``ADS+`` -> ``ads plus``).
+_CODE_HEAD_RE = re.compile(r"^[a-z]{2,4}$")
+_CODE_NUMBER_RE = re.compile(r"^\d{3,5}$")
+_TAIL_TOKEN_RE = re.compile(r"[a-z0-9]+\+?")
+_TAIL_MAX_WORDS = 3
+_PLUS = "plus"
+
+
+def variant_tails(
+    text: str, stop_words: frozenset[str] | set[str] = frozenset()
+) -> list[tuple[str, str, tuple[str, ...]]]:
+    """Every ``(letters, number, tail words)`` the text prints after a ``<letters> <number>`` code.
+
+    ``stop_words`` ends a tail (category and marketing words are passed in by the caller,
+    because this module imports nothing from the pipeline; colour words always end it).
+    A tail may be empty.
+    """
+    tokens = _TAIL_TOKEN_RE.findall(text.lower())
+    out: list[tuple[str, str, tuple[str, ...]]] = []
+    for index in range(len(tokens) - 1):
+        head, number = tokens[index].rstrip("+"), tokens[index + 1]
+        if not _CODE_HEAD_RE.match(head) or not _CODE_NUMBER_RE.match(number):
+            continue
+        tail: list[str] = []
+        for raw in tokens[index + 2 :]:
+            word = raw.rstrip("+")
+            if (
+                not word.isalpha()
+                or word in stop_words
+                or is_colour_word(word)
+                or len(tail) >= _TAIL_MAX_WORDS
+            ):
+                break
+            tail.append(word)
+            if raw.endswith("+"):
+                tail.append(_PLUS)
+                break
+        out.append((head, number, tuple(tail)))
+    return out
+
+
+def _tail_words_compatible(one: str, other: str) -> bool:
+    """Equal, or one is a prefix of the other (``c`` ~ ``clear``, ``ifga`` ~ ``ifgainv``)."""
+    return one == other or one.startswith(other) or other.startswith(one)
+
+
+def _core_tail(tail: tuple[str, ...]) -> list[str]:
+    return [word for word in tail if word != _PLUS]
+
+
+def variant_tails_conflict(row_tail: tuple[str, ...], page_tail: tuple[str, ...]) -> bool:
+    """True when two tails name **different** variants of one code.
+
+    A conflict needs *no word in common* (any shared word is one line spelled two ways): ``es`` vs ``clear lid`` conflict, while ``c`` vs ``clear lid`` agree
+    (the letter is the initial), ``ads`` vs ``x ads`` agree (the page adds a word) and
+    ``ads plus`` vs ``x ads`` agree (``+`` is kept, but never makes a page foreign).  An
+    empty tail has no opinion.
+    """
+    row, page = _core_tail(row_tail), _core_tail(page_tail)
+    if not row or not page:
+        return False
+    # Any shared word means one product line spelled two ways (`bkg tech` / `tech r`);
+    # only tails with nothing in common are different variants.
+    return not any(_tail_words_compatible(w, p) for w in row for p in page)
+
+
+def variant_tail_agrees(row_tail: tuple[str, ...], page_tail: tuple[str, ...]) -> bool:
+    """True when both tails speak and every word of the row's tail is found in the page's."""
+    row, page = _core_tail(row_tail), _core_tail(page_tail)
+    if not row or not page:
+        return False
+    return all(any(_tail_words_compatible(w, p) for p in page) for w in row)
+
+
+def code_heads_compatible(one: str, other: str) -> bool:
+    """Two code letter-prefixes of one model line: equal, or one abbreviates the other.
+
+    A brand's own URLs drop a letter the retailers keep (``dw-255-es`` for ``DWT 255 ES``).
+    Only letters of length >= 2 on both sides, so a lone letter never glues two families.
+    """
+    return len(one) >= 2 and len(other) >= 2 and (one.startswith(other) or other.startswith(one))

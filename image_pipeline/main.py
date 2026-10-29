@@ -145,6 +145,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="suppress appending the closing banner (last.png) across all platforms",
     )
     parser.add_argument(
+        "--skip-quality-gates",
+        action="store_true",
+        help="bypass all image quality gates (S6/S7/S8/S9/S13/S19) and accept images as-is",
+    )
+    parser.add_argument(
         "--images-dir",
         default=None,
         metavar="PARENT",
@@ -244,6 +249,7 @@ def build_config(args: argparse.Namespace) -> PipelineConfig:
         local_images_mode=bool(args.images_dir),
         no_template=bool(args.no_template),
         no_banner=bool(args.no_banner),
+        skip_quality_gates=bool(args.skip_quality_gates),
         workers=int(args.workers),
         limit=args.limit,
         redo_titles=tuple(args.redo or ()),
