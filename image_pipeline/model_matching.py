@@ -282,7 +282,12 @@ def glued_model_token(
     suffix_is_glued = bool(re.search(r"[a-z]$", number.lower()))
     if not suffix_is_glued and index + 2 < len(words):
         suffix = words[index + 2].strip(_PUNCTUATION)
-        if len(suffix) == 1 and suffix.isalpha() and suffix.lower() not in GLUE_STOPWORDS:
+        if (
+            _GLUE_SUFFIX_RE.match(suffix.lower())
+            and suffix.lower() not in GLUE_STOPWORDS
+            and suffix.lower() not in TAIL_STOPWORDS
+            and not UNIT_QUANTITY_RE.match(f"{number}{suffix}".lower())
+        ):
             token = f"{token} {suffix}"
     identity = normalize_key(token)
     if len(identity) < 5 or not re.search(r"[a-z]", identity) or not re.search(r"\d", identity):
@@ -2398,8 +2403,21 @@ def brand_match_cores(identity: str, brand: str = "") -> tuple[str, ...]:
     if prefix and len(identity) > len(prefix):
         normalized_brand = normalize_key(brand) if brand else ""
         if not normalized_brand or prefix.startswith(normalized_brand[:1]):
+            rest = identity[len(prefix):]
             cores.append(identity[1:])             # brand initial dropped ("rf538ifga")
-            cores.append(identity[len(prefix):])   # whole family prefix dropped ("538ifga")
+            cores.append(rest)                     # whole family prefix dropped ("538ifga")
+            if normalized_brand:
+                # Brand-gated appliance prefix family equivalence:
+                # Dawlance: dwt <-> dw
+                if prefix.startswith("dwt"):
+                    cores.append("dw" + rest)
+                elif prefix.startswith("dw") and not prefix.startswith("dwt"):
+                    cores.append("dwt" + rest)
+                # Haier: hwm <-> hw
+                elif prefix.startswith("hwm"):
+                    cores.append("hw" + rest)
+                elif prefix.startswith("hw") and not prefix.startswith("hwm"):
+                    cores.append("hwm" + rest)
     return tuple(dict.fromkeys(cores))
 
 
@@ -2448,7 +2466,7 @@ def _prefix_is_allowed(observed: str, identity: str, brand: str) -> bool:
     # Digit-headed sheet code: accept any short appliance prefix the page adds.
     if not family and identity and identity[0].isdigit():
         return len(remainder) <= 3
-    return bool(family) and family.startswith(remainder)
+    return bool(family) and (family.startswith(remainder) or remainder.startswith(family))
 
 
 def code_text(text: str) -> str:
@@ -3021,13 +3039,14 @@ def row_variant_code(keys: ModelKeys) -> tuple[str, str, tuple[str, ...]] | None
     """
     for head, number, tail in variant_tails(keys.cleaned_title, _tail_stop_words()):
         if tail and any(number in identity for identity in keys.identities):
-            core = [word for word in tail if word != "plus"]
-            if len(core) == 1 and len(core[0]) >= 3 and any(
-                identity_alpha_tail(identity)[1] for identity in keys.identities
-            ):
-                # A glued part-number suffix (``HRF-538 IFGA``): the suffix rule owns it,
-                # and it demotes to a flagged last resort (owner decision 2026-10-07).
-                return None
+            if "plus" not in tail:
+                core = [word for word in tail if word != "plus"]
+                if len(core) == 1 and len(core[0]) >= 3 and any(
+                    identity_alpha_tail(identity)[1] for identity in keys.identities
+                ):
+                    # A glued part-number suffix (``HRF-538 IFGA``): the suffix rule owns it,
+                    # and it demotes to a flagged last resort (owner decision 2026-10-07).
+                    return None
             return head, number, tail
     return None
 
@@ -3075,6 +3094,44 @@ def url_variant_verdict(url: str, keys: ModelKeys) -> str:
         if variant_tails_conflict(row_tail, page_tail):
             verdict = "conflict"
     return verdict
+
+
+def omitted_variant_modifier(keys: ModelKeys, text: str) -> tuple[str, str] | None:
+    """When a row requested a modifier (like '+' or 'ES') and the text omits it for a base model.
+
+    Returns (omitted_modifier, base_code) or None if exact match or no modifier requested.
+    """
+    own = row_variant_code(keys)
+    if own is None:
+        return None
+    head, number, row_tail = own
+    if not row_tail:
+        return None
+
+    matching_page_tails = [
+        page_tail
+        for page_head, page_number, page_tail in variant_tails(text, _tail_stop_words())
+        if page_number == number and code_heads_compatible(page_head, head)
+    ]
+    if not matching_page_tails:
+        return None
+
+    # State 1: Conflicting variant tail on page -> contradictory product (not an omitted modifier).
+    if any(variant_tails_conflict(row_tail, pt) for pt in matching_page_tails):
+        return None
+
+    # State 2: Row requested '+' modifier -> check whether the market omitted '+':
+    if "plus" in row_tail:
+        if any("plus" in pt for pt in matching_page_tails):
+            return None  # Exact match with plus
+        return "+", f"{head.upper()} {number}"
+
+    # State 3: Row requested non-plus suffix (e.g. 'ES') -> check if page has matching suffix:
+    if any(variant_tail_agrees(row_tail, pt) for pt in matching_page_tails):
+        return None  # Exact agreeing match
+
+    # State 4: Base product accepted where modifier was omitted:
+    return " ".join(row_tail), f"{head.upper()} {number}"
 
 
 def match_product(

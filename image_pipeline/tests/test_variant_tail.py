@@ -129,6 +129,39 @@ class TestPageVerdict:
         keys = build_model_keys(ES)
         text = f"{ES_URL} | Dawlance DW 255 ES Automatic Washing Machine"
         assert not page_variant_conflict(keys, text)
+        match = match_product(keys=keys, brand="dawlance", strong_text=text)
+        assert match.matched
+        assert match.strength == 2
+
+    def test_dw_prefix_rejected_if_brand_missing_or_foreign(self) -> None:
+        keys = build_model_keys(ES)
+        # Without brand name Dawlance, DW 255 ES should NOT match DWT 255 ES
+        unbranded_text = "DW 255 ES Automatic Washing Machine"
+        assert not match_product(keys=keys, brand="", strong_text=unbranded_text).matched
+        # With foreign brand Haier, must strictly reject
+        foreign_text = "Haier DW 255 ES Automatic Washing Machine"
+        assert not match_product(keys=keys, brand="haier", strong_text=foreign_text).matched
+
+    def test_separator_permutations_match(self) -> None:
+        keys_hyphen = build_model_keys("Dawlance DW-7500 Automatic Washing Machine")
+        keys_space = build_model_keys("Dawlance DW 7500 Automatic Washing Machine")
+        text_hyphen = "Dawlance DW-7500 Automatic Washing Machine"
+        text_space = "Dawlance DW 7500 Automatic Washing Machine"
+        text_glued = "Dawlance DW7500 Automatic Washing Machine"
+        for k in (keys_hyphen, keys_space):
+            for t in (text_hyphen, text_space, text_glued):
+                assert match_product(keys=k, brand="dawlance", strong_text=t).matched
+
+    def test_clear_lid_and_c_dual_match(self) -> None:
+        keys_clear = build_model_keys(CLEAR)
+        keys_c = build_model_keys(C_ROW)
+        text_clear = f"{CLEAR_URL} | Dawlance DWT 255 Clear Lid Automatic Washing Machine"
+        text_c = "Dawlance DWT 255 C Automatic Washing Machine"
+        text_dw_c = "Dawlance DW 255 C Automatic Washing Machine"
+        for k in (keys_clear, keys_c):
+            assert match_product(keys=k, brand="dawlance", strong_text=text_clear).matched
+            assert match_product(keys=k, brand="dawlance", strong_text=text_c).matched
+            assert match_product(keys=k, brand="dawlance", strong_text=text_dw_c).matched
 
     def test_page_that_omits_the_tail_is_no_conflict(self) -> None:
         keys = build_model_keys(ES)
@@ -148,4 +181,60 @@ class TestSearchAndHealing:
         stale = BASE + "dwt-1166-x-ads--automatic-washing-machines"
         assert _healed_first([stale]) == [ADS_URL, stale]
         assert _healed_first([ES_URL]) == [ES_URL]
+
+
+class TestOmittedModifierNotice:
+    def test_detects_omitted_plus(self) -> None:
+        from model_matching import omitted_variant_modifier
+        keys = build_model_keys(ADS)
+        # Page omits '+' and prints DWT 1166 X ADS
+        res = omitted_variant_modifier(keys, "DWT 1166 X ADS Automatic Washing Machines")
+        assert res == ("+", "DWT 1166")
+        # Page has '+' -> exact match, no omission
+        res_exact = omitted_variant_modifier(keys, "DWT 1166 ADS+ Automatic Washing Machines")
+        assert res_exact is None
+
+    def test_detects_omitted_es(self) -> None:
+        from model_matching import omitted_variant_modifier
+        keys = build_model_keys(ES)
+        # Page omits 'ES' and prints bare base DWT 255
+        res = omitted_variant_modifier(keys, "Dawlance DWT 255 Automatic Washing Machine")
+        assert res == ("es", "DWT 255")
+        # Page has exact DW 255 ES -> exact match, no omission
+        res_exact = omitted_variant_modifier(keys, "Dawlance DW 255 ES Automatic Washing Machine")
+        assert res_exact is None
+
+
+class TestFiveTargetApplianceModels:
+    """Verifies the 5 specific Pakistani appliance models from the issue report."""
+
+    def test_exact_tokens_and_identities_extracted(self) -> None:
+        cases = [
+            ("Dawlance DWT 255 ES Automatic Top Load Washing Machine - White", "DWT 255 ES", "dwt255es"),
+            ("Dawlance DWT 255 Clear Lid Automatic Top Load Washing Machine - White", "DWT 255", "dwt255"),
+            ("Dawlance DWT 1166 ADS+ Automatic Top Load Washing Machine", "DWT 1166 ADS", "dwt1166ads"),
+            ("Dawlance DW 7500 C Automatic Washing Machine", "DW 7500 C", "dw7500c"),
+            ("Haier 801217 WB Washing Machine", "801217 WB", "801217wb"),
+        ]
+        for title, exp_tok, exp_ident in cases:
+            keys = build_model_keys(title)
+            assert keys.tokens[0] == exp_tok
+            assert keys.identities[0] == exp_ident
+
+    def test_search_terms_alias_for_clear_lid(self) -> None:
+        keys = build_model_keys(CLEAR)
+        terms = search_terms(keys, brand="dawlance", title=CLEAR)
+        # Must include both full CLEAR LID and short form alias C
+        assert any("CLEAR LID" in t for t in terms)
+        assert any(" C" in t for t in terms)
+
+    def test_dwt_never_matches_haier_hwm(self) -> None:
+        keys = build_model_keys(ES)
+        # DWT must strictly never match Haier HWM
+        assert not match_product(
+            keys=keys, brand="haier", strong_text="Haier HWM 255 ES Automatic Washing Machine"
+        ).matched
+        assert not match_product(
+            keys=keys, brand="dawlance", strong_text="Haier HWM 255 ES Automatic Washing Machine"
+        ).matched
 

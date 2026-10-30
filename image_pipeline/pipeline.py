@@ -82,6 +82,7 @@ from model_matching import (
     is_display_product,
     key_pattern,
     near_miss_codes,
+    omitted_variant_modifier,
     relaxed_page_match,
     tail_chunk_match,
     truncation_variants,
@@ -1738,6 +1739,17 @@ def _visit_page(
             return _PageOutcome(True, True, resolved_url, deferred=True)
 
     notes.extend(match.variant_notes)
+    omitted_info = omitted_variant_modifier(keys, f"{match.page_name} {resolved_url}")
+    if omitted_info:
+        omitted_part, base_model = omitted_info
+        yellow_notice = (
+            f"\033[93m[NOTICE: MARKET OMITTED MODIFIER] Product '{task.title}' -> "
+            f"Market omitted '{omitted_part}', safely accepted true base model '{base_model}'. "
+            f"(Verified true product, not a conflicting variant).\033[0m"
+        )
+        print(yellow_notice, flush=True)
+        LOG.warning("[omitted_modifier] %s", yellow_notice)
+        notes.append(f"notice: market omitted '{omitted_part}', accepted true base {base_model}")
     if relaxed:
         notes.append(f"flagged: relaxed fallback match - {relaxed}")
     if tolerated_reason:

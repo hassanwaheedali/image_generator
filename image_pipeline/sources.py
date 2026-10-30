@@ -237,13 +237,19 @@ def search_terms(keys: ModelKeys, *, brand: str | None = None, limit: int = 6, t
         return len(terms) >= cap
 
     own = row_variant_code(keys)
-    if own is not None and keys.tokens:
+    if own is not None:
         tail = " ".join(own[2]).replace(" plus", "+").upper()
-        for spelling in shop_spellings(keys.tokens[0]):
+        base = f"{own[0].upper()} {own[1]}"
+        for spelling in shop_spellings(base):
             if brand and add(f"{brand.title()} {spelling} {tail}"):
                 return tuple(terms)
             if add(f"{spelling} {tail}"):
                 return tuple(terms)
+            if own[2] == ("clear", "lid"):
+                if brand and add(f"{brand.title()} {spelling} C"):
+                    return tuple(terms)
+                if add(f"{spelling} C"):
+                    return tuple(terms)
     for token in keys.tokens:
         for spelling in shop_spellings(token):
             if brand and add(f"{brand.title()} {spelling}"):

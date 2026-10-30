@@ -364,13 +364,15 @@ def variant_tails(
         if not _CODE_HEAD_RE.match(head) or not _CODE_NUMBER_RE.match(number):
             continue
         tail: list[str] = []
-        for raw in tokens[index + 2 :]:
+        for offset, raw in enumerate(tokens[index + 2 :]):
             word = raw.rstrip("+")
+            next_idx = index + 3 + offset
             if (
                 not word.isalpha()
                 or word in stop_words
                 or is_colour_word(word)
                 or len(tail) >= _TAIL_MAX_WORDS
+                or (_CODE_HEAD_RE.match(word) and next_idx < len(tokens) and _CODE_NUMBER_RE.match(tokens[next_idx]))
             ):
                 break
             tail.append(word)
@@ -387,7 +389,10 @@ def _tail_words_compatible(one: str, other: str) -> bool:
 
 
 def _core_tail(tail: tuple[str, ...]) -> list[str]:
-    return [word for word in tail if word != _PLUS]
+    words = [word for word in tail if word != _PLUS]
+    if len(words) >= 2 and words[0] == "clear" and words[1] == "lid":
+        return ["c", *words[2:]]
+    return words
 
 
 def variant_tails_conflict(row_tail: tuple[str, ...], page_tail: tuple[str, ...]) -> bool:
