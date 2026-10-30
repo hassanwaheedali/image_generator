@@ -214,7 +214,10 @@ def process_direct_product(
                 )
         else:
             deps.decisions.keep(
-                title=task.title, url=url, rule_id="skip_quality_gates", detail="image accepted as-is without quality gate enforcement"
+                title=task.title,
+                url=url,
+                rule_id="skip_quality_gates",
+                detail="image accepted as-is without quality gate enforcement",
             )
 
         if (

@@ -990,8 +990,7 @@ class PipelineConfig:
 
         for src in (*self.retail_shopify_sources, *self.retail_woo_sources, *self.last_resort_marketplace_hosts):
             host = urlsplit(src if "://" in src else f"https://{src}").netloc.lower().split(":")[0]
-            if host.startswith("www."):
-                host = host[4:]
+            host = host.removeprefix("www.")
             domain_name = host.split(".")[0]
             if domain_name:
                 all_retailers.add(domain_name)

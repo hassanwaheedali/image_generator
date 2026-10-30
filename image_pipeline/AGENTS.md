@@ -168,6 +168,17 @@ Tests must never hit the network: they use `tests/conftest.py` fakes (`FakePageF
 `FakeImageFetcher`, `FakeImageHost`, `FakeSourceSearcher`, `LocalPathHost`) and synthetic images.
 Live verification is a separate, deliberate step (see `verification/`).
 
+## Strict Core Engineering Invariants (Zero Hardcoding & Strict DRY)
+
+1. **Strict DRY & Zero Hardcoding:**
+   - NEVER hardcode brand names, model prefixes, product codes, or specific strings (`dwt`, `dw`, `hwm`, `dawlance`, `haier`, etc.) inside generic matching, tokenizing, or routing logic.
+   - All matching algorithms must be **purely dynamic, algebraic, and DRY**: derived from runtime attributes (e.g. `brand_initial = normalize_key(brand)[:1]`, regex tokenization, set-difference arithmetic).
+   - The codebase serves a catalog of **752+ diverse products** across all major Pakistani and global appliance manufacturers. Any hardcoding will break catalog scale.
+
+2. **No Lazy Shortcuts Under Any Circumstances:**
+   - Never write a one-off quick fix or narrow conditional just to satisfy a single failing test case.
+   - Every algorithmic change must be designed universally from first principles, verified against the entire catalog logic, and tested for adversarial cross-brand isolation.
+
 ## When something is unclear
 
 Do not guess silently. If a requirement, a threshold or a page behaviour is ambiguous, write down the

@@ -1916,7 +1916,7 @@ def test_digit_headed_model_recognition_and_drum_gluing() -> None:
     assert "801217wb" in keys.identities
 
     # Bug #1A: glued letter prefix + hyphenated drum number
-    from model_matching import glued_model_token, _prefix_is_allowed
+    from model_matching import _prefix_is_allowed, glued_model_token
     assert glued_model_token(["HWM", "80-1217"], 0) == ("HWM 80-1217", "hwm801217")
 
     # Bug #1C: digit-only stem allowed in truncation_variants

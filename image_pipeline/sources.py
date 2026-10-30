@@ -240,15 +240,39 @@ def search_terms(keys: ModelKeys, *, brand: str | None = None, limit: int = 6, t
     if own is not None:
         tail = " ".join(own[2]).replace(" plus", "+").upper()
         base = f"{own[0].upper()} {own[1]}"
+        # 1. Full tail queries for primary base spelling (e.g. "Dawlance DWT 1016 DDM INV PRIMA")
+        if brand and add(f"{brand.title()} {base} {tail}"):
+            return tuple(terms)
+        if add(f"{base} {tail}"):
+            return tuple(terms)
+
+        # 2. Universal base query (e.g. "Dawlance DWT 1016" - critical when market omitted DDM or +)
+        if brand and add(f"{brand.title()} {base}"):
+            return tuple(terms)
+        if add(base):
+            return tuple(terms)
+
+        # 3. Sub-tail query if multiple descriptors (e.g. "Dawlance DWT 1016 INV PRIMA" without DDM)
+        if len(own[2]) > 1:
+            sub_tail = " ".join(own[2][1:]).replace(" plus", "+").upper()
+            if brand and add(f"{brand.title()} {base} {sub_tail}"):
+                return tuple(terms)
+            if add(f"{base} {sub_tail}"):
+                return tuple(terms)
+
+        # 4. Clear Lid <-> C short-form alias
+        if own[2] == ("clear", "lid"):
+            if brand and add(f"{brand.title()} {base} C"):
+                return tuple(terms)
+            if add(f"{base} C"):
+                return tuple(terms)
+
+        # 5. Remaining hyphen/glued spellings
         for spelling in shop_spellings(base):
-            if brand and add(f"{brand.title()} {spelling} {tail}"):
-                return tuple(terms)
-            if add(f"{spelling} {tail}"):
-                return tuple(terms)
-            if own[2] == ("clear", "lid"):
-                if brand and add(f"{brand.title()} {spelling} C"):
+            if spelling != base:
+                if brand and add(f"{brand.title()} {spelling} {tail}"):
                     return tuple(terms)
-                if add(f"{spelling} C"):
+                if add(f"{spelling} {tail}"):
                     return tuple(terms)
     for token in keys.tokens:
         for spelling in shop_spellings(token):

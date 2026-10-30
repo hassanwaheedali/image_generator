@@ -31,14 +31,15 @@ from textnorm import WHITESPACE_RE, normalize_key, normalize_text
 from url_filters import IMAGE_EXTENSIONS, KNOWN_BRANDS, page_product_brand
 from variant_terms import (
     COLOUR_FAMILIES,
+    code_heads_compatible,
     colour_phrase,
     colour_word_conflict,
-    is_colour_word,
-    code_heads_compatible,
     identity_alpha_tail,
+    is_colour_word,
     same_colour,
     shade_agreement,
     suffix_agreement,
+    tail_words_compatible,
     variant_tail_agrees,
     variant_tails,
     variant_tails_conflict,
@@ -345,6 +346,13 @@ def _relaxed_disjoint_code(page_text: str, keys: ModelKeys) -> bool:
     return not any(
         page_id in our_expanded
         or any(page_id.startswith(ours) or ours.startswith(page_id) for ours in our_set)
+        or any(
+            code_heads_compatible(_leading_letters(page_id), _leading_letters(ours))
+            and bool(re.search(r"\d", numeric_stem(page_id)))
+            and re.findall(r"\d+", numeric_stem(page_id))[:1]
+            == re.findall(r"\d+", numeric_stem(ours))[:1]
+            for ours in our_set
+        )
         for page_id in page_keys.identities
     )
 
@@ -1262,7 +1270,16 @@ def _build(
                 remember(index, token, identity)
             glued = glued_model_token(source_words, index)
             if glued is not None:
-                remember(index, glued[0], glued[1])
+                token, identity = glued
+                remember(index, token, identity)
+                token_parts = token.split()
+                if (
+                    len(token_parts) == 3
+                    and _GLUE_PREFIX_RE.match(token_parts[0].lower())
+                    and len(token_parts[2]) >= 2
+                ):
+                    base_token = f"{token_parts[0]} {token_parts[1]}"
+                    remember(index, base_token, normalize_key(base_token))
         found.sort(key=lambda entry: entry[0])
         return tuple(entry[1] for entry in found), tuple(entry[2] for entry in found)
 
@@ -1331,7 +1348,7 @@ def truncation_variants(core: str) -> tuple[str, ...]:
     ``pipeline.py``).
     """
     variants: list[str] = []
-    for cut in (1, 2):
+    for cut in (1, 2, 3):
         if len(core) <= cut + 2:
             continue
         suffix = core[-cut:]
@@ -1660,6 +1677,8 @@ def code_like_tokens(text: str) -> tuple[str, ...]:
     #    OR prefix + first-number-group + second-number-group (e.g. HWM+80+1217).
     for i in range(len(segments) - 2):
         s1, s2, s3 = segments[i], segments[i + 1], segments[i + 2]
+        if s3.lower() in GLUE_STOPWORDS or s3.lower() in TAIL_STOPWORDS:
+            continue
         triplet = normalize_key(s1 + s2 + s3)
         if (
             len(triplet) >= 5
@@ -2406,18 +2425,20 @@ def brand_match_cores(identity: str, brand: str = "") -> tuple[str, ...]:
             rest = identity[len(prefix):]
             cores.append(identity[1:])             # brand initial dropped ("rf538ifga")
             cores.append(rest)                     # whole family prefix dropped ("538ifga")
-            if normalized_brand:
-                # Brand-gated appliance prefix family equivalence:
-                # Dawlance: dwt <-> dw
-                if prefix.startswith("dwt"):
-                    cores.append("dw" + rest)
-                elif prefix.startswith("dw") and not prefix.startswith("dwt"):
-                    cores.append("dwt" + rest)
-                # Haier: hwm <-> hw
-                elif prefix.startswith("hwm"):
-                    cores.append("hw" + rest)
-                elif prefix.startswith("hw") and not prefix.startswith("hwm"):
-                    cores.append("hwm" + rest)
+            if normalized_brand and prefix.startswith(normalized_brand[:1]):
+                b_init = normalized_brand[:1]
+                cat = prefix[len(b_init):]
+                # Contractions (e.g. dwt -> dw, hwm -> hw):
+                cores.extend(b_init + cat[:i] + rest for i in range(1, len(cat)))
+                # Permutations / category variants (e.g. dwt <-> dtw):
+                if len(cat) >= 2:
+                    cores.append(b_init + cat[::-1] + rest)
+                # Expansions (when sheet has short prefix like dw or hw):
+                # Generates appliance category expansions dynamically under the brand initial
+                if len(cat) == 1:
+                    for ext in ("t", "m", "f", "r"):
+                        cores.append(b_init + cat + ext + rest)
+                        cores.append(b_init + ext + cat + rest)
     return tuple(dict.fromkeys(cores))
 
 
@@ -2446,27 +2467,31 @@ def _family_letters(identity: str, brand: str) -> str:
 def _prefix_is_allowed(observed: str, identity: str, brand: str) -> bool:
     """May these letters sit in front of the code?
 
-    ``""`` (nothing), the brand initial (``H`` of ``H55S80EUX``), or the sheet's own
-    family letters (``RF`` of ``HRF-538``) are fine.  Anything else is a conflict:
-    ``Haier HSF-538 IFGA`` must not satisfy ``Haier HRF-538 IFGA``.
-
-    **Digit-headed codes** (2026-10-25): when the sheet writes a bare digit code
-    (``801217wb``, ``1301217e``) without the appliance prefix, the page may still
-    print one (``HWM-80-1217``, ``HRF-...``).  Any observed prefix of <= 3 letters
-    is accepted for these rows, because the family cannot be inferred from the code
-    itself and rejecting ``"wm"`` from ``"hwm"`` would discard every valid page.
+    Pure dynamic DRY logic:
+    When a brand is verified on the page, the prefix on the page must start with the brand's
+    initial letter (e.g. 'D' for Dawlance, 'H' for Haier). Any short category abbreviation
+    (1-3 letters after the initial, e.g. DW, DWT, DTW, DWE for Dawlance; HW, HWM, HRF for Haier)
+    is accepted. Foreign brands or unbranded pages are strictly blocked.
     """
-    remainder = observed
-    brand_initial = normalize_key(brand)[:1] if brand else ""
-    if brand_initial and remainder.startswith(brand_initial):
-        remainder = remainder[1:]
-    if not remainder:
+    if not observed:
         return True
-    family = _family_letters(identity, brand)
-    # Digit-headed sheet code: accept any short appliance prefix the page adds.
-    if not family and identity and identity[0].isdigit():
-        return len(remainder) <= 3
-    return bool(family) and (family.startswith(remainder) or remainder.startswith(family))
+    brand_initial = normalize_key(brand)[:1] if brand else ""
+    id_prefix = _leading_letters(identity)
+
+    # When brand is verified on the page:
+    if brand_initial:
+        # Both observed prefix and identity prefix must match the brand's initial letter:
+        if observed.startswith(brand_initial) and id_prefix.startswith(brand_initial):
+            remainder = observed[len(brand_initial):]
+            return len(remainder) <= 3
+        # Digit-headed sheet code (e.g. Haier 801217 WB):
+        if not id_prefix and identity and identity[0].isdigit():
+            remainder = observed.removeprefix(brand_initial)
+            return len(remainder) <= 3
+        return False
+
+    # Without verified brand on page, prefix substitution is forbidden:
+    return observed == id_prefix
 
 
 def code_text(text: str) -> str:
@@ -3120,18 +3145,22 @@ def omitted_variant_modifier(keys: ModelKeys, text: str) -> tuple[str, str] | No
     if any(variant_tails_conflict(row_tail, pt) for pt in matching_page_tails):
         return None
 
-    # State 2: Row requested '+' modifier -> check whether the market omitted '+':
-    if "plus" in row_tail:
-        if any("plus" in pt for pt in matching_page_tails):
-            return None  # Exact match with plus
-        return "+", f"{head.upper()} {number}"
+    # Dynamic set difference of modifier words:
+    present_words = [
+        w
+        for w in row_tail
+        if any(any(tail_words_compatible(w, p) for p in pt) for pt in matching_page_tails)
+    ]
+    omitted_words = [w for w in row_tail if w not in present_words]
 
-    # State 3: Row requested non-plus suffix (e.g. 'ES') -> check if page has matching suffix:
-    if any(variant_tail_agrees(row_tail, pt) for pt in matching_page_tails):
-        return None  # Exact agreeing match
+    if not omitted_words:
+        return None  # All requested modifier words are present on the page (exact match).
 
-    # State 4: Base product accepted where modifier was omitted:
-    return " ".join(row_tail), f"{head.upper()} {number}"
+    matched_tail = " ".join(present_words).upper()
+    accepted_name = f"{head.upper()} {number} {matched_tail}".strip()
+
+    omitted_str = "+" if omitted_words == ["plus"] else " ".join(omitted_words)
+    return omitted_str, accepted_name
 
 
 def match_product(

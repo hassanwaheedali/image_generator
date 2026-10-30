@@ -383,9 +383,12 @@ def variant_tails(
     return out
 
 
-def _tail_words_compatible(one: str, other: str) -> bool:
+def tail_words_compatible(one: str, other: str) -> bool:
     """Equal, or one is a prefix of the other (``c`` ~ ``clear``, ``ifga`` ~ ``ifgainv``)."""
     return one == other or one.startswith(other) or other.startswith(one)
+
+
+_tail_words_compatible = tail_words_compatible
 
 
 def _core_tail(tail: tuple[str, ...]) -> list[str]:
@@ -398,10 +401,10 @@ def _core_tail(tail: tuple[str, ...]) -> list[str]:
 def variant_tails_conflict(row_tail: tuple[str, ...], page_tail: tuple[str, ...]) -> bool:
     """True when two tails name **different** variants of one code.
 
-    A conflict needs *no word in common* (any shared word is one line spelled two ways): ``es`` vs ``clear lid`` conflict, while ``c`` vs ``clear lid`` agree
-    (the letter is the initial), ``ads`` vs ``x ads`` agree (the page adds a word) and
-    ``ads plus`` vs ``x ads`` agree (``+`` is kept, but never makes a page foreign).  An
-    empty tail has no opinion.
+    A conflict needs *no word in common* (any shared word is one line spelled two ways):
+    ``es`` vs ``clear lid`` conflict, while ``c`` vs ``clear lid`` agree (the letter is the initial),
+    ``ads`` vs ``x ads`` agree (the page adds a word) and ``ads plus`` vs ``x ads`` agree
+    (``+`` is kept, but never makes a page foreign).  An empty tail has no opinion.
     """
     row, page = _core_tail(row_tail), _core_tail(page_tail)
     if not row or not page:

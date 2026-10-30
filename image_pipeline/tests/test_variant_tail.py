@@ -16,8 +16,8 @@ from model_matching import (
     row_variant_code,
     url_variant_verdict,
 )
-from sources import _healed_first, model_tokens_in_url, rank_candidates, search_terms
 from models import PageCandidate
+from sources import _healed_first, model_tokens_in_url, rank_candidates, search_terms
 from variant_terms import (
     code_heads_compatible,
     variant_tail_agrees,
@@ -187,9 +187,9 @@ class TestOmittedModifierNotice:
     def test_detects_omitted_plus(self) -> None:
         from model_matching import omitted_variant_modifier
         keys = build_model_keys(ADS)
-        # Page omits '+' and prints DWT 1166 X ADS
+        # Page omits '+' and prints DWT 1166 X ADS -> accepts 'DWT 1166 ADS'
         res = omitted_variant_modifier(keys, "DWT 1166 X ADS Automatic Washing Machines")
-        assert res == ("+", "DWT 1166")
+        assert res == ("+", "DWT 1166 ADS")
         # Page has '+' -> exact match, no omission
         res_exact = omitted_variant_modifier(keys, "DWT 1166 ADS+ Automatic Washing Machines")
         assert res_exact is None
@@ -237,4 +237,56 @@ class TestFiveTargetApplianceModels:
         assert not match_product(
             keys=keys, brand="dawlance", strong_text="Haier HWM 255 ES Automatic Washing Machine"
         ).matched
+
+
+class TestDwt1016DdmInvPrima:
+    """Verifies DWT 1016 DDM INV Prima model resolution and omitted modifier logic."""
+
+    ROW_TITLE = "Dawlance DWT 1016 DDM INV Prima Automatic Top Load Washing Machine"
+    OFFICIAL_URL = "https://www.dawlance.com.pk/top-load-washing-machine/dwt-1016-inv-prima-automatic-washing-machines"
+    OFFICIAL_TEXT = f"{OFFICIAL_URL} | DWT 1016 INV Prima Automatic Washing Machines"
+
+    def test_keys_extract_both_full_and_base(self) -> None:
+        keys = build_model_keys(self.ROW_TITLE)
+        # Full triplet code:
+        assert "DWT 1016 DDM" in keys.tokens
+        assert "dwt1016ddm" in keys.identities
+        # Dynamically preserved base code:
+        assert "DWT 1016" in keys.tokens
+        assert "dwt1016" in keys.identities
+
+    def test_matches_official_page_without_ddm(self) -> None:
+        keys = build_model_keys(self.ROW_TITLE)
+        match = match_product(keys=keys, brand="dawlance", strong_text=self.OFFICIAL_TEXT)
+        assert match.matched
+        assert match.rule == "model_key"
+        assert not page_variant_conflict(keys, self.OFFICIAL_TEXT)
+
+    def test_omitted_modifier_detects_ddm(self) -> None:
+        from model_matching import omitted_variant_modifier
+
+        keys = build_model_keys(self.ROW_TITLE)
+        res = omitted_variant_modifier(keys, self.OFFICIAL_TEXT)
+        assert res == ("ddm", "DWT 1016 INV PRIMA")
+
+    def test_bare_base_page_omits_all_tails(self) -> None:
+        from model_matching import omitted_variant_modifier
+
+        keys = build_model_keys(self.ROW_TITLE)
+        bare_url = BASE + "dwt-1016-automatic-washing-machines"
+        bare_text = f"{bare_url} | Dawlance DWT 1016 Automatic Washing Machine"
+        res = omitted_variant_modifier(keys, bare_text)
+        assert res == ("ddm inv prima", "DWT 1016")
+
+    def test_contradictory_variant_conflicts_and_is_rejected(self) -> None:
+        keys = build_model_keys(self.ROW_TITLE)
+        conflicting_text = "Dawlance DWT 1016 Clear Lid Automatic Washing Machine"
+        assert page_variant_conflict(keys, conflicting_text)
+        assert not match_product(keys=keys, brand="dawlance", strong_text=conflicting_text).matched
+
+    def test_foreign_brand_is_rejected(self) -> None:
+        keys = build_model_keys(self.ROW_TITLE)
+        foreign_text = "Haier DWT 1016 INV Prima Automatic Washing Machine"
+        assert not match_product(keys=keys, brand="dawlance", strong_text=foreign_text).matched
+
 
