@@ -387,6 +387,21 @@ def test_direct_applies_the_option_1_colour_rule(tmp_path: Path) -> None:
     assert result.status is Status.PARTIAL
 
 
+def test_direct_single_url_flags_colour_review_instead_of_hard_dropping(tmp_path: Path) -> None:
+    """When a --direct row supplies only one image (e.g. a black mouse inside a bright
+    retail box), S16.square mirrors raw S16 by flagging S16.review instead of dropping
+    the row's sole supplied image."""
+    only_url = "http://cdn.test/boxed-mouse.png"
+    deps, _ = _direct_deps(tmp_path, {only_url: _png_bytes(_white_appliance_photo())})
+    task = ProductTask(
+        index=0, title="Hoco Black Accessories - GM29 Mouse", source_urls=(only_url,)
+    )
+    result, accepted = process_direct_product(task, deps, _direct_config(tmp_path))
+    assert len(accepted) == 1
+    assert result.status is Status.PARTIAL
+    assert "S16.review" in _decisions(tmp_path)
+
+
 def test_direct_processes_titles_without_a_model_code(tmp_path: Path) -> None:
     """Option 2 trusts the link: no page to prove, so no '4.1' rejection exists."""
     url = "http://cdn.test/fridge.png"

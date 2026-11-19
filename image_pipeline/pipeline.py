@@ -78,7 +78,6 @@ from image_quality import (
 from model_matching import (
     build_model_keys,
     colourway_words,
-    extract_colour_families,
     is_display_product,
     key_pattern,
     near_miss_codes,
@@ -129,7 +128,13 @@ from url_filters import (
     upscale_candidates,
     url_filename,
 )
-from variant_terms import colour_phrase, colour_word_conflict, identity_alpha_tail, shade_agreement
+from variant_terms import (
+    colour_phrase,
+    colour_word_conflict,
+    identity_alpha_tail,
+    shade_agreement,
+    visual_colour_target,
+)
 
 LOG = logging.getLogger("pipeline")
 
@@ -1231,7 +1236,13 @@ def _salvage_row(
             # Strictly the first picture (owner 2026-10-21): a last-resort offer that
             # would become the row's hero is colour-judged; one filling a detail slot
             # is not - hue cannot tell a wrong sibling from a correct side view.
-            color_ok, color_detail = verify_image_color(offer.image, keys.colour_word)
+            color_ok, color_detail = verify_image_color(
+                offer.image,
+                visual_colour_target(task.title, keys.colour_word),
+                min_target_presence=config.color_min_target_presence,
+                min_rival_dominance=config.color_min_rival_dominance,
+                min_chroma=config.color_cielab_min_chroma,
+            )
             if not color_ok:
                 rejections["S16.salvage"] += 1
                 deps.decisions.reject(
@@ -2479,11 +2490,14 @@ def _consume_candidates(
             )
             color_ok, color_detail = verify_image_color(
                 image,
-                keys.colour_word,
+                visual_colour_target(task.title, keys.colour_word),
                 official=official_gallery,
                 exempt_chroma_on_official=exempt_chroma,
                 min_saturation=config.color_chroma_min_saturation,
                 wash_max_value=config.color_chroma_max_value,
+                min_target_presence=config.color_min_target_presence,
+                min_rival_dominance=config.color_min_rival_dominance,
+                min_chroma=config.color_cielab_min_chroma,
             )
             if not color_ok:
                 rejections["S16"] += 1
@@ -2613,11 +2627,15 @@ def _hero_colour_gate(
         and not colour_word_conflict(keys.colour_word, used_url.rsplit("/", 1)[-1])
     ):
         return ""
+    target = visual_colour_target(task.title, keys.colour_word)
     return hero_colour_conflict(
         square,
-        extract_colour_families(keys.colour_word),
+        frozenset({target}) if target else frozenset(),
         min_saturation=config.color_chroma_min_saturation,
         wash_max_value=config.color_chroma_max_value,
+        min_target_presence=config.color_min_target_presence,
+        min_rival_dominance=config.color_min_rival_dominance,
+        min_chroma=config.color_cielab_min_chroma,
     )
 
 
@@ -2638,6 +2656,7 @@ def _compose_and_save(
     rejections: Counter[str],
     fingerprint: ImageFingerprint | None = None,
     official_page: bool = False,
+    flag_only_hero_colour: bool = False,
 ) -> None:
     """Stage 5: isolate, 1:1 centre, light unsharp, every selected template, save locally.
 
@@ -2691,13 +2710,21 @@ def _compose_and_save(
         config=config,
     )
     if conflict:
-        # The hero is the row's colour statement, so it is judged on the artefact that ships.
-        # Images 2+ are detail shots and stay unjudged.
-        rejections["S16"] += 1
-        deps.decisions.reject(
-            title=task.title, url=used_url, rule_id="S16.square", detail=conflict
-        )
-        return
+        if flag_only_hero_colour:
+            # Option 2 sole/final supplied URL: mirror raw S16's ``remaining_urls`` guard
+            # so retail boxes, brand accents, and studio lighting never drop the row's only
+            # picture, while recording the discrepancy for human review.
+            deps.decisions.keep(
+                title=task.title, url=used_url, rule_id="S16.review", detail=conflict
+            )
+        else:
+            # The hero is the row's colour statement, so it is judged on the artefact that ships.
+            # Images 2+ are detail shots and stay unjudged.
+            rejections["S16"] += 1
+            deps.decisions.reject(
+                title=task.title, url=used_url, rule_id="S16.square", detail=conflict
+            )
+            return
     served = downloaded if downloaded is not None else image
     raw_path = _save_audit(served, config, task.title, ImageRole.RAW, f"{index:02d}-raw.jpg")
     if served.size != image.size:

@@ -764,6 +764,35 @@ class PipelineConfig:
     #: the gold-on-white hole the tests guard), white/black/silver bodies 0.00.
     color_chroma_min_saturation: float = 0.22
     color_chroma_max_value: float = 0.95
+    #: CIELAB Two-Sided Evidence Color Gate (S16 v2) thresholds:
+    #: - ``color_min_target_presence``: if at least this share of foreground pixels falls
+    #:   inside the target colour's perceptual 3D CIELAB volume, the colour is confirmed
+    #:   present (handles accented printers, retail-boxed products, multi-tone appliances).
+    #: - ``color_min_rival_dominance``: when target colour is absent, a mutually exclusive
+    #:   rival colour must cover at least this share of foreground pixels before rejecting.
+    #: - ``color_cielab_min_chroma``: minimum perceptual chroma C* = hypot(a*, b*) to count
+    #:   a pixel as genuinely chromatic (separates glossy black glass sheen C*~8 and pale
+    #:   cool studio plates C*~14 from gold bodies C*~20 and dyed navy/blue C*~24-28).
+    color_min_target_presence: float = 0.12
+    color_min_rival_dominance: float = 0.45
+    color_cielab_min_chroma: float = 16.0
+    #: Non-colourway technical phrases stripped before reading a title's product colour
+    #: (e.g. "Blue Fin" condenser coating, "Silver Ion" antibacterial filter, "Red Switch"
+    #: mechanical keyboard switches, "Gold Plated" connector).
+    color_non_colourway_phrases: tuple[str, ...] = (
+        "blue fin",
+        "silver ion",
+        "gold plated",
+        "red switch",
+        "blue switch",
+        "brown switch",
+        "white led",
+        "blue led",
+        "red led",
+        "green led",
+        "black and white",
+        "black & white",
+    )
 
     # ----- Option 2: direct mode + branded template guard (S19) -----------
     #: Option 2 run mode: the sheet's URL column holds direct image URLs.  No pages
@@ -1025,6 +1054,7 @@ class PipelineConfig:
         self._validate_platforms()
         self._validate_fetch()
         self._validate_image_gates()
+        self._validate_color_gate()
         self._validate_branded_template()
         self._validate_compositing()
         if (
@@ -1235,6 +1265,16 @@ class PipelineConfig:
             raise ConfigError("dedup_corr_threshold must be in (0, 1]")
         if not 0.0 < self.dedup_shape_iou_min <= 1.0:
             raise ConfigError("dedup_shape_iou_min must be in (0, 1]")
+
+    def _validate_color_gate(self) -> None:
+        for name, value in (
+            ("color_min_target_presence", self.color_min_target_presence),
+            ("color_min_rival_dominance", self.color_min_rival_dominance),
+        ):
+            if not 0.0 < value <= 1.0:
+                raise ConfigError(f"{name} must be in (0, 1]")
+        if self.color_cielab_min_chroma <= 0.0:
+            raise ConfigError("color_cielab_min_chroma must be > 0")
 
     def _validate_branded_template(self) -> None:
         for name, value in (

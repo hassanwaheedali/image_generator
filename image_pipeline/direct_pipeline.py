@@ -51,6 +51,7 @@ from pipeline import (
     note_gallery_colour_conflict,
 )
 from url_filters import dedup_key, detect_brand, display_brand
+from variant_terms import visual_colour_target
 
 LOG = logging.getLogger("pipeline.direct")
 
@@ -234,11 +235,14 @@ def process_direct_product(
         ):
             color_ok, color_detail = verify_image_color(
                 image,
-                keys.colour_word,
+                visual_colour_target(task.title, keys.colour_word),
                 official=True,
                 exempt_chroma_on_official=config.color_gate_official_chroma_exempt,
                 min_saturation=config.color_chroma_min_saturation,
                 wash_max_value=config.color_chroma_max_value,
+                min_target_presence=config.color_min_target_presence,
+                min_rival_dominance=config.color_min_rival_dominance,
+                min_chroma=config.color_cielab_min_chroma,
             )
             remaining_urls = [u for u in task.source_urls if dedup_key(u) not in seen_keys and u != url]
             if not color_ok and config.local_images_mode:
@@ -321,6 +325,7 @@ def process_direct_product(
 
         # Same as Option 1's ``_consume_candidates``: register the URL key on
         # accept so a repeated link is caught by the S10-key check before download.
+        has_more_urls = any(dedup_key(u) not in seen_keys and u != url for u in task.source_urls)
         seen_keys.add(key)
         _compose_and_save(
             task=task,
@@ -338,6 +343,7 @@ def process_direct_product(
             accepted=accepted,
             rejections=rejections,
             fingerprint=fingerprint,
+            flag_only_hero_colour=not has_more_urls,
         )
 
     notes = ["direct mode: user-supplied image URLs, no scraping"]

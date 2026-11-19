@@ -2250,6 +2250,63 @@ def test_a_wrong_colour_hero_is_still_refused_after_delegation() -> None:
     assert "brown" in reason
 
 
+def test_black_row_keeps_slender_black_product_on_square_canvas() -> None:
+    """Slender black products (hand blenders, hair curlers, tower speakers, wired
+    earphones) occupy ~8-18% of a white square canvas, so canvas-wide dark_frac sits
+    under 8% even when 30-60% of the product pixels themselves are black."""
+    from image_quality import verify_image_color
+
+    shot = Image.new("RGB", (1000, 1000), (255, 255, 255))
+    draw = ImageDraw.Draw(shot)
+    # Tall thin black upper handle + silver shaft (hand blender geometry, ~8% canvas area)
+    draw.rectangle((455, 160, 545, 540), fill=(25, 25, 28))
+    draw.rectangle((465, 540, 535, 840), fill=(185, 185, 190))
+
+    ok, reason = verify_image_color(shot, "black")
+    assert ok is True, reason
+
+
+def test_black_row_still_rejects_slender_bright_product() -> None:
+    """Adversarial: fixing slender black products must still reject a slender white/cream
+    or silver product on a black row."""
+    from image_quality import verify_image_color
+
+    shot = Image.new("RGB", (1000, 1000), (255, 255, 255))
+    ImageDraw.Draw(shot).rectangle((440, 150, 560, 850), fill=(225, 220, 205))
+
+    ok, reason = verify_image_color(shot, "black")
+    assert ok is False
+    assert "bright" in reason
+
+
+def test_rose_gold_accepts_warm_blush_and_rose_hues_and_rejects_wrong_colours() -> None:
+    """Rose gold spans warm blush/copper (~18 deg) through rose-pink (~344 deg), while
+    still rejecting purple, blue, and green wrong-colourway siblings."""
+    from image_quality import verify_image_color
+
+    blush_copper = _create_synthetic_appliance((218, 178, 161))  # hue ~18 deg (Soluna S7)
+    rose_pink = _create_synthetic_appliance((178, 134, 146))     # hue ~344 deg (X300 Groove)
+    purple_shot = _create_synthetic_appliance((120, 65, 125))
+    blue_shot = _create_synthetic_appliance((30, 60, 180))
+    green_shot = _create_synthetic_appliance((40, 150, 50))
+
+    assert verify_image_color(blush_copper, "rose gold")[0] is True
+    assert verify_image_color(rose_pink, "rose gold")[0] is True
+    for bad in (purple_shot, blue_shot, green_shot):
+        ok, reason = verify_image_color(bad, "rose gold")
+        assert ok is False, f"Expected rejection for wrong colour on rose gold, got {reason}"
+
+
+def test_hero_colour_conflict_preserves_specific_shade_targets() -> None:
+    """S16.square must honour specific shade centroids (rose gold, burgundy) rather than
+    collapsing them to coarse families."""
+    assert hero_colour_conflict(_door("#dab2a1"), frozenset({"rose gold"})) == ""
+    assert hero_colour_conflict(_door("#b28692"), frozenset({"rose gold"})) == ""
+    assert hero_colour_conflict(_door("#7d56a5"), frozenset({"burgundy"})) == ""
+    assert hero_colour_conflict(_door("#2e7d32"), frozenset({"rose gold"})) != ""
+
+
+# --------------------------------------------------------------------------- #
 # S19 inset branded-frame guard (white-corner store templates)
 # --------------------------------------------------------------------------- #
 def test_s19_rejects_inset_single_hue_store_template_with_white_corners(

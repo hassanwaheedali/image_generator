@@ -223,6 +223,42 @@ def test_title_colours_come_from_brackets() -> None:
     assert "gold" in keys.colours
 
 
+def test_brand_name_colour_words_do_not_trigger_product_colour() -> None:
+    """Multi-word brands containing a colour word (National Gold, Black & Decker,
+    White-Westinghouse) must not falsely claim a product colourway, while an explicit
+    product colour after the brand is still read."""
+    ng_iron = build_model_keys("National Gold Iron - NG-786-144 Steam")
+    assert ng_iron.colour_word == ""
+    assert ng_iron.colours == ()
+
+    ng_black = build_model_keys("National Gold Black Iron - NG-786-144 Steam")
+    assert ng_black.colour_word == "black"
+    assert ng_black.colours == ("black",)
+
+    bd_white = build_model_keys("Black & Decker White Toaster - ET222")
+    assert bd_white.colour_word == "white"
+    assert bd_white.colours == ("white",)
+
+    ww = build_model_keys("White-Westinghouse Top Load Washer - WW100")
+    assert ww.colour_word == ""
+
+
+def test_technical_colour_idioms_and_video_games_do_not_misfire_colour_gate() -> None:
+    from model_matching import is_display_product
+
+    ac = build_model_keys("Haier 1.5 Ton White Inverter AC Blue Fin - HSU-18HFC")
+    assert ac.colour_word == "white"
+
+    kb = build_model_keys("A4Tech Mechanical Keyboard Red Switch - B820R")
+    assert kb.colour_word == ""
+
+    cable = build_model_keys("HDMI 2.1 Cable Gold Plated 3m")
+    assert cable.colour_word == ""
+
+    assert is_display_product("Red Dead Redemption Video Game For PS5") is True
+    assert is_display_product("A Plague Tale Requiem DVD Game For PS5") is True
+
+
 # --------------------------------------------------------------------------- #
 # variant facts (plan section 3.6)
 # --------------------------------------------------------------------------- #

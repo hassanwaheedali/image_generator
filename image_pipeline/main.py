@@ -782,8 +782,11 @@ def _check_local_images(
         verify_image_color,
     )
     from model_matching import build_model_keys
+    from variant_terms import visual_colour_target
 
-    colour_word = build_model_keys(title).colour_word if title else ""
+    colour_word = (
+        visual_colour_target(title, build_model_keys(title).colour_word) if title else ""
+    )
     from pipeline import _layout_rescue_verdict
 
     exit_code = 0
@@ -855,6 +858,9 @@ def _check_local_images(
                     ),
                     min_saturation=config.color_chroma_min_saturation,
                     wash_max_value=config.color_chroma_max_value,
+                    min_target_presence=config.color_min_target_presence,
+                    min_rival_dominance=config.color_min_rival_dominance,
+                    min_chroma=config.color_cielab_min_chroma,
                 )
                 if ok:
                     print(f"    {label:19s}: PUBLISH" + (f" - {why}" if why else ""))

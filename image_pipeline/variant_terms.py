@@ -221,6 +221,27 @@ def colour_phrase(text: str, shade_words: Iterable[str] = ()) -> tuple[str, str]
     return "", ""
 
 
+def visual_colour_target(text: str, primary_word: str) -> str:
+    """Exact colour phrase to pass to visual S16 / S16.square verification.
+
+    Preserves multi-word compound colourways from ``_COMPOUND_COLOURS`` (e.g.
+    ``rose gold``, ``emerald green``, ``sky blue``) at the primary colour's position
+    so visual hue centroids match the stated colourway without changing
+    :func:`primary_colour_word`'s head-word contract.
+    """
+    head = _canonical(normalize_text(primary_word))
+    if not head:
+        return ""
+    tokens = normalize_text(text).split()
+    for index in range(len(tokens) - 1, 0, -1):
+        if _HEADS.get(tokens[index]) == head:
+            pair = f"{_canonical(tokens[index - 1])} {head}"
+            if pair in _COMPOUND_COLOURS:
+                return pair
+            break
+    return head
+
+
 def shade_agreement(row: tuple[str, str], page: tuple[str, str]) -> ShadeVerdict:
     """Whether a row's colour and a page's colour describe the same picture.
 

@@ -526,7 +526,34 @@ BRAND_DISPLAY: dict[str, str] = {
     "bosch": "Bosch",
     "siemens": "Siemens",
     "philips": "Philips",
+    "nationalgold": "National Gold",
+    "blackdecker": "Black & Decker",
+    "whitewestinghouse": "White-Westinghouse",
+    "silvercrest": "Silver Crest",
+    "bluestar": "Blue Star",
 }
+
+
+#: Leading multi-word brand prefixes derived from ``BRAND_DISPLAY`` so brand names that
+#: contain a colour word (``National Gold``, ``Black & Decker``, ``White-Westinghouse``)
+#: are not misread as the product's colourway by the colour parser.
+_LEADING_BRAND_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(
+        r"^\s*" + r"[\s&+\-]+".join(re.escape(part) for part in parts) + r"(?=\s|$)",
+        re.IGNORECASE,
+    )
+    for display in sorted(BRAND_DISPLAY.values(), key=len, reverse=True)
+    if len(parts := [p for p in re.split(r"[\s&+\-]+", display) if p]) >= 2
+)
+
+
+def strip_leading_brand(title: str) -> str:
+    """Remove a leading multi-word brand name from ``title`` before reading colour words."""
+    for pattern in _LEADING_BRAND_PATTERNS:
+        stripped = pattern.sub("", title, count=1).strip()
+        if stripped != title.strip():
+            return stripped
+    return title
 
 
 def display_brand(brand: str | None, title: str = "") -> str:

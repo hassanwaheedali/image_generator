@@ -28,7 +28,7 @@ from urllib.parse import unquote, urlsplit
 from models import ModelKeys, ProductTask
 from similarity import similar
 from textnorm import WHITESPACE_RE, normalize_key, normalize_text
-from url_filters import IMAGE_EXTENSIONS, KNOWN_BRANDS, page_product_brand
+from url_filters import IMAGE_EXTENSIONS, KNOWN_BRANDS, page_product_brand, strip_leading_brand
 from variant_terms import (
     COLOUR_FAMILIES,
     code_heads_compatible,
@@ -1293,14 +1293,19 @@ def _build(
             tokens, identities = scan(" ".join(kept).split())
 
     title_key = normalize_key(cleaned) if allow_title_only else ""
-    colour_word, colour_shade = colour_phrase(title, _COLOURWAY_WORDS)
+    from color_gate import DEFAULT_NON_COLOURWAY_PHRASES, strip_non_colourway_phrases
+
+    colour_source = strip_non_colourway_phrases(
+        strip_leading_brand(title), DEFAULT_NON_COLOURWAY_PHRASES
+    )
+    colour_word, colour_shade = colour_phrase(colour_source, _COLOURWAY_WORDS)
 
     return ModelKeys(
         cleaned_title=cleaned,
         tokens=tokens,
         title_key=title_key,
         identities=identities,
-        colours=tuple(sorted(extract_colour_families(title))),
+        colours=tuple(sorted(extract_colour_families(colour_source))),
         variant_facts=tuple(sorted(extract_variant_facts(title).items())),
         colour_word=colour_word,
         colour_shade=colour_shade,
@@ -2332,16 +2337,17 @@ def url_names_foreign_brand(url: str, brand: str | None) -> str | None:
 
 
 def is_display_product(title: str) -> bool:
-    """True for TVs, monitors, and screens where display wallpapers contain arbitrary colours.
+    """True for TVs, monitors, and media/game covers whose artwork contains arbitrary colours.
 
-    Televisions and monitors do not have distinct chromatic body variants (they are black/grey
-    bezels) and their product photography intentionally displays vivid colourful scenes
-    (nature wallpapers, sunsets, oceans). Safeguard S16 (chromatic variant gating) is therefore
-    bypassed for display products so valid TV shots are not rejected.
+    Televisions, monitors, and video game box art do not have distinct chromatic hardware
+    variants and intentionally display vivid colourful artwork (wallpapers, sunsets, game
+    covers like "Red Dead Redemption"). Safeguard S16 is bypassed for them.
     """
     t = title.lower()
     words = set(re.findall(r"[a-z0-9]+", t))
-    if {"tv", "television", "monitor", "oled", "qled"} & words:
+    if {"tv", "television", "monitor", "oled", "qled", "ps5", "ps4", "xbox", "nintendo"} & words:
+        return True
+    if "game" in words and ("dvd" in words or "video" in words):
         return True
     return bool("led" in words and any(w in words for w in ("inch", "in", "smart", "fhd", "uhd", "4k", "2k", "8k")))
 

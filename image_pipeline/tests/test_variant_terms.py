@@ -16,6 +16,7 @@ from variant_terms import (
     primary_colour_word,
     shade_agreement,
     suffix_agreement,
+    visual_colour_target,
 )
 
 # --------------------------------------------------------------------------- #
@@ -322,3 +323,16 @@ def test_another_colour_is_left_to_the_colour_rule_that_already_rejects_it() -> 
 def test_a_shade_spelled_two_ways_is_still_one_shade() -> None:
     assert shade_agreement(("black", "matte"), ("black", "matt")) == "same"
     assert shade_agreement(("green", "meadow"), ("green", "medow")) == "same"
+
+
+def test_visual_colour_target_preserves_compound_colours_at_primary_position() -> None:
+    assert (
+        visual_colour_target("Faster Soluna S7 ANC Bluetooth Headphones-Rose Gold", "gold")
+        == "rose gold"
+    )
+    assert visual_colour_target("Faster Rose Gold Speaker - X300 Groove", "gold") == "rose gold"
+    assert visual_colour_target("Haier Refrigerator Emerald Green", "green") == "emerald green"
+    assert visual_colour_target("Dawlance 8 Cu Ft Pearl Burgundy Refrigerator", "burgundy") == "burgundy"
+    assert visual_colour_target("Rose Gold & Metallic Gold Edition", "gold") == "gold"
+    assert visual_colour_target("Anex Black Blender - AG-140 Hand", "black") == "black"
+    assert visual_colour_target("No colour here", "") == ""

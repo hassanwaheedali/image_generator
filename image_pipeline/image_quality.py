@@ -1074,34 +1074,28 @@ def hero_colour_conflict(
     *,
     min_saturation: float = 0.22,
     wash_max_value: float = 0.95,
+    min_target_presence: float = 0.12,
+    min_rival_dominance: float = 0.45,
+    min_chroma: float = 16.0,
 ) -> str:
     """Safeguard S16.square: the picture we ship as the row's hero must be the row's colour.
 
-    S16 judges the file the shop served; by the time the product is isolated, cropped and
-    centred the picture that actually goes to the shop is a different artefact, and the run
-    of 2026-10-20 showed the gap: a red patterned door published on a ``Black`` row, a bronze
-    "New Classic Plus" fridge published on three Kenwood colourways.  Those files pass S16
-    because their studio wash and dark trim out-weigh the colour print in the raw frame.
-
-    Only the FIRST image of a row is judged: images 2+ are the parts and details the owner
-    asked to keep, and a fridge's open shelves photograph cool-white, which is no opinion
-    about its colour.  A picture with no chromatic foreground at all is no opinion either -
-    exactly the fail-open that keeps grey and white studios publishing today.
-
-    The verdict itself is S16's own (``verify_image_color``), asked once per family the row
-    names, because the crude label bins this rule was first written on cannot carry it:
-    the bins have no brown and they bin a 335-degree purple as "red", so the 49-folder run
-    of 2026-10-21 refused five correct heroes - brown rows were refusable whatever the
-    picture.  S16's arcs, shade centroids, conflicts table and achromatic brightness path
-    are the tolerance the pipeline has been tuned with for months; a row that names several
-    colours accepts a hero that matches any one of them.
+    Delegates to :func:`verify_image_color` (backed by the CIELAB two-sided evidence
+    engine in ``color_gate``) once per target colourway the row names.  Only image 01 is
+    judged; images 2+ are detail shots and stay unjudged.
     """
     if not row_colour_families:
         return ""
     reasons: list[str] = []
     for family in sorted(row_colour_families):
         ok, detail = verify_image_color(
-            image, family, min_saturation=min_saturation, wash_max_value=wash_max_value
+            image,
+            family,
+            min_saturation=min_saturation,
+            wash_max_value=wash_max_value,
+            min_target_presence=min_target_presence,
+            min_rival_dominance=min_rival_dominance,
+            min_chroma=min_chroma,
         )
         if ok:
             return ""
@@ -1252,16 +1246,6 @@ def is_canvas_blurry(
     return is_blurry, hf_energy, edge_sharpness
 
 
-def is_hue_in_arc(hue: float, start: float, end: float) -> bool:
-    """Whether hue in degrees (0-360) falls within circular arc [start, end]."""
-    hue = float(hue) % 360.0
-    start = float(start) % 360.0
-    end = float(end) % 360.0
-    if start <= end:
-        return start <= hue <= end
-    return hue >= start or hue <= end
-
-
 def album_coherence_note(
     images: Sequence[Image.Image],
     *,
@@ -1323,221 +1307,29 @@ def verify_image_color(
     exempt_chroma_on_official: bool = True,
     min_saturation: float = 0.22,
     wash_max_value: float = 0.95,
+    min_target_presence: float = 0.12,
+    min_rival_dominance: float = 0.45,
+    min_chroma: float = 16.0,
 ) -> tuple[bool, str]:
-    """Safeguard S16: does the image's foreground chromaticity contradict the target colour?
+    """Safeguard S16: does the image's foreground colour contradict the target colour?
 
-    Fails open (returns True) when target_color_word is empty or not a known colour.
-    Returns (False, reason) when a strong chromatic foreground contradicts the target.
-
-    ``official`` marks a page owned by the brand itself (``host_is_official``).  A brand's
-    own hero is the definitive picture of that exact variant, so on such a page S16 keeps
-    the two signals that actually catch a wrong-colour sibling - the brightness conflict
-    and the dark-body conflict, both measured on the product area - and gives up only the
-    third one, *chromatic dominance*, which cannot tell a coloured product from a coloured
-    studio wash.  ``exempt_chroma_on_official=False`` restores the old, stricter behaviour.
-    A non-empty detail paired with ``True`` means "would have been rejected, exempted
-    because this is the brand's page" - so the run can log it instead of going silent.
+    Delegates to :func:`color_gate.evaluate_image_color` (perceptual CIELAB 3D colour
+    volumes + two-sided presence/contradiction evidence over the true foreground mask).
+    ``min_saturation`` and ``wash_max_value`` are kept for backward signature compatibility.
     """
-    if not target_color_word or not target_color_word.strip():
-        return True, ""
+    del min_saturation, wash_max_value
+    from color_gate import evaluate_image_color
 
-    from variant_terms import COLOUR_FAMILIES
-
-    target_norm = target_color_word.strip().lower()
-    target_family = next(
-        (fam for fam, synonyms in COLOUR_FAMILIES.items() if target_norm in synonyms or target_norm == fam),
-        "",
+    verdict = evaluate_image_color(
+        image,
+        target_color_word,
+        official=official,
+        exempt_chroma_on_official=exempt_chroma_on_official,
+        min_target_presence=min_target_presence,
+        min_rival_dominance=min_rival_dominance,
+        min_chroma=min_chroma,
     )
-    if not target_family:
-        return True, ""
-
-    # Achromatic targets (black/white/grey rows) are judged by the product area
-    # itself, not the hue family table: the foreground mask throws the near-white
-    # body away as "background", so a white/gold unit on a black row slipped
-    # through the old chroma-only rule (EcoStar Duke).  Two signals, both
-    # measured over the central region: (1) brightness conflict - a bright unit
-    # on a black row, a dark unit on a white row; (2) chromatic dominance - the
-    # product area is *mostly* a saturated colour (a green fridge on a white
-    # row).  A small accent (blue control panel on a white dispenser) covers
-    # too little of the centre to fire either rule.
-    if target_family in ("black", "white", "grey"):
-        thumb = to_rgb(image).resize((64, 64), Image.Resampling.BOX)
-        arr = np.asarray(thumb, dtype=np.float32) / 255.0
-        central = arr[7:57, 7:57]
-        if central.size == 0:
-            return True, ""
-        c_max = central.max(axis=-1)
-        c_delta = c_max - central.min(axis=-1)
-        central_mean = float(c_max.mean())
-        bg = (c_max > 0.90) & (c_delta < 0.08)
-        product = ~bg
-        product_frac = float(np.mean(product))
-        product_mean = float(c_max[product].mean()) if product.any() else 1.0
-        dark_frac = float(np.mean(c_max < 0.45))
-        # A colour, not a tint.  The old test was "channel spread > 0.10", which cannot
-        # separate a coloured product from a coloured studio background: the owner's Orient
-        # Frost hero of 2026-10-10 - a white unit on a cool plate - measured 60 %
-        # "chromatic" and the brand's own picture was thrown away.  Saturation (spread /
-        # value) plus a brightness cap is what separates them: a studio wash is bright and
-        # weakly saturated (0.01 of the product area on a #c9d9f2 plate, where the old test
-        # said 0.45), a coloured body is neither (0.61-0.62 for purple/red/blue/green/gold).
-        # The bar is 0.22 and not higher because a golden body sits at saturation 0.24 - a
-        # 0.30 bar re-opens the gold-on-white hole this gate was written for.
-        saturation = np.divide(c_delta, np.maximum(c_max, 1e-6))
-        chromatic = (saturation > min_saturation) & (c_max < wash_max_value)
-        chromatic_coverage = float(np.mean(chromatic & product))
-        # Glossy black/grey glass reflects the cool studio as *dark* colour sheen (the
-        # Floral Black CB1 of 2026-10-21: 50 % of the area chromatic at hue ~207°, yet
-        # 97 % of the body is dark and only 2 % of the colour is visible).  A colourway
-        # genuinely sold on a black/grey row is a coloured *body* - bright, or dark and
-        # strongly dyed.  Measured on his own files, the two populations separate
-        # cleanly: CB1's sheen tops out at saturation 0.48 (p90), while navy (0.67),
-        # maroon (0.90) and dark green (0.71) bodies all sit above 0.55.  White keeps
-        # the plain bar because the wrong-colour bodies it guards against are bright.
-        if target_family in ("black", "grey"):
-            body = (c_max >= 0.45) | (saturation >= 0.55)
-            chromatic_coverage = float(np.mean(chromatic & product & body))
-        if target_family == "black" and central_mean > 0.75 and dark_frac < 0.08:
-            # No dark body anywhere in the product area - a white/bright unit on a
-            # black row.  The dark_frac guard keeps a *correct* small black unit
-            # (few dark pixels, lots of white background) from being rejected.
-            return False, (
-                f"product area is bright (mean {central_mean:.2f}, "
-                f"dark coverage {dark_frac:.0%}) - "
-                f"conflicts with target '{target_color_word}' (family black)"
-            )
-        if target_family == "white":
-            if central_mean < 0.45:
-                return False, (
-                    f"product area is dark (mean {central_mean:.2f}) - "
-                    f"conflicts with target '{target_color_word}' (family white)"
-                )
-            if product_frac >= 0.30 and product_mean < 0.30:
-                # A large, near-black body dominates the frame (slim wide unit on a
-                # white row survives the plain mean test because white background
-                # outnumbers it).
-                return False, (
-                    f"product area is dominated by a dark body "
-                    f"(coverage {product_frac:.0%}, mean {product_mean:.2f}) - "
-                    f"conflicts with target '{target_color_word}' (family white)"
-                )
-        if chromatic_coverage >= 0.45:
-            reason = (
-                f"product area is a saturated colour ({chromatic_coverage:.0%} of it at "
-                f"saturation > {min_saturation:.2f}) - conflicts with target "
-                f"'{target_color_word}' (family {target_family})"
-            )
-            if official and exempt_chroma_on_official:
-                # Only this branch.  A dark body on a white row, or a bright body on a
-                # black row, is a wrong *product* and still rejects on a brand page too -
-                # that is how the Haier official-CDN dark-body catch of 2026-10-09 stays
-                # alive.  What a brand page is never judged on is wash dominance, because
-                # the tint lives in the brand's own studio setup, not in the variant.
-                return True, (
-                    f"{reason}; not enforced - this is the brand's own page, whose hero "
-                    "defines the variant's colour"
-                )
-            return False, reason
-        return True, ""
-
-    profile = extract_foreground_color_profile(image)
-    if not profile.is_chromatic:
-        return True, ""
-
-    # A small chromatic accent must not condemn the whole image (a gold handle on
-    # a maroon fridge): a family conflict needs the foreground to be *mostly*
-    # that colour.
-    if profile.chromatic_ratio < 0.45:
-        return True, ""
-
-    # Conflicting chromatic pairings between distinct coloured appliance variants
-    # Covering all vocabulary families from variant_terms.COLOUR_FAMILIES
-    conflicts: dict[str, set[str]] = {
-        "gold": {"purple", "red", "blue", "green", "pink"},
-        "red": {"purple", "gold", "blue", "green", "yellow", "orange"},
-        "purple": {"red", "gold", "blue", "green", "yellow", "orange"},
-        "blue": {"red", "purple", "gold", "green", "yellow", "orange"},
-        "green": {"red", "purple", "gold", "blue", "yellow", "orange"},
-        "white": {"purple", "red", "blue", "green", "gold", "orange", "yellow", "pink", "brown", "chromatic"},
-        "black": {"purple", "red", "blue", "green", "gold", "orange", "yellow", "pink", "brown", "chromatic"},
-        "grey": {"purple", "red", "blue", "green", "gold", "orange", "yellow", "pink", "brown", "chromatic"},
-        "beige": {"purple", "red", "blue", "green", "pink"},
-        "brown": {"purple", "blue", "green"},
-        "yellow": {"purple", "red", "blue", "green"},
-        "orange": {"purple", "blue", "green"},
-        "pink": {"blue", "green", "gold"},
-    }
-
-    # Dynamic continuous circular hue arcs for chromatic appliance families.
-    # Instead of brittle discrete bins and hardcoded one-off string checks, this models
-    # the continuous physical spectrum of appliances and studio lighting:
-    # - Green smoothly spans olive (70°) through forest, mint, emerald, and cyan/teal sheen (210°)
-    # - Red wraps circularly (305° to 25°, or 285° on official brand heroes) spanning wine,
-    #   burgundy, maroon, crimson, and red
-    # - Purple spans violet (255°) through magenta and warm studio glass reflections (up to 25°)
-    # - Blue spans cyan/teal (180°) through sky blue, cobalt, and deep navy (260°)
-    # - Gold/Yellow spans champagne, bronze, gold, and warm amber (25° to 65°)
-    # Standard W3C/chromatic shade centroids on the 360° color wheel:
-    # Allows any known shade (emerald, burgundy, mint, teal, maroon, copper, etc.) to dynamically
-    # anchor its own natural hue spectrum without brittle one-off string checks.
-    SHADE_CENTROIDS: dict[str, float] = {
-        "burgundy": 310.0,
-        "wine": 310.0,
-        "maroon": 335.0,
-        "ruby": 350.0,
-        "crimson": 345.0,
-        "cherry": 350.0,
-        "rose": 330.0,
-        "coral": 15.0,
-        "emerald": 165.0,
-        "emerald green": 160.0,
-        "teal": 180.0,
-        "mint": 150.0,
-        "olive": 80.0,
-        "cyan": 180.0,
-        "navy": 230.0,
-        "sky blue": 205.0,
-        "azure": 210.0,
-        "amber": 40.0,
-        "copper": 25.0,
-        "bronze": 35.0,
-        "champagne": 45.0,
-    }
-
-    target_centroid = next(
-        (cent for shade, cent in SHADE_CENTROIDS.items() if shade in target_norm),
-        None,
-    )
-    if target_centroid is not None:
-        diff = abs(profile.median_hue - target_centroid) % 360.0
-        if min(diff, 360.0 - diff) <= 55.0:
-            return True, ""
-
-    red_min = 285.0 if official else 305.0
-    chromatic_arcs: dict[str, tuple[float, float]] = {
-        "green": (70.0, 210.0),
-        "blue": (180.0, 260.0),
-        "purple": (255.0, 25.0),
-        "red": (red_min, 25.0),
-        "gold": (25.0, 65.0),
-        "yellow": (25.0, 65.0),
-        "orange": (15.0, 45.0),
-        "pink": (305.0, 355.0),
-    }
-
-    if target_family in chromatic_arcs:
-        arc_start, arc_end = chromatic_arcs[target_family]
-        if is_hue_in_arc(profile.median_hue, arc_start, arc_end):
-            return True, ""
-
-    banned = conflicts.get(target_family, set())
-    if profile.dominant_family in banned:
-        return False, (
-            f"foreground colour ({profile.dominant_family}, hue {profile.median_hue:.0f}°) "
-            f"conflicts with target '{target_color_word}' (family {target_family})"
-        )
-
-    return True, ""
+    return verdict.accepted, verdict.reason
 
 
 # --------------------------------------------------------------------------- #
