@@ -137,6 +137,7 @@ def load_env_file(
 #: Default endpoint used when ``FREEIMAGE_UPLOAD_URL`` is not set.
 DEFAULT_UPLOAD_URL: Final[str] = "https://freeimage.host/api/1/upload"
 DEFAULT_IMGBB_UPLOAD_URL: Final[str] = "https://api.imgbb.com/1/upload"
+DEFAULT_IMAGEKIT_UPLOAD_URL: Final[str] = "https://upload.imagekit.io/api/v1/files/upload"
 DEFAULT_APILAYER_UPLOAD_URL: Final[str] = "https://api.apilayer.com/image_upload/upload"
 
 
@@ -149,6 +150,15 @@ def _read_upload_url() -> str:
 def _read_imgbb_upload_url() -> str:
     """Upload endpoint supplied by ``IMGBB_UPLOAD_URL`` (blank uses the default)."""
     return os.environ.get("IMGBB_UPLOAD_URL", "").strip() or DEFAULT_IMGBB_UPLOAD_URL
+
+
+def parse_api_keys(raw: str) -> tuple[str, ...]:
+    """Parse a comma-separated API key string into unique, trimmed keys in order.
+
+    Empty tokens (e.g. trailing commas or blank spaces) are ignored so
+    ``"k1, k2, "`` yields ``("k1", "k2")`` and ``" , "`` yields ``()``.
+    """
+    return tuple(dict.fromkeys(part.strip() for part in raw.split(",") if part.strip()))
 
 
 def _read_api_key() -> str:
@@ -173,6 +183,26 @@ def _read_apilayer_api_key() -> str:
 def _read_apilayer_upload_url() -> str:
     """Upload endpoint supplied by ``APILAYER_UPLOAD_URL`` (blank uses the default)."""
     return os.environ.get("APILAYER_UPLOAD_URL", "").strip() or DEFAULT_APILAYER_UPLOAD_URL
+
+
+def _read_imagekit_private_key() -> str:
+    """ImageKit private API key(s) for upload, read from ``IMAGEKIT_PRIVATE_KEY``."""
+    return os.environ.get("IMAGEKIT_PRIVATE_KEY", "").strip()
+
+
+def _read_imagekit_upload_url() -> str:
+    """Upload endpoint supplied by ``IMAGEKIT_UPLOAD_URL`` (blank uses the default)."""
+    return os.environ.get("IMAGEKIT_UPLOAD_URL", "").strip() or DEFAULT_IMAGEKIT_UPLOAD_URL
+
+
+def _read_imagekit_url_endpoint() -> str:
+    """Optional ImageKit CDN URL endpoint (e.g. ``https://ik.imagekit.io/<id>``)."""
+    return os.environ.get("IMAGEKIT_URL_ENDPOINT", "").strip()
+
+
+def _read_imagekit_folder() -> str:
+    """Optional destination folder inside ImageKit Media Library (e.g. ``/products``)."""
+    return os.environ.get("IMAGEKIT_FOLDER", "").strip()
 
 
 #: The two roots a run is written under when the caller pins no folder.  Relative on
@@ -955,12 +985,20 @@ class PipelineConfig:
     api_key: str = field(default_factory=_read_api_key)
     #: Fallback/alternative upload host - ``IMGBB_API_KEY``.
     imgbb_api_key: str = field(default_factory=_read_imgbb_api_key)
+    #: Fallback/alternative upload host - ``IMAGEKIT_PRIVATE_KEY``.
+    imagekit_private_key: str = field(default_factory=_read_imagekit_private_key)
     #: Fallback/alternative upload host - ``APILAYER_API_KEY``.
     apilayer_api_key: str = field(default_factory=_read_apilayer_api_key)
     #: Upload endpoint - ``FREEIMAGE_UPLOAD_URL``, defaulting to freeimage.host.
     upload_url: str = field(default_factory=_read_upload_url)
     #: Upload endpoint - ``IMGBB_UPLOAD_URL``, defaulting to api.imgbb.com.
     imgbb_upload_url: str = field(default_factory=_read_imgbb_upload_url)
+    #: Upload endpoint - ``IMAGEKIT_UPLOAD_URL``, defaulting to upload.imagekit.io.
+    imagekit_upload_url: str = field(default_factory=_read_imagekit_upload_url)
+    #: Optional ImageKit URL-endpoint (``IMAGEKIT_URL_ENDPOINT``).
+    imagekit_url_endpoint: str = field(default_factory=_read_imagekit_url_endpoint)
+    #: Optional ImageKit target folder (``IMAGEKIT_FOLDER``).
+    imagekit_folder: str = field(default_factory=_read_imagekit_folder)
     #: Upload endpoint - ``APILAYER_UPLOAD_URL``, defaulting to api.apilayer.com.
     apilayer_upload_url: str = field(default_factory=_read_apilayer_upload_url)
     upload_min_interval_s: float = 0.6
@@ -975,12 +1013,18 @@ class PipelineConfig:
         self._validate_fetch()
         self._validate_image_gates()
         self._validate_compositing()
-        if not self.dry_run and not self.api_key and not self.imgbb_api_key and not self.apilayer_api_key:
+        if (
+            not self.dry_run
+            and not self.api_keys
+            and not self.imgbb_api_keys
+            and not self.imagekit_private_keys
+            and not self.apilayer_api_keys
+        ):
             raise ConfigError(
-                "FREEIMAGE_API_KEY (or IMGBB_API_KEY / APILAYER_API_KEY) is not set "
+                "FREEIMAGE_API_KEY (or IMGBB_API_KEY / IMAGEKIT_PRIVATE_KEY / APILAYER_API_KEY) is not set "
                 "(and --dry-run was not requested). "
-                "Put it in secrets.env (FREEIMAGE_API_KEY=..., IMGBB_API_KEY=..., or APILAYER_API_KEY=...) or export "
-                "it in the shell before a real upload run."
+                "Put it in secrets.env (FREEIMAGE_API_KEY=..., IMGBB_API_KEY=..., IMAGEKIT_PRIVATE_KEY=..., "
+                "or APILAYER_API_KEY=...) or export it in the shell before a real upload run."
             )
         if self.extra_generic_name_words:
             from model_matching import register_generic_name_words
@@ -1331,6 +1375,26 @@ class PipelineConfig:
     @property
     def checkpoint_path(self) -> Path:
         return self.state_dir / "checkpoint.jsonl"
+
+    @property
+    def api_keys(self) -> tuple[str, ...]:
+        """Parsed FreeImage API keys (supports comma-separated rotation)."""
+        return parse_api_keys(self.api_key)
+
+    @property
+    def imgbb_api_keys(self) -> tuple[str, ...]:
+        """Parsed ImgBB API keys (supports comma-separated rotation)."""
+        return parse_api_keys(self.imgbb_api_key)
+
+    @property
+    def imagekit_private_keys(self) -> tuple[str, ...]:
+        """Parsed ImageKit private API keys (supports comma-separated rotation)."""
+        return parse_api_keys(self.imagekit_private_key)
+
+    @property
+    def apilayer_api_keys(self) -> tuple[str, ...]:
+        """Parsed APILayer API keys (supports comma-separated rotation)."""
+        return parse_api_keys(self.apilayer_api_key)
 
     @property
     def banner_cache_path(self) -> Path:

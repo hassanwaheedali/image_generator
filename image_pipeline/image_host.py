@@ -13,7 +13,7 @@ import logging
 import re
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any, Final
 
 import requests
@@ -199,6 +199,36 @@ class ImgBBHost:
 
 APILAYER_ENDPOINT: Final[str] = "https://api.apilayer.com/image_upload/upload"
 
+_APILAYER_QUOTA_RE: Final[re.Pattern[str]] = re.compile(
+    r"(daily|monthly).*limit|subscription\s+plan", re.IGNORECASE
+)
+
+
+def _is_apilayer_quota_exhausted(response: requests.Response) -> tuple[bool, str]:
+    """Return ``(True, detail)`` when an APILayer HTTP 429 signals exhausted daily/monthly quota."""
+    message = ""
+    try:
+        payload: Any = response.json()
+        if isinstance(payload, Mapping):
+            raw = payload.get("message") or payload.get("error")
+            if isinstance(raw, str):
+                message = raw.strip()
+    except ValueError:
+        pass
+
+    for header in ("X-RateLimit-Remaining-Month", "X-RateLimit-Remaining-Day"):
+        if response.headers.get(header) == "0":
+            return True, message or f"{header}=0"
+    if message and _APILAYER_QUOTA_RE.search(message):
+        return True, message
+    return False, ""
+
+
+def _host_label(host: ImageHost) -> str:
+    """Human-readable host label for failover logs (never includes secret keys)."""
+    label = getattr(host, "display_name", "")
+    return label if isinstance(label, str) and label else type(host).__name__
+
 
 class APILayerHost:
     """Thread-safe APILayer client implementing the ImageHost protocol."""
@@ -238,7 +268,12 @@ class APILayerHost:
                 files={"upload": (filename, data, "image/jpeg")},
                 timeout=self._timeout,
             )
-            if response.status_code == 429 or response.status_code >= 500:
+            if response.status_code == 429:
+                exhausted, detail = _is_apilayer_quota_exhausted(response)
+                if exhausted:
+                    raise PermanentAPIError(f"apilayer quota exhausted: {detail}")
+                raise FetchError("apilayer upload HTTP 429")
+            if response.status_code >= 500:
                 raise FetchError(f"apilayer upload HTTP {response.status_code}")
             try:
                 payload: Any = response.json()
@@ -275,6 +310,200 @@ class APILayerHost:
             max_delay_s=self._max_delay,
             description=f"apilayer upload {filename}",
         )
+
+
+IMAGEKIT_ENDPOINT: Final[str] = "https://upload.imagekit.io/api/v1/files/upload"
+
+
+def _extract_imagekit_url(payload: Mapping[str, Any], url_endpoint: str) -> str | None:
+    """Extract the public CDN URL from an ImageKit upload response payload."""
+    url = payload.get("url")
+    if isinstance(url, str) and url:
+        return url
+    file_path = payload.get("filePath")
+    if url_endpoint and isinstance(file_path, str) and file_path:
+        return f"{url_endpoint.rstrip('/')}/{file_path.lstrip('/')}"
+    return None
+
+
+def _response_error_text(response: requests.Response) -> str:
+    """Best-effort error message from a JSON or plain-text HTTP response."""
+    try:
+        payload: Any = response.json()
+        if isinstance(payload, Mapping):
+            raw = payload.get("message") or payload.get("error")
+            if isinstance(raw, str) and raw.strip():
+                return raw.strip()
+    except ValueError:
+        pass
+    return response.text.strip()[:300]
+
+
+class ImageKitHost:
+    """Thread-safe ImageKit.io client implementing the ImageHost protocol."""
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        min_interval_s: float = 0.5,
+        timeout_s: float = 60.0,
+        max_retries: int = 3,
+        base_delay_s: float = 0.8,
+        max_delay_s: float = 8.0,
+        endpoint: str = IMAGEKIT_ENDPOINT,
+        url_endpoint: str = "",
+        folder: str = "",
+    ) -> None:
+        if not api_key:
+            raise PermanentAPIError("IMAGEKIT_PRIVATE_KEY is not configured")
+        self._api_key = api_key
+        self._endpoint = endpoint
+        self._url_endpoint = url_endpoint.strip()
+        self._folder = folder.strip()
+        self._timeout = timeout_s
+        self._max_retries = max_retries
+        self._base_delay = base_delay_s
+        self._max_delay = max_delay_s
+        self._limiter = DomainRateLimiter(min_interval_s)
+        self._lock = threading.Lock()
+
+    def upload(self, data: bytes, filename: str) -> str:
+        """Upload JPEG bytes to ImageKit.io, returning the public https CDN URL."""
+
+        def _do() -> str:
+            with self._lock:
+                self._limiter.wait(self._endpoint)
+                time.sleep(0)
+            form_data: dict[str, str] = {"fileName": filename}
+            if self._folder:
+                form_data["folder"] = self._folder
+            response = requests.post(
+                self._endpoint,
+                auth=(self._api_key, ""),
+                data=form_data,
+                files={"file": (filename, data, "image/jpeg")},
+                timeout=self._timeout,
+            )
+            if response.status_code == 429:
+                msg = _response_error_text(response)
+                if msg and any(pattern.search(msg) for pattern in _PERMANENT_HINTS):
+                    raise PermanentAPIError(f"imagekit quota exhausted: {msg}")
+                raise FetchError("imagekit upload HTTP 429")
+            if response.status_code >= 500:
+                raise FetchError(f"imagekit upload HTTP {response.status_code}")
+            try:
+                payload: Any = response.json()
+            except ValueError as exc:
+                raise FetchError(f"imagekit upload returned non-JSON body: {exc}") from exc
+            if not isinstance(payload, Mapping):
+                raise FetchError("imagekit upload returned an unexpected JSON shape")
+
+            if 200 <= response.status_code < 300:
+                url = _extract_imagekit_url(payload, self._url_endpoint)
+                if url:
+                    return url
+                raise FetchError("imagekit HTTP 200 without url")
+
+            payload_with_status = dict(payload)
+            payload_with_status.setdefault("status_code", response.status_code)
+            kind, message = classify_upload_response(payload_with_status)
+            if kind == "permanent":
+                raise PermanentAPIError(f"imagekit refused the upload: {message}")
+            if kind == "transient":
+                raise FetchError(f"imagekit transient error: {message}")
+            return message
+
+        return retry_with_backoff(
+            _do,
+            max_retries=self._max_retries,
+            base_delay_s=self._base_delay,
+            max_delay_s=self._max_delay,
+            description=f"imagekit upload {filename}",
+        )
+
+
+class RotatingImageHost:
+    """Thread-safe round-robin pool of keys for one image-host provider.
+
+    Distributes uploads evenly across all healthy key instances so concurrent workers do
+    not burn through a single key's rate limit.  When any key hits a ``PermanentAPIError``
+    (daily quota, rate limit, or invalid key), that slot is retired permanently and the
+    in-flight upload immediately retries on the next healthy key.  Only after every key
+    in the pool is exhausted does ``PermanentAPIError`` propagate up (e.g. to
+    ``FallbackImageHost`` to shift to the next provider).
+    """
+
+    def __init__(self, hosts: Sequence[ImageHost], *, provider_name: str = "") -> None:
+        if not hosts:
+            raise ValueError("At least one image host must be provided")
+        self._hosts: tuple[ImageHost, ...] = tuple(hosts)
+        self._provider_name: str = provider_name or type(self._hosts[0]).__name__
+        self._cursor: int = 0
+        self._exhausted: set[int] = set()
+        self._lock = threading.Lock()
+
+    @property
+    def display_name(self) -> str:
+        """Provider name and key-pool size for operational logging."""
+        return f"{self._provider_name} ({len(self._hosts)} keys)"
+
+    @property
+    def total_count(self) -> int:
+        """Total number of configured key slots in this pool."""
+        return len(self._hosts)
+
+    @property
+    def active_count(self) -> int:
+        """Number of non-exhausted key slots still eligible for rotation."""
+        with self._lock:
+            return len(self._hosts) - len(self._exhausted)
+
+    def _next_slot(self) -> tuple[int, ImageHost]:
+        total = len(self._hosts)
+        with self._lock:
+            for offset in range(total):
+                idx = (self._cursor + offset) % total
+                if idx not in self._exhausted:
+                    self._cursor = (idx + 1) % total
+                    return idx, self._hosts[idx]
+        raise PermanentAPIError(
+            f"All {total} {self._provider_name} key(s) failed permanently"
+        )
+
+    def _retire_slot(self, idx: int, exc: PermanentAPIError) -> bool:
+        total = len(self._hosts)
+        with self._lock:
+            if idx not in self._exhausted:
+                self._exhausted.add(idx)
+                remaining = total - len(self._exhausted)
+                if remaining > 0:
+                    LOG.warning(
+                        "[key-rotation] %s key #%d/%d failed permanently (%s); %d key(s) remaining",
+                        self._provider_name,
+                        idx + 1,
+                        total,
+                        exc,
+                        remaining,
+                    )
+                else:
+                    LOG.error(
+                        "[key-rotation] all %d %s key(s) failed permanently (last error: %s)",
+                        total,
+                        self._provider_name,
+                        exc,
+                    )
+            return len(self._exhausted) < total
+
+    def upload(self, data: bytes, filename: str) -> str:
+        """Upload via the next healthy key, retiring permanently failed keys automatically."""
+        while True:
+            idx, host = self._next_slot()
+            try:
+                return host.upload(data, filename)
+            except PermanentAPIError as exc:
+                if not self._retire_slot(idx, exc):
+                    raise
 
 
 class FallbackImageHost:
@@ -331,8 +560,8 @@ class FallbackImageHost:
                     if self._current_index == idx:
                         next_idx = idx + 1
                         if next_idx < len(self._hosts):
-                            curr_name = type(host).__name__
-                            next_name = type(self._hosts[next_idx]).__name__
+                            curr_name = _host_label(host)
+                            next_name = _host_label(self._hosts[next_idx])
                             LOG.warning(
                                 "[host-failover] %s failed permanently (%s); shifting uploads to %s fallback",
                                 curr_name,

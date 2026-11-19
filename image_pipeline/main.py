@@ -46,7 +46,14 @@ from fetch import (
     LocalImageFetcher,
     PermanentAPIError,
 )
-from image_host import APILayerHost, FallbackImageHost, FreeImageHost, ImgBBHost
+from image_host import (
+    APILayerHost,
+    FallbackImageHost,
+    FreeImageHost,
+    ImageKitHost,
+    ImgBBHost,
+    RotatingImageHost,
+)
 from models import ProductResult, ProductTask, Status
 from pipeline import (
     COLOUR_UNSTATED_NOTE,
@@ -595,54 +602,90 @@ def select_platforms(
     return groups[int(answer) - 1]
 
 
+def _build_provider_host(
+    keys: tuple[str, ...],
+    factory: Callable[[str], ImageHost],
+    provider_name: str,
+) -> ImageHost | None:
+    """Build one provider's host: a single client for 1 key, or a RotatingImageHost for N keys."""
+    if not keys:
+        return None
+    instances: list[ImageHost] = [factory(key) for key in keys]
+    if len(instances) == 1:
+        return instances[0]
+    return RotatingImageHost(instances, provider_name=provider_name)
+
+
 def _build_image_host(config: PipelineConfig) -> ImageHost:
-    """Build the configured image host, supporting dry-run, primary, fallback or failover."""
+    """Build the configured image host, supporting dry-run, multi-key rotation, and failover."""
     if config.dry_run:
         return DryRunHost(config.output_dir)
 
-    hosts: list[ImageHost] = []
-    if config.api_key:
-        hosts.append(
-            FreeImageHost(
-                api_key=config.api_key,
+    provider_specs: tuple[tuple[tuple[str, ...], Callable[[str], ImageHost], str], ...] = (
+        (
+            config.api_keys,
+            lambda key: FreeImageHost(
+                api_key=key,
                 endpoint=config.upload_url,
                 min_interval_s=config.upload_min_interval_s,
                 max_retries=config.max_retries,
                 base_delay_s=config.backoff_base_s,
                 max_delay_s=config.backoff_max_s,
-            )
-        )
-    if config.imgbb_api_key:
-        hosts.append(
-            ImgBBHost(
-                api_key=config.imgbb_api_key,
+            ),
+            FreeImageHost.__name__,
+        ),
+        (
+            config.imgbb_api_keys,
+            lambda key: ImgBBHost(
+                api_key=key,
                 endpoint=config.imgbb_upload_url,
                 min_interval_s=config.upload_min_interval_s,
                 max_retries=config.max_retries,
                 base_delay_s=config.backoff_base_s,
                 max_delay_s=config.backoff_max_s,
-            )
-        )
-    if config.apilayer_api_key:
-        hosts.append(
-            APILayerHost(
-                api_key=config.apilayer_api_key,
+            ),
+            ImgBBHost.__name__,
+        ),
+        (
+            config.imagekit_private_keys,
+            lambda key: ImageKitHost(
+                api_key=key,
+                endpoint=config.imagekit_upload_url,
+                url_endpoint=config.imagekit_url_endpoint,
+                folder=config.imagekit_folder,
+                min_interval_s=config.upload_min_interval_s,
+                max_retries=config.max_retries,
+                base_delay_s=config.backoff_base_s,
+                max_delay_s=config.backoff_max_s,
+            ),
+            ImageKitHost.__name__,
+        ),
+        (
+            config.apilayer_api_keys,
+            lambda key: APILayerHost(
+                api_key=key,
                 endpoint=config.apilayer_upload_url,
                 min_interval_s=config.upload_min_interval_s,
                 max_retries=config.max_retries,
                 base_delay_s=config.backoff_base_s,
                 max_delay_s=config.backoff_max_s,
-            )
-        )
-
-    if len(hosts) > 1:
-        return FallbackImageHost(hosts=hosts)
-    if len(hosts) == 1:
-        return hosts[0]
-
-    raise PermanentAPIError(
-        "No upload host configured (FREEIMAGE_API_KEY, IMGBB_API_KEY, or APILAYER_API_KEY required)"
+            ),
+            APILayerHost.__name__,
+        ),
     )
+    hosts = [
+        built
+        for keys, factory, name in provider_specs
+        if (built := _build_provider_host(keys, factory, name)) is not None
+    ]
+    if not hosts:
+        raise PermanentAPIError(
+            "No upload host configured "
+            "(FREEIMAGE_API_KEY, IMGBB_API_KEY, IMAGEKIT_PRIVATE_KEY, or APILAYER_API_KEY required)"
+        )
+    summary = " -> ".join(getattr(h, "display_name", type(h).__name__) for h in hosts)
+    LOG.info("[image-host] upload chain: %s", summary)
+    return FallbackImageHost(hosts=hosts) if len(hosts) > 1 else hosts[0]
 
 
 def build_deps(
