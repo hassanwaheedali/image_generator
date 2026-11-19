@@ -2248,3 +2248,64 @@ def test_a_wrong_colour_hero_is_still_refused_after_delegation() -> None:
     reason = hero_colour_conflict(_door("#2e7d32"), frozenset({"brown"}))
     assert "green" in reason
     assert "brown" in reason
+
+
+# S19 inset branded-frame guard (white-corner store templates)
+# --------------------------------------------------------------------------- #
+def test_s19_rejects_inset_single_hue_store_template_with_white_corners(
+    config: PipelineConfig,
+) -> None:
+    """Templates like iShopping + AlfaMall leave white outer corners while wrapping
+    the perimeter in single-hue decorative swooshes/circles around a white studio centre."""
+    from image_quality import branded_template_reason
+
+    img = Image.new("RGB", (600, 600), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    brand_yellow = (254, 211, 90)
+    # Upper-right circle, right swoosh, bottom swoosh, left accent - all inset from corners
+    draw.ellipse((390, 10, 560, 180), fill=brand_yellow)
+    draw.rectangle((525, 190, 590, 540), fill=brand_yellow)
+    draw.rectangle((60, 510, 550, 590), fill=brand_yellow)
+    draw.rectangle((10, 260, 70, 520), fill=brand_yellow)
+    # Centred appliance product on white studio interior
+    draw.rectangle((190, 170, 410, 440), fill=(40, 40, 42))
+
+    reason = branded_template_reason(img, config)
+    assert reason is not None
+    assert "inset single-hue frame" in reason
+
+
+def test_s19_inset_frame_keeps_solid_coloured_retail_box_and_clean_product(
+    config: PipelineConfig,
+) -> None:
+    """Adversarial: a solid coloured product/box filling the interior (Philips blue box)
+    or a colourful product centred on white must never trigger the inset-frame guard."""
+    from image_quality import branded_template_reason
+
+    # 1. Solid blue retail box filling both interior and edges (inner_white ~ 0)
+    blue_box = Image.new("RGB", (600, 600), (255, 255, 255))
+    ImageDraw.Draw(blue_box).rectangle((30, 30, 570, 570), fill=(10, 85, 155))
+    assert branded_template_reason(blue_box, config) is None
+
+    # 2. Bright yellow product centred on clean white background
+    yellow_prod = Image.new("RGB", (600, 600), (255, 255, 255))
+    ImageDraw.Draw(yellow_prod).rounded_rectangle((140, 120, 460, 480), radius=20, fill=(250, 200, 30))
+    assert branded_template_reason(yellow_prod, config) is None
+
+
+def test_s20_allows_slender_product_on_flat_light_grey_studio_backdrop(
+    config: PipelineConfig,
+) -> None:
+    """A thin vertical product (USB cable, hair curler) on a dead-flat #f2f2f2 studio
+    backdrop isolates cleanly inside a clean border ring and must not be rejected as a
+    full-bleed marketing poster."""
+    img = Image.new("RGB", (470, 556), (242, 242, 242))
+    draw = ImageDraw.Draw(img)
+    # Slender vertical USB cable (~75x430)
+    draw.rectangle((198, 60, 232, 160), fill=(35, 35, 38))
+    draw.rectangle((208, 160, 222, 490), fill=(45, 45, 48))
+    draw.rectangle((245, 90, 268, 160), fill=(35, 35, 38))
+    draw.rectangle((251, 160, 262, 490), fill=(45, 45, 48))
+
+    rule, detail = run_quality_gates(img, config, official_gallery=True)
+    assert rule == "ok", f"Expected ok for slender studio cable, got {rule}: {detail}"

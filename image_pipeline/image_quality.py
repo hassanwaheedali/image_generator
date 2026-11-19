@@ -757,6 +757,82 @@ def studio_background_pass(image: Image.Image, config: PipelineConfig) -> bool:
 # --------------------------------------------------------------------------- #
 # S19 - branded template guard (Option 2)
 # --------------------------------------------------------------------------- #
+def _rgb_pixel_hues(arr: np.ndarray, max_c: np.ndarray, delta: np.ndarray) -> np.ndarray:
+    """Vectorized HSV hue (0..360) for an ``(H, W, 3)`` float32 RGB array in ``[0, 1]``."""
+    r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
+    hues = np.zeros(max_c.shape, dtype=np.float32)
+    nz = delta > 0
+    idx_r = (r == max_c) & nz
+    hues[idx_r] = ((g[idx_r] - b[idx_r]) / delta[idx_r]) % 6.0
+    idx_g = (g == max_c) & nz
+    hues[idx_g] = ((b[idx_g] - r[idx_g]) / delta[idx_g]) + 2.0
+    idx_b = (b == max_c) & nz
+    hues[idx_b] = ((r[idx_b] - g[idx_b]) / delta[idx_b]) + 4.0
+    return hues * 60.0
+
+
+def _inset_branded_frame_reason(image: Image.Image, config: PipelineConfig) -> str | None:
+    """Detect store templates whose brand graphics wrap the perimeter inside white corners.
+
+    Hue-agnostic: finds the dominant saturated hue in the outer perimeter ring and flags
+    only when coherent single-hue graphics cover multiple border sides, sit around a
+    white-studio interior, and concentrate more strongly on the outer frame than inside
+    (so solid-coloured products and retail boxes never fire it).
+    """
+    side = 128
+    arr = np.asarray(to_rgb(image).resize((side, side), Image.Resampling.BOX), dtype=np.float32) / 255.0
+    max_c = arr.max(axis=-1)
+    delta = max_c - arr.min(axis=-1)
+    sat = np.divide(delta, np.maximum(max_c, 1e-6))
+    colored = (max_c > 0.25) & (delta >= 0.12) & (sat >= 0.35)
+
+    band = max(4, round(side * config.branded_frame_ring_ratio))
+    ring = np.zeros((side, side), dtype=bool)
+    ring[:band, :] = True
+    ring[-band:, :] = True
+    ring[:, :band] = True
+    ring[:, -band:] = True
+    inner = ~ring
+
+    ring_colored = colored & ring
+    ring_colored_count = int(ring_colored.sum())
+    if ring_colored_count < 20:
+        return None
+
+    hues = _rgb_pixel_hues(arr, max_c, delta)
+    hist, edges = np.histogram(hues[ring_colored], bins=36, range=(0.0, 360.0))
+    peak = (float(edges[int(np.argmax(hist))]) + 5.0) % 360.0
+    diff = np.abs(hues - peak)
+    same_brand = colored & (np.minimum(diff, 360.0 - diff) <= 20.0)
+
+    coherence = float((same_brand & ring).sum() / ring_colored_count)
+    ring_brand_frac = float((same_brand & ring).sum() / ring.sum())
+    inner_brand_frac = float((same_brand & inner).sum() / inner.sum())
+    inner_white_frac = float(((max_c > 0.90) & (delta < 0.08) & inner).sum() / inner.sum())
+    sides_hit = sum(
+        1
+        for strip in (
+            same_brand[:band, :],
+            same_brand[-band:, :],
+            same_brand[:, :band],
+            same_brand[:, -band:],
+        )
+        if float(strip.mean()) >= config.branded_frame_min_side_fraction
+    )
+    if (
+        ring_brand_frac >= config.branded_frame_min_ring_fraction
+        and coherence >= config.branded_frame_min_hue_coherence
+        and sides_hit >= config.branded_frame_min_sides
+        and inner_white_frac >= config.branded_frame_min_inner_white_fraction
+        and ring_brand_frac >= config.branded_frame_min_ring_to_inner_ratio * inner_brand_frac
+    ):
+        return (
+            f"store template: inset single-hue frame covers {ring_brand_frac:.0%} of outer "
+            f"ring across {sides_hit}/4 sides (coherence {coherence:.0%}, not a clean product photo)"
+        )
+    return None
+
+
 def branded_template_reason(image: Image.Image, config: PipelineConfig) -> str | None:
     """Safeguard S19: a store's own themed template is not a product photo.
 
@@ -765,13 +841,9 @@ def branded_template_reason(image: Image.Image, config: PipelineConfig) -> str |
     isolation and puts one shop's branding inside another shop's template, so they
     must be skipped while clean product photos pass.
 
-    The evidence is the background only: the four corner patches, the same window
-    the S7 studio rescue trusts.  A product photo's corners are white or light
-    neutral (saturation ~0.01-0.05); a theme frame shows saturated brand colour in
-    its corners.  The product body is never measured - a colourful product on a
-    white sheet passes, and a product that fills the frame is judged by the S7
-    corner bar exactly as in Option 1, never here.  Returns ``None`` when the
-    image passes, or a one-sentence reason a human can act on.
+    Checks both saturated outer corners and inset single-hue decorative frames that
+    leave white triangles at the very corners.  Returns ``None`` when the image passes,
+    or a one-sentence reason a human can act on.
     """
     if not config.branded_template_guard_enabled:
         return None
@@ -780,12 +852,12 @@ def branded_template_reason(image: Image.Image, config: PipelineConfig) -> str |
         for _value, saturation in corner_patch_stats(image, config.corner_patch_ratio)
         if saturation >= config.branded_corner_min_saturation
     )
-    if saturated < config.branded_min_saturated_corners:
-        return None
-    return (
-        f"store template: {saturated} of 4 corners are saturated brand colour "
-        f"(themed shop background, not a clean product photo)"
-    )
+    if saturated >= config.branded_min_saturated_corners:
+        return (
+            f"store template: {saturated} of 4 corners are saturated brand colour "
+            f"(themed shop background, not a clean product photo)"
+        )
+    return _inset_branded_frame_reason(image, config)
 
 
 def run_quality_gates(
@@ -839,7 +911,16 @@ def run_quality_gates(
                     isolated, degraded = isolate_main_product(image, config)
                     iw, ih = isolated.size
                     ratio = max(iw, ih) / max(1, min(iw, ih))
-                    if not degraded and ratio <= config.max_aspect_ratio and min(iw, ih) >= config.min_short_side:
+                    standard_body = (
+                        ratio <= config.max_aspect_ratio
+                        and min(iw, ih) >= config.min_short_side
+                    )
+                    slender_studio_body = (
+                        ring_clean
+                        and max(iw, ih) >= config.min_short_side
+                        and (iw * ih) < 0.85 * (image.width * image.height)
+                    )
+                    if not degraded and (standard_body or slender_studio_body):
                         is_studio_product = True
         if not is_studio_product:
             return "S20", marketing_layout_reason(image, config)

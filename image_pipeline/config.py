@@ -792,6 +792,19 @@ class PipelineConfig:
     #: How many themed corners make the whole picture a store template.  3 of 4: one
     #: accidental coloured corner (a cable, a shadow, a price tag) never fires S19.
     branded_min_saturated_corners: int = 3
+    #: Inset branded frame detection (S19): catches white-corner store templates whose
+    #: brand graphics (circles, swooshes, banners) wrap the outer perimeter ring around
+    #: a white-canvas product interior.  Measured across 2,405 live images: every inset
+    #: iShopping/AlfaMall template scores ring_brand 0.36-0.43, coherence 0.93-0.995,
+    #: 4/4 sides, ring/inner ratio 1.5-8.5, inner_white 0.60+; clean products and solid
+    #: coloured boxes never cross all bars simultaneously.
+    branded_frame_ring_ratio: float = 0.14
+    branded_frame_min_ring_fraction: float = 0.25
+    branded_frame_min_side_fraction: float = 0.12
+    branded_frame_min_sides: int = 3
+    branded_frame_min_hue_coherence: float = 0.85
+    branded_frame_min_ring_to_inner_ratio: float = 1.25
+    branded_frame_min_inner_white_fraction: float = 0.20
 
     # ----- last-resort salvage --------------------------------------------
     #: Owner decision 2026-10-08 ("jab kuch na bachey toh kam quality wali hi le lon"):
@@ -1012,6 +1025,7 @@ class PipelineConfig:
         self._validate_platforms()
         self._validate_fetch()
         self._validate_image_gates()
+        self._validate_branded_template()
         self._validate_compositing()
         if (
             not self.dry_run
@@ -1221,6 +1235,21 @@ class PipelineConfig:
             raise ConfigError("dedup_corr_threshold must be in (0, 1]")
         if not 0.0 < self.dedup_shape_iou_min <= 1.0:
             raise ConfigError("dedup_shape_iou_min must be in (0, 1]")
+
+    def _validate_branded_template(self) -> None:
+        for name, value in (
+            ("branded_frame_ring_ratio", self.branded_frame_ring_ratio),
+            ("branded_frame_min_ring_fraction", self.branded_frame_min_ring_fraction),
+            ("branded_frame_min_side_fraction", self.branded_frame_min_side_fraction),
+            ("branded_frame_min_hue_coherence", self.branded_frame_min_hue_coherence),
+            ("branded_frame_min_inner_white_fraction", self.branded_frame_min_inner_white_fraction),
+        ):
+            if not 0.0 < value <= 1.0:
+                raise ConfigError(f"{name} must be in (0, 1]")
+        if not 1 <= self.branded_frame_min_sides <= 4:
+            raise ConfigError("branded_frame_min_sides must be in [1, 4]")
+        if self.branded_frame_min_ring_to_inner_ratio < 0.0:
+            raise ConfigError("branded_frame_min_ring_to_inner_ratio must be >= 0")
 
     def _validate_compositing(self) -> None:
         if self.canonical_side < 64:
