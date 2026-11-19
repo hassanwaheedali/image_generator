@@ -561,6 +561,16 @@ class TestLocalProcessor:
         assert result.status is Status.PARTIAL
         assert "S13.blur" in _decisions_text(tmp_path)
 
+    def test_skip_blur_accepts_blurry_picture(self, tmp_path: Path) -> None:
+        crisp = _white_product_photo()
+        blurred = crisp.filter(ImageFilter.GaussianBlur(radius=8))
+        task = _local_task(tmp_path, [blurred])
+        result, accepted = process_direct_product(
+            task, _local_deps(tmp_path), _local_config(tmp_path, skip_blur=True)
+        )
+        assert len(accepted) == 1
+        assert "S13.blur" not in _decisions_text(tmp_path)
+
     def test_branded_store_template_dies_at_s19(self, tmp_path: Path) -> None:
         task = _local_task(tmp_path, [_themed_template((248, 198, 0))])
         result, accepted = process_direct_product(task, _local_deps(tmp_path), _local_config(tmp_path))

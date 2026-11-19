@@ -150,6 +150,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="bypass all image quality gates (S6/S7/S8/S9/S13/S19) and accept images as-is",
     )
     parser.add_argument(
+        "--skip-blur",
+        action="store_true",
+        help="bypass blur checks across all options while keeping all other quality gates active",
+    )
+    parser.add_argument(
         "--images-dir",
         default=None,
         metavar="PARENT",
@@ -250,6 +255,7 @@ def build_config(args: argparse.Namespace) -> PipelineConfig:
         no_template=bool(args.no_template),
         no_banner=bool(args.no_banner),
         skip_quality_gates=bool(args.skip_quality_gates),
+        skip_blur=bool(args.skip_blur),
         workers=int(args.workers),
         limit=args.limit,
         redo_titles=tuple(args.redo or ()),
@@ -878,7 +884,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.check_image:
         # This mode reads only local files: no sheet, no assets, no API key, no network.
         return _check_local_images(
-            list(args.check_image), PipelineConfig(dry_run=True), str(args.check_title)
+            list(args.check_image),
+            PipelineConfig(
+                dry_run=True,
+                skip_quality_gates=bool(args.skip_quality_gates),
+                skip_blur=bool(args.skip_blur),
+            ),
+            str(args.check_title),
         )
     # Secrets come from the environment; a .env file is only a convenience wrapper.
     # A real exported variable always wins, and the value itself is never logged.

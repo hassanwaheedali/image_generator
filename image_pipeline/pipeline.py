@@ -1146,19 +1146,20 @@ def _maybe_offer_salvage(
         )
     except ImageValidationError:
         return
-    score = sharpness_score(image)
-    if score < config.salvage_min_sharpness:
-        rejections["S8.salvage"] += 1
-        deps.decisions.reject(
-            title=task.title,
-            url=used_url,
-            rule_id="S8.salvage",
-            detail=(
-                f"too blurred for last-resort publication "
-                f"(sharpness {score:.3f} < {config.salvage_min_sharpness:.3f})"
-            ),
-        )
-        return
+    if not (config.skip_quality_gates or config.skip_blur):
+        score = sharpness_score(image)
+        if score < config.salvage_min_sharpness:
+            rejections["S8.salvage"] += 1
+            deps.decisions.reject(
+                title=task.title,
+                url=used_url,
+                rule_id="S8.salvage",
+                detail=(
+                    f"too blurred for last-resort publication "
+                    f"(sharpness {score:.3f} < {config.salvage_min_sharpness:.3f})"
+                ),
+            )
+            return
     pixels = max(1, image.size[0] * image.size[1])
     _offer_salvage(
         salvage,
@@ -2352,7 +2353,11 @@ def _consume_candidates(
                 max_bytes=config.max_image_bytes,
                 max_pixels=config.max_image_pixels,
                 min_lossy_bytes=config.min_lossy_image_bytes,
-                min_lossy_bytes_per_pixel=config.min_lossy_bytes_per_pixel,
+                min_lossy_bytes_per_pixel=(
+                    0.0
+                    if (config.skip_blur or config.skip_quality_gates)
+                    else config.min_lossy_bytes_per_pixel
+                ),
                 blur_sharpness_floor=config.salvage_min_sharpness,
             )
         except ImageValidationError as exc:

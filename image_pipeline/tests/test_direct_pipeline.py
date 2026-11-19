@@ -540,3 +540,20 @@ def test_direct_rejects_blurry_image_with_s13_blur(tmp_path: Path) -> None:
     assert "S13.blur" in _decisions(tmp_path)
     assert "image is too blurry" in _decisions(tmp_path)
 
+
+def test_direct_skip_blur_accepts_blurry_image(tmp_path: Path) -> None:
+    """skip_blur bypasses all blur checks in direct mode while keeping other gates."""
+    from dataclasses import replace
+
+    crisp = _white_product_photo()
+    blurred = crisp.filter(ImageFilter.GaussianBlur(radius=8))
+    url = "http://cdn.test/blurry.png"
+    deps, _ = _direct_deps(tmp_path, {url: _png_bytes(blurred)})
+    task = ProductTask(index=0, title="Cool Breeze 12X Inverter AC", source_urls=(url,))
+    config = replace(_direct_config(tmp_path), skip_blur=True)
+    result, accepted = process_direct_product(task, deps, config)
+    assert len(accepted) == 1
+    assert result.status is Status.PARTIAL
+    assert "S13.blur" not in _decisions(tmp_path)
+
+

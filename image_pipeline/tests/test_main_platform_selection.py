@@ -123,3 +123,11 @@ def test_a_dud_answer_means_everything(answer: str) -> None:
     """Enter alone is the owner's normal path; nothing else may shrink the run."""
     verdict, _ = _ask(answer)
     assert verdict is None
+
+
+def test_skip_blur_cli_flag_wires_into_config() -> None:
+    from main import build_config, build_parser
+
+    assert not build_config(build_parser().parse_args([])).skip_blur
+    assert build_config(build_parser().parse_args(["--skip-blur"])).skip_blur
+

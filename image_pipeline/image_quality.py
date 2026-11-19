@@ -1141,7 +1141,7 @@ def is_canvas_blurry(
     Evaluates the FFT spectral energy in the upper frequencies (r > 0.35 * min(h, w))
     and product edge gradient sharpness.
     """
-    if not config.canvas_blur_guard_enabled:
+    if not config.canvas_blur_guard_enabled or config.skip_blur or config.skip_quality_gates:
         return False, 1.0, 100.0
 
     arr = np.asarray(canvas_image.convert("L"), dtype=np.float64)

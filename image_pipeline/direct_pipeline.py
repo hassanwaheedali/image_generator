@@ -136,6 +136,7 @@ def process_direct_product(
             deps.decisions.reject(title=task.title, url=url, rule_id="S13.fetch", detail=str(exc))
             continue
 
+        skip_blur = config.skip_quality_gates or config.skip_blur
         try:
             image = validate_image_bytes(
                 binary.content,
@@ -143,7 +144,7 @@ def process_direct_product(
                 max_bytes=config.max_image_bytes,
                 max_pixels=config.max_image_pixels,
                 min_lossy_bytes=config.min_lossy_image_bytes,
-                min_lossy_bytes_per_pixel=config.min_lossy_bytes_per_pixel,
+                min_lossy_bytes_per_pixel=0.0 if skip_blur else config.min_lossy_bytes_per_pixel,
                 blur_sharpness_floor=config.salvage_min_sharpness,
             )
         except ImageValidationError as exc:
@@ -153,18 +154,19 @@ def process_direct_product(
 
         # Blur guard (Option 2): reject genuinely blurry / smeared images.
         # Clean product shots (sharpness >= 0.02) pass; smeared/blurry images are rejected.
-        blur_score = sharpness_score(image)
-        if not config.skip_quality_gates and blur_score < config.salvage_min_sharpness:
-            rejections["S13.blur"] += 1
-            deps.decisions.reject(
-                title=task.title,
-                url=url,
-                rule_id="S13.blur",
-                detail=f"image is too blurry (sharpness {blur_score:.3f} < {config.salvage_min_sharpness:.3f})",
-            )
-            if config.keep_rejected_images:
-                _dump_rejected(image, config, task.title, url, "S13.blur")
-            continue
+        if not skip_blur:
+            blur_score = sharpness_score(image)
+            if blur_score < config.salvage_min_sharpness:
+                rejections["S13.blur"] += 1
+                deps.decisions.reject(
+                    title=task.title,
+                    url=url,
+                    rule_id="S13.blur",
+                    detail=f"image is too blurry (sharpness {blur_score:.3f} < {config.salvage_min_sharpness:.3f})",
+                )
+                if config.keep_rejected_images:
+                    _dump_rejected(image, config, task.title, url, "S13.blur")
+                continue
 
         # The same furniture cleanup Option 1 runs before the ring test: a shop
         # promo strip glued to an edge is cut, not a reason to lose the photo.
@@ -278,7 +280,11 @@ def process_direct_product(
 
         # Blur guard (Option 2): reject images that lack high-frequency details when composited on canvas.
         # Calibrated against platform template frames in download mode; local curated images and --no-template skip it.
-        if config.canvas_blur_guard_enabled and not (config.local_images_mode or config.no_template):
+        if (
+            config.canvas_blur_guard_enabled
+            and not skip_blur
+            and not (config.local_images_mode or config.no_template)
+        ):
             isolated, _ = isolate_main_product(image, config)
             square = to_square_canvas(
                 isolated,

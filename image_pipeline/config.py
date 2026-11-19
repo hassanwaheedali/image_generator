@@ -211,6 +211,8 @@ class PipelineConfig:
     no_template: bool = False
     #: When true, bypass all image quality gates (S6/S7/S8/S9/S13/S19) and accept images as-is.
     skip_quality_gates: bool = False
+    #: When true, bypass all blur checks across Option 1/2/3 while keeping other quality gates active.
+    skip_blur: bool = False
 
     # ----- run control -----------------------------------------------------
     dry_run: bool = False
